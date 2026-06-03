@@ -16,6 +16,9 @@ data/
 *.sqlite
 *.sqlite3
 
+# Per-instance user config (real student profile)
+prompts/USER.md
+
 # Secrets
 .env
 .env.local

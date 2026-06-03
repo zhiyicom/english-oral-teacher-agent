@@ -1,0 +1,18 @@
+{
+  "name": "doing-fine",
+  "match": {
+    "userSaysContains": "fine"
+  },
+  "chunks": [
+    {
+      "type": "thinking",
+      "delta": "Good — they're doing fine. I'll pick a light topic from their interests."
+    },
+    { "type": "text", "delta": "Glad to hear it! " },
+    { "type": "text", "delta": "What did you do today?" }
+  ],
+  "result": {
+    "content": "Glad to hear it! What did you do today?",
+    "thinking": "Good — they're doing fine. I'll pick a light topic from their interests."
+  }
+}

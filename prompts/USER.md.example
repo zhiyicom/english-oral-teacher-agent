@@ -1,0 +1,20 @@
+---
+name: Sample Student
+age: 13
+level: intermediate
+goals:
+  - Improve daily English conversation
+  - Build vocabulary for school subjects
+  - Get comfortable speaking aloud
+interests:
+  - Basketball
+  - Video games (Minecraft, Roblox)
+  - Anime
+  - Pizza and burgers
+voice_accent: en-US
+voice_speed: 1.0
+---
+
+Sample student is a 13-year-old Chinese middle schooler. They are shy at first
+but warm up after a few minutes. They know basic English grammar but rarely
+speak it. They respond well to short, fun questions about their interests.

@@ -1,0 +1,18 @@
+{
+  "name": "hobby-played",
+  "match": {
+    "userSaysContains": "played"
+  },
+  "chunks": [
+    {
+      "type": "thinking",
+      "delta": "The student is talking about playing. I should ask which game or activity."
+    },
+    { "type": "text", "delta": "Nice! " },
+    { "type": "text", "delta": "What game did you play?" }
+  ],
+  "result": {
+    "content": "Nice! What game did you play?",
+    "thinking": "The student is talking about playing. I should ask which game or activity."
+  }
+}
