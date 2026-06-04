@@ -1,0 +1,18 @@
+{
+  "name": "creeper",
+  "match": {
+    "userSaysContains": "creeper"
+  },
+  "chunks": [
+    {
+      "type": "thinking",
+      "delta": "The student is talking about creepers. I should give a practical tip."
+    },
+    { "type": "text", "delta": "Oh no, creepers! " },
+    { "type": "text", "delta": "Have you tried building walls around your castle?" }
+  ],
+  "result": {
+    "content": "Oh no, creepers! Have you tried building walls around your castle?",
+    "thinking": "The student is talking about creepers. I should give a practical tip."
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "castle",
+  "match": {
+    "userSaysContains": "castle"
+  },
+  "chunks": [
+    {
+      "type": "thinking",
+      "delta": "The student mentions building castles. I should ask which mode they play in."
+    },
+    { "type": "text", "delta": "Castles are so cool! " },
+    { "type": "text", "delta": "Do you build them in survival or creative mode?" }
+  ],
+  "result": {
+    "content": "Castles are so cool! Do you build them in survival or creative mode?",
+    "thinking": "The student mentions building castles. I should ask which mode they play in."
+  }
+}
