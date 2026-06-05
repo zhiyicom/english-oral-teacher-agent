@@ -350,17 +350,24 @@ $ sqlite3 data/oral-teacher.db "SELECT count(*) FROM messages;"
 
 ---
 
-### v0.4 状态机
+### v0.4 状态机（model C：silence=hint 不切 phase）
 
-**目标**：4 个 session phase 切换 + [System Context] 注入 + 边界检测
+**目标**：4 个 session phase 按时切换 + [System Context] 注入 + silence 作为 hint 给 LLM
+
+**phase 切换的两条路径**：
+1. **时间边界**（5 / 25 / 30 min）—— 自动
+2. **用户说 stop**（整句）—— 立即到 END
+
+**silence 不切 phase**：state machine 仍计算 `silenceMin` 并塞进 state，但**不**据此切 phase。理由：13 岁小孩沉默多在思考，state machine 硬切会打断；让 LLM 看到 `Silence: 4.0 min` 自己决定怎么回应。`phaseHistory` 只记 time-based + user_stop 两类切换。
 
 **模块**：
 
 ```
 src/agent/
-├── state-machine.ts
-├── prompt-builder.ts
-├── context-injector.ts
+├── clock.ts
+├── state-machine.ts        # getPhase + applyEvent（model C：TICK 不带 silence 分支）
+├── context-injector.ts     # buildSystemContext（包含 phase + elapsed + silence）
+├── prompt-builder.ts       # 拼 final system
 └── index.ts
 ```
 
@@ -369,15 +376,21 @@ src/agent/
 | 层 | 测试 | 工具 |
 |---|---|---|
 | L1 | `getPhase(0/4/6/24/26/29/30/31)` 8 个 | vitest |
-| L1 | 用户说 "stop" → 强制 END | vitest |
-| L1 | 沉默 2/5/10 分钟各自触发 | fake timer |
-| L1 | `prompt-builder.buildSystemContext` 包含 phase + elapsed | vitest |
-| L2 | 时间 mock：模拟 30 分钟，session phase 切换 4 次 | fake timer |
-| L2 | 状态转换不合法时报错 | vitest |
-| L3 | CLI 跑 1 turn，prompt 包含 [System Context] WARM_UP | vitest + tsx |
-| L3 | CLI 跑模拟 6 分钟，session phase 自动切到 MAIN_ACTIVITY | fake timer |
+| L1 | 用户说 "stop" → 立即 END | vitest |
+| L1 | **silence 10 min 不切 phase**（WARM_UP / MAIN_ACTIVITY / WRAP_UP 各自断言） | fake timer |
+| L1 | `buildSystemContext` 包含 phase + elapsed + silence（即便 silence=0 也显示） | vitest |
+| L1 | USER_MSG 重置 silenceMin=0 | vitest |
+| L2 | fake timer 模拟 30 分钟，phaseHistory 3 条 time-based 切换 | fake timer |
+| L2 | 状态转换不合法时报错（`validatePhaseTransition` 抛错） | vitest |
+| L3 | CLI 1 turn：stdout 含 `[System Context] Phase: WARM_UP` | vitest + tsx |
+| L3 | CLI MOCK_TIME 6 轮：第 6 轮 phase = MAIN_ACTIVITY | fake timer |
+| L3 | CLI 用户说 "stop"：下一轮 phase = END + loop 退出 | vitest + tsx |
 
-**手动 demo**：`MOCK_TIME=true pnpm dev`，看 5 分钟后 [System Context] 变化。
+**手动 demo**：`MOCK_TIME=true pnpm dev`，跑 5 轮看 elapsed 跳到 5.0、silence 几乎 0。跑 6 轮看 phase 切到 MAIN_ACTIVITY。
+
+**详细设计 / 范围**：[sprint/v0.4-scope.md](./sprint/v0.4-scope.md) / [sprint/v0.4-design.md](./sprint/v0.4-design.md)
+
+> **历史**：v0.4 原本想用 model A（silence 阈值触发 phase 切），review 时改为 model C——见 v0.4-scope.md §9 变更记录。
 
 ---
 
