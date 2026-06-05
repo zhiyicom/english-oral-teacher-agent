@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { PhaseTransition } from '../agent/state-machine.js'
 import type { DbHandle } from './db.js'
 
 export interface Session {
@@ -6,6 +7,7 @@ export interface Session {
   started_at: string
   ended_at: string | null
   duration_min: number | null
+  phase_history: string | null
 }
 
 export interface CreateSessionInput {
@@ -16,6 +18,8 @@ export interface CreateSessionInput {
 export interface MarkEndedInput {
   endedAt?: string
   durationMin?: number
+  phaseHistory?: PhaseTransition[]
+  reason?: string
 }
 
 export interface SessionsDao {
@@ -25,7 +29,7 @@ export interface SessionsDao {
   markEnded(id: string, opts?: MarkEndedInput): Session
 }
 
-const SELECT_COLS = 'id, started_at, ended_at, duration_min'
+const SELECT_COLS = 'id, started_at, ended_at, duration_min, phase_history'
 
 export function createSessionsDao(handle: DbHandle): SessionsDao {
   const { raw } = handle
@@ -33,8 +37,11 @@ export function createSessionsDao(handle: DbHandle): SessionsDao {
   const insert = raw.prepare('INSERT INTO sessions (id, started_at) VALUES (?, ?)')
   const selectOne = raw.prepare(`SELECT ${SELECT_COLS} FROM sessions WHERE id = ?`)
   const selectAll = raw.prepare(`SELECT ${SELECT_COLS} FROM sessions ORDER BY started_at DESC`)
-  const updateEnd = raw.prepare('UPDATE sessions SET ended_at = ?, duration_min = ? WHERE id = ?')
   const selectStartedAt = raw.prepare('SELECT started_at FROM sessions WHERE id = ?')
+  const updateEnd = raw.prepare(
+    'UPDATE sessions SET ended_at = ?, duration_min = ?, phase_history = COALESCE(?, phase_history) WHERE id = ?',
+  )
+  const selectAfterUpdate = raw.prepare(`SELECT ${SELECT_COLS} FROM sessions WHERE id = ?`)
 
   function computeDurationMin(id: string, endedAt: string): number {
     const row = selectStartedAt.get(id) as { started_at: string } | undefined
@@ -44,12 +51,23 @@ export function createSessionsDao(handle: DbHandle): SessionsDao {
     return Math.max(0, Math.floor((endMs - startMs) / 60_000))
   }
 
+  function serializePhaseHistory(history: PhaseTransition[] | undefined): string | null {
+    if (!history) return null
+    return JSON.stringify(history)
+  }
+
   return {
     create(input: CreateSessionInput = {}) {
       const id = input.id ?? randomUUID()
       const startedAt = input.startedAt ?? new Date().toISOString()
       insert.run(id, startedAt)
-      return { id, started_at: startedAt, ended_at: null, duration_min: null }
+      return {
+        id,
+        started_at: startedAt,
+        ended_at: null,
+        duration_min: null,
+        phase_history: null,
+      }
     },
     get(id: string) {
       return (selectOne.get(id) as Session | undefined) ?? null
@@ -60,8 +78,19 @@ export function createSessionsDao(handle: DbHandle): SessionsDao {
     markEnded(id: string, opts: MarkEndedInput = {}) {
       const endedAt = opts.endedAt ?? new Date().toISOString()
       const durationMin = opts.durationMin ?? computeDurationMin(id, endedAt)
-      updateEnd.run(endedAt, durationMin, id)
-      return { id, started_at: '', ended_at: endedAt, duration_min: durationMin }
+      const phaseHistoryJson = serializePhaseHistory(opts.phaseHistory)
+      updateEnd.run(endedAt, durationMin, phaseHistoryJson, id)
+      const after = selectAfterUpdate.get(id) as Session | undefined
+      if (!after) {
+        return {
+          id,
+          started_at: '',
+          ended_at: endedAt,
+          duration_min: durationMin,
+          phase_history: phaseHistoryJson,
+        }
+      }
+      return after
     },
   }
 }

@@ -51,4 +51,33 @@ describe('SessionsDao', () => {
     expect(fetched?.ended_at).toBe('2026-06-05T10:25:00.000Z')
     expect(fetched?.duration_min).toBe(25)
   })
+
+  // v0.4 — phase_history persistence
+  it('markEnded with phaseHistory writes JSON to phase_history column; re-parse returns same array', () => {
+    sessions.create({ id: 'v4-1', startedAt: '2026-06-05T10:00:00.000Z' })
+    const history = [
+      { phase: 'WARM_UP' as const, at: 0, reason: 'time' as const },
+      { phase: 'MAIN_ACTIVITY' as const, at: 5, reason: 'time' as const },
+      { phase: 'WRAP_UP' as const, at: 25, reason: 'time' as const },
+      { phase: 'END' as const, at: 30, reason: 'time' as const },
+    ]
+    sessions.markEnded('v4-1', {
+      endedAt: '2026-06-05T10:30:00.000Z',
+      phaseHistory: history,
+    })
+
+    const fetched = sessions.get('v4-1')
+    expect(fetched?.phase_history).not.toBeNull()
+    const parsed = JSON.parse(fetched?.phase_history ?? 'null')
+    expect(parsed).toEqual(history)
+  })
+
+  it('markEnded without phaseHistory still works (backward compat with v0.3 callers)', () => {
+    sessions.create({ id: 'v4-2', startedAt: '2026-06-05T10:00:00.000Z' })
+    const ended = sessions.markEnded('v4-2', { endedAt: '2026-06-05T10:05:00.000Z' })
+    expect(ended.ended_at).toBe('2026-06-05T10:05:00.000Z')
+    expect(ended.duration_min).toBe(5)
+    // phase_history is left null when not provided (or whatever was there before)
+    expect(ended.phase_history).toBeNull()
+  })
 })

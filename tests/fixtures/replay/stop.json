@@ -1,0 +1,13 @@
+{
+  "name": "stop",
+  "match": {
+    "userSaysContains": "stop"
+  },
+  "chunks": [
+    { "type": "text", "delta": "Okay, see you next time! " },
+    { "type": "text", "delta": "Don't forget to practice. 👋" }
+  ],
+  "result": {
+    "content": "Okay, see you next time! Don't forget to practice. 👋"
+  }
+}

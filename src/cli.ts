@@ -2,11 +2,22 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { type Interface, createInterface } from 'node:readline'
 import { pathToFileURL } from 'node:url'
+import {
+  type Clock,
+  type Phase,
+  type PhaseTransition,
+  type SessionState,
+  applyEvent,
+  buildFinalSystem,
+  initState,
+  mockClock,
+  realClock,
+} from './agent/index.js'
 import { loadEnv } from './config/env.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
 import { createReplayProvider } from './llm/testing.js'
 import type { LLMClient, Message } from './llm/types.js'
-import { type SystemPrompt, buildSystemString, loadSystemPrompt } from './prompts/loader.js'
+import { type SystemPrompt, loadSystemPrompt } from './prompts/loader.js'
 import { applyMigrations, createMessagesDao, createSessionsDao, openDb } from './storage/index.js'
 
 function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLMClient {
@@ -21,6 +32,14 @@ function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLM
   return createReplayProvider(fixturesDir)
 }
 
+function selectClock(): Clock {
+  if (process.env.MOCK_TIME === '1') {
+    const initial = Date.parse(process.env.MOCK_NOW ?? '2026-01-01T00:00:00Z')
+    return mockClock(initial)
+  }
+  return realClock
+}
+
 function printBanner(sp: SystemPrompt): void {
   const profile = sp.userProfile
   console.log('English Oral Teacher Agent — CLI mode')
@@ -28,22 +47,9 @@ function printBanner(sp: SystemPrompt): void {
   console.log('Type "exit" to quit.\n')
 }
 
-// Buffered line reader.
-//
-// We can't use rl.question() directly because it has two problems for our loop:
-//   1. rl.question() does not reject when stdin ends — its callback just
-//      never fires, so a naive `await rl.question(...)` hangs forever on EOF.
-//   2. readline 'line' events fire the moment a newline is read, regardless
-//      of whether anyone is listening. If the LLM call is slow and the user
-//      pastes multiple lines (or our test driver writes them faster than we
-//      consume), every 'line' event fired during the LLM call is lost — we
-//      only see the first line emitted *after* the LLM returns. Live LLM
-//      verification exposed this: turns 2 and 3 vanished, and the next line
-//      read was the one that arrived just as the LLM finished.
-//
-// The fix is to listen for 'line' and 'close' events ONCE, immediately, and
-// push lines into a queue. ask() returns synchronously from the queue when
-// one is available, and otherwise waits on a single resolver.
+// Buffered line reader — see v0.3 commit ef78cae for the readline bug this
+// was written to fix. KEPT here because it's still needed: we don't use
+// rl.question() because its callback never fires on EOF.
 function createLineReader(rl: Interface): {
   next: () => Promise<string>
   writePrompt: (s: string) => void
@@ -66,7 +72,7 @@ function createLineReader(rl: Interface): {
     if (waiter) {
       const w = waiter
       waiter = null
-      w('') // signal EOF to the loop
+      w('')
     }
   })
 
@@ -79,15 +85,23 @@ function createLineReader(rl: Interface): {
       })
     },
     writePrompt(prompt: string): void {
-      // Just a visual cue — we don't use rl.question because the actual line
-      // is delivered via the 'line' event listener above.
       process.stdout.write(prompt)
     },
   }
 }
 
+// v0.4 — strict whole-sentence stop regex.
+//   - keyword must be at sentence start (preceded by ^, [.!?]\s+, or \n)
+//   - keyword must end the input (followed by [.!?\s]* only)
+//   - "let's stop and continue" → stop is mid-sentence, NOT matched
+//   - "I don't want to stop." → stop preceded by space (not [.!?]), NOT matched
+//   - "stop", "Stop.", "okay. stop" → matched
+const STOP_REGEX = /(?:^|[.!?]\s+|\n)(stop|quit|end|bye|done|结束|停)\b[.!?\s]*$/i
+
 export async function main(): Promise<void> {
   const env = loadEnv()
+  const clock = selectClock()
+  const mockTime = process.env.MOCK_TIME === '1'
 
   // Open SQLite + run migrations + create session row
   const db = openDb({ dataDir: env.APP_DATA_DIR })
@@ -97,12 +111,15 @@ export async function main(): Promise<void> {
   const session = sessions.create()
 
   const systemPrompt = loadSystemPrompt()
-  const systemString = buildSystemString(systemPrompt)
 
   const fixturesDir = resolve('tests/fixtures/replay')
   const client = selectClient(env, fixturesDir)
 
   const history: Message[] = []
+  const phaseHistory: PhaseTransition[] = []
+  let state: SessionState = initState(clock.now())
+  phaseHistory.push({ phase: state.phase, at: 0, reason: 'time' })
+  let exitReason: 'user_exit' | 'user_stop' | 'phase_end' = 'user_exit'
 
   const rl = createInterface({
     input: process.stdin,
@@ -121,19 +138,61 @@ export async function main(): Promise<void> {
   try {
     while (true) {
       const raw = await reader.next()
-      // createLineReader resolves with '' on stdin close (EOF). An empty
-      // trimmed input is also our break signal (user just hit Enter).
       if (raw === '') break
       const input = raw.trim()
       if (input === '' || input.toLowerCase() === 'exit') break
 
+      // Tick first — this may push us into END via time-based transition
+      const phaseBeforeTick = state.phase
+      state = applyEvent(state, { type: 'TICK' }, clock)
+      if (state.phase !== phaseBeforeTick) {
+        phaseHistory.push({
+          phase: state.phase,
+          at: state.elapsedMin,
+          reason: 'time',
+        })
+        process.stderr.write(
+          `[cli] phase → ${state.phase} (elapsed=${state.elapsedMin.toFixed(1)} min)\n`,
+        )
+      }
+
+      // Time-based END: stop the loop, no more LLM calls
+      if (state.phase === 'END') {
+        process.stderr.write('[cli] session ended (time-based, 30 min reached)\n')
+        exitReason = 'phase_end'
+        break
+      }
+
+      // Detect stop keyword (still call LLM this turn for the goodbye)
+      const isStop = STOP_REGEX.test(input)
+      if (isStop) {
+        state = applyEvent(state, { type: 'USER_STOP' }, clock)
+        phaseHistory.push({
+          phase: 'END',
+          at: state.elapsedMin,
+          reason: 'user_stop',
+        })
+        process.stderr.write(
+          `[cli] phase → END (user_stop, elapsed=${state.elapsedMin.toFixed(1)} min)\n`,
+        )
+        exitReason = 'user_stop'
+      } else {
+        state = applyEvent(state, { type: 'USER_MSG' }, clock)
+      }
+
       history.push({ role: 'user', content: input })
       messages.append({ sessionId: session.id, role: 'user', content: input })
 
+      const system = buildFinalSystem(systemPrompt, state)
+      // Surface the [System Context] block on stderr so L3 tests can verify
+      // what phase the LLM sees (and so users can debug phase behavior live).
+      process.stderr.write(
+        `[cli] ctx: ${state.phase} elapsed=${state.elapsedMin.toFixed(1)} silence=${state.silenceMin.toFixed(1)}\n`,
+      )
       reader.writePrompt('[Teacher]: ')
       let response = ''
       for await (const chunk of client.chatStream({
-        system: systemString,
+        system,
         messages: history,
       })) {
         if (chunk.type === 'text') {
@@ -144,12 +203,21 @@ export async function main(): Promise<void> {
       process.stdout.write('\n\n')
       history.push({ role: 'assistant', content: response })
       messages.append({ sessionId: session.id, role: 'assistant', content: response })
+
+      // MOCK_TIME: advance the fake clock by 1 min per turn so the
+      // state machine sees time progress without real waiting.
+      if (mockTime && clock !== realClock) {
+        ;(clock as ReturnType<typeof mockClock>).advance(60_000)
+      }
     }
   } finally {
     // Persist the session as ended and close the DB regardless of how we exit.
     try {
-      process.stderr.write(`[cli] markEnded ${session.id}\n`)
-      sessions.markEnded(session.id)
+      process.stderr.write(`[cli] markEnded ${session.id} reason=${exitReason}\n`)
+      sessions.markEnded(session.id, {
+        phaseHistory,
+        reason: exitReason,
+      })
       process.stderr.write('[cli] markEnded done\n')
     } finally {
       rl.close()
