@@ -1,4 +1,6 @@
 export * from './clock.js'
 export * from './state-machine.js'
+export * from './retrieval.js'
+export * from './summarizer.js'
 export * from './context-injector.js'
 export * from './prompt-builder.js'

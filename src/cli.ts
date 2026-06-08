@@ -4,14 +4,17 @@ import { type Interface, createInterface } from 'node:readline'
 import { pathToFileURL } from 'node:url'
 import {
   type Clock,
+  type LastReview,
   type Phase,
   type PhaseTransition,
   type SessionState,
   applyEvent,
   buildFinalSystem,
   initState,
+  loadLastReview,
   mockClock,
   realClock,
+  summarize,
 } from './agent/index.js'
 import { loadEnv } from './config/env.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
@@ -121,6 +124,11 @@ export async function main(): Promise<void> {
   phaseHistory.push({ phase: state.phase, at: 0, reason: 'time' })
   let exitReason: 'user_exit' | 'user_stop' | 'phase_end' = 'user_exit'
 
+  // v0.5 — load the most recent session's summary for [System Context] injection.
+  // Injected only on the FIRST turn of this session (first-turn-only per v0.5 design §2.5).
+  const lastReview: LastReview | null = loadLastReview(db)
+  let isFirstTurn = true
+
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -183,7 +191,11 @@ export async function main(): Promise<void> {
       history.push({ role: 'user', content: input })
       messages.append({ sessionId: session.id, role: 'user', content: input })
 
-      const system = buildFinalSystem(systemPrompt, state)
+      const system = buildFinalSystem(systemPrompt, state, isFirstTurn ? lastReview : null)
+      // After the first buildFinalSystem call, freeze the last-review injection —
+      // subsequent turns build the system string from a fresh state but without
+      // the review (which would otherwise drift / look stale 25 min in).
+      isFirstTurn = false
       // Surface the [System Context] block on stderr so L3 tests can verify
       // what phase the LLM sees (and so users can debug phase behavior live).
       process.stderr.write(
@@ -213,9 +225,34 @@ export async function main(): Promise<void> {
   } finally {
     // Persist the session as ended and close the DB regardless of how we exit.
     try {
+      // v0.5 — call the summarizer over the full session transcript. On any
+      // failure (LLM error / JSON parse / schema mismatch) fall back to a
+      // placeholder summary so markEnded can still write and the session
+      // is not lost.
+      const allMessages = messages.getBySession(session.id)
+      let summaryText: string
+      let summaryKeywords: string[]
+      try {
+        const review = await summarize(
+          allMessages.map((m) => ({ role: m.role, content: m.content })),
+          client,
+        )
+        summaryText = review.summary
+        summaryKeywords = review.keywords
+        process.stderr.write(
+          `[cli] summarize ok summary=${summaryText.length}c keywords=${summaryKeywords.length}\n`,
+        )
+      } catch (err) {
+        process.stderr.write(`[cli] summarize failed: ${(err as Error).message}\n`)
+        summaryText = '(summarization failed)'
+        summaryKeywords = []
+      }
+
       process.stderr.write(`[cli] markEnded ${session.id} reason=${exitReason}\n`)
       sessions.markEnded(session.id, {
         phaseHistory,
+        summary: summaryText,
+        keywords: summaryKeywords,
         reason: exitReason,
       })
       process.stderr.write('[cli] markEnded done\n')

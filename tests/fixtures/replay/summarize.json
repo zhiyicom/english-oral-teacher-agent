@@ -1,0 +1,15 @@
+{
+  "name": "summarize",
+  "match": {
+    "userSaysContains": "SUMMARIZER_INSTRUCTION"
+  },
+  "chunks": [
+    {
+      "type": "text",
+      "delta": "{\"summary\":\"Student practiced talking about Minecraft castles and creepers. Teacher suggested building walls for defense.\",\"keywords\":[\"minecraft\",\"castle\",\"creeper\",\"wall\",\"build\"]}"
+    }
+  ],
+  "result": {
+    "content": "{\"summary\":\"Student practiced talking about Minecraft castles and creepers. Teacher suggested building walls for defense.\",\"keywords\":[\"minecraft\",\"castle\",\"creeper\",\"wall\",\"build\"]}"
+  }
+}
