@@ -21,3 +21,10 @@ export {
   createTopicStatsDao,
   createTopicsDao,
 } from './topics.js'
+export {
+  type AppendMistakeInput,
+  type Mistake,
+  type MistakeCategory,
+  type MistakesDao,
+  createMistakesDao,
+} from './mistakes.js'

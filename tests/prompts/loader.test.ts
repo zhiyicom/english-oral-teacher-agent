@@ -21,4 +21,19 @@ describe('loadSystemPrompt', () => {
     expect(s).toContain(sp.soul)
     expect(s).toContain(sp.agents)
   })
+
+  it('loads prompts/tools.md when present (v0.7)', () => {
+    const sp = loadSystemPrompt()
+    expect(sp.tools).not.toBeNull()
+    expect(sp.tools).toContain('mark_mistake')
+    expect(sp.tools).toMatch(/<tool>/)
+  })
+
+  it('buildSystemString includes # TOOLS section with calling syntax (v0.7)', () => {
+    const sp = loadSystemPrompt()
+    const s = buildSystemString(sp)
+    expect(s).toContain('# TOOLS')
+    expect(s).toContain('mark_mistake')
+    expect(s).toContain('grammar')
+  })
 })

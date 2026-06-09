@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   applyMigrations,
   createMessagesDao,
+  createMistakesDao,
   createSessionsDao,
   createTopicStatsDao,
   createTopicsDao,
@@ -401,4 +402,86 @@ describe('CLI v0.4 state-machine integration', () => {
     expect(names).toEqual(['family', 'food', 'minecraft', 'movies', 'music', 'school', 'sports'])
     db.close()
   }, 20000)
+
+  // -------- v0.7 — tool calling: mark_mistake --------
+
+  it('1 turn with "yesterday" input: mistakes table gets 1 row + stderr tool-call log + stdout has NO <tool> block', async () => {
+    // The mistake-yesterday Replay fixture has the LLM output a
+    // <tool>mark_mistake(...)</tool> block. The CLI must:
+    //   (a) write a row to the mistakes table
+    //   (b) log "[cli] tool call: mark_mistake(...)" to stderr
+    //   (c) NOT leak the <tool>...</tool> block into stdout (DoD #6)
+    const result = await runCli('I go to school yesterday\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toMatch(/\[cli\] tool call: mark_mistake\(/)
+    // The <tool> block must NOT appear in what the student sees.
+    expect(result.stdout).not.toContain('<tool>')
+    expect(result.stdout).not.toContain('</tool>')
+    // The teacher's natural text reply must still reach the student.
+    expect(result.stdout).toMatch(/went to school yesterday/i)
+
+    const db = openDb({ dataDir })
+    applyMigrations(db, migrationsDir)
+    const sessions = createSessionsDao(db)
+    const mistakes = createMistakesDao(db)
+    const session = sessions.list()[0]
+    expect(session).toBeDefined()
+    const rows = mistakes.getBySession(session?.id ?? '')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.original).toBe('I go to school yesterday')
+    expect(rows[0]?.corrected).toBe('I went to school yesterday')
+    expect(rows[0]?.category).toBe('grammar')
+    db.close()
+  }, 25000)
+
+  it('2 turns both with "yesterday": same session accumulates 2 mistake rows', async () => {
+    const result = await runCli('I go to school yesterday\nI see my friend yesterday\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(result.exitCode).toBe(0)
+    const toolCallMatches = result.stderr.match(/\[cli\] tool call: mark_mistake/g) ?? []
+    expect(toolCallMatches.length).toBe(2)
+
+    const db = openDb({ dataDir })
+    applyMigrations(db, migrationsDir)
+    const sessions = createSessionsDao(db)
+    const mistakes = createMistakesDao(db)
+    const session = sessions.list()[0]
+    const rows = mistakes.getBySession(session?.id ?? '')
+    expect(rows).toHaveLength(2)
+    db.close()
+  }, 25000)
+
+  it('session A + session B both produce mistakes: total 2 mistakes across 2 sessions', async () => {
+    const a = await runCli('I go to school yesterday\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(a.exitCode).toBe(0)
+
+    const b = await runCli('I go to school yesterday\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(b.exitCode).toBe(0)
+
+    const db = openDb({ dataDir })
+    applyMigrations(db, migrationsDir)
+    const sessions = createSessionsDao(db)
+    const mistakes = createMistakesDao(db)
+    const allSessions = sessions.list()
+    expect(allSessions).toHaveLength(2)
+    // getRecent across both sessions should return 2 rows
+    const recent = mistakes.getRecent(10)
+    expect(recent).toHaveLength(2)
+    // And each session has exactly 1 row
+    for (const s of allSessions) {
+      expect(mistakes.getBySession(s.id)).toHaveLength(1)
+    }
+    db.close()
+  }, 40000)
 })

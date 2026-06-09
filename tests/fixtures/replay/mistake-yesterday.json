@@ -1,0 +1,22 @@
+{
+  "name": "mistake-yesterday",
+  "match": {
+    "userSaysContains": "yesterday"
+  },
+  "chunks": [
+    {
+      "type": "thinking",
+      "delta": "The student said 'I go to school yesterday' — that's a past-tense grammar mistake. I'll record it via mark_mistake and rephrase naturally."
+    },
+    {
+      "type": "text",
+      "delta": "<tool>mark_mistake({\"original\":\"I go to school yesterday\",\"corrected\":\"I went to school yesterday\",\"category\":\"grammar\"})</tool>\n\n"
+    },
+    { "type": "text", "delta": "Oh, you went to school yesterday! " },
+    { "type": "text", "delta": "What did you do there?" }
+  ],
+  "result": {
+    "content": "<tool>mark_mistake({\"original\":\"I go to school yesterday\",\"corrected\":\"I went to school yesterday\",\"category\":\"grammar\"})</tool>\n\nOh, you went to school yesterday! What did you do there?",
+    "thinking": "The student said 'I go to school yesterday' — that's a past-tense grammar mistake. I'll record it via mark_mistake and rephrase naturally."
+  }
+}

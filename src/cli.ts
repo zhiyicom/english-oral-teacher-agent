@@ -10,11 +10,15 @@ import {
   type SessionState,
   applyEvent,
   buildFinalSystem,
+  createMarkMistakeTool,
+  createToolRegistry,
   initState,
   loadLastReview,
   matchTopic,
   mockClock,
+  parseToolCall,
   realClock,
+  stripToolCall,
   summarize,
 } from './agent/index.js'
 import { loadEnv } from './config/env.js'
@@ -148,6 +152,11 @@ export async function main(): Promise<void> {
   // the loop ends, so within-session reading once is correct.
   const activeTopics: TopicStat[] = topicStats.all()
 
+  // v0.7 — register tools. mark_mistake is bound to this session's id so the
+  // LLM never has to pass sessionId (and can't cross sessions by accident).
+  const toolRegistry = createToolRegistry()
+  toolRegistry.register(createMarkMistakeTool(db, session.id))
+
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -226,19 +235,53 @@ export async function main(): Promise<void> {
         `[cli] ctx: ${state.phase} elapsed=${state.elapsedMin.toFixed(1)} silence=${state.silenceMin.toFixed(1)}\n`,
       )
       reader.writePrompt('[Teacher]: ')
+      // v0.7 — buffer the full response BEFORE writing to stdout. We need to
+      // strip any <tool>...</tool> block before the student sees it (the
+      // tool block is an internal CLI signal, not student-facing text). The
+      // performance impact is negligible (50-200 tokens per turn) and the
+      // existing L3 tests only assert on the final stdout string, so this
+      // is not a breaking change for tests.
       let response = ''
       for await (const chunk of client.chatStream({
         system,
         messages: history,
       })) {
         if (chunk.type === 'text') {
-          process.stdout.write(chunk.delta)
           response += chunk.delta
         }
       }
-      process.stdout.write('\n\n')
-      history.push({ role: 'assistant', content: response })
-      messages.append({ sessionId: session.id, role: 'assistant', content: response })
+
+      // v0.7 — parse + execute + strip the tool block, then write the
+      // student-facing text. Tool failures (parse/schema/execute) are
+      // logged to stderr and skipped; they never block the conversation
+      // because mark_mistake is best-effort.
+      let display = response
+      let parsed: ReturnType<typeof parseToolCall> = null
+      try {
+        parsed = parseToolCall(response)
+      } catch (err) {
+        process.stderr.write(`[cli] tool parse error: ${(err as Error).message}\n`)
+      }
+      if (parsed) {
+        display = stripToolCall(response, parsed)
+        const tool = toolRegistry.get(parsed.name)
+        if (!tool) {
+          process.stderr.write(`[cli] tool unknown: ${parsed.name}\n`)
+        } else {
+          try {
+            tool.execute(parsed.args)
+            process.stderr.write(
+              `[cli] tool call: ${parsed.name}(${JSON.stringify(parsed.args)})\n`,
+            )
+          } catch (err) {
+            process.stderr.write(`[cli] tool execute error: ${(err as Error).message}\n`)
+          }
+        }
+      }
+
+      process.stdout.write(`${display}\n\n`)
+      history.push({ role: 'assistant', content: display })
+      messages.append({ sessionId: session.id, role: 'assistant', content: display })
 
       // MOCK_TIME: advance the fake clock by 1 min per turn so the
       // state machine sees time progress without real waiting.
