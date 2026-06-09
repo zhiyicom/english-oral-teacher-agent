@@ -5,6 +5,7 @@ export {
   type MarkEndedInput,
   type Session,
   type SessionsDao,
+  type SessionWithEmbedding,
 } from './sessions.js'
 export {
   createMessagesDao,

@@ -229,7 +229,7 @@ topics:
 |---|---|---|---|
 | **会话内** | 当前 session | 内存（结束时落盘） | 维持当前 session 对话流畅性 |
 | **跨会话结构化** | 跨 session | SQLite | 统计、归档、用户查询 |
-| **跨会话语义** | 跨 session | LanceDB | 新 session 启动时检索相关历史摘要 |
+| **跨会话语义** | 跨 session | SQLite BLOB（`sessions.embedding`） | 新 session 启动时检索相关历史摘要 |
 
 > **会话独立性原则**：每个 session 是独立单元。**session 之间不共享滚动上下文**——上一 session 的对话原文不会自动带入下一 session。跨 session 信息仅通过摘要检索（在新 session 启动时做一次）注入。
 
@@ -297,28 +297,30 @@ CREATE INDEX idx_sessions_started ON sessions(started_at);
 CREATE INDEX idx_mistakes_session ON mistakes(session_id);
 ```
 
-### 3.3 向量索引（LanceDB）
+### 3.3 向量索引（SQLite BLOB）
 
-**Collection**：`session_summaries`
+**存储位置**：`sessions` 表新增 `embedding BLOB` 列（migration 005，v0.7.2）
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `id` | string | session_id |
-| `vector` | float[768] | summary 文本的 embedding |
-| `text` | string | 原始 summary（供 LLM 用） |
-| `started_at` | string | 会话开始时间 |
-| `keywords` | string[] | 提取自摘要的关键词（3-8 个） |
-| `topics` | string[] | 涉及的话题 slug（关键词匹配后命中） |
-| `duration_min` | int | 时长 |
+| `id` (主键) | string | session_id（与 sessions.id 同一行） |
+| `embedding` | BLOB (1536 bytes) | raw Float32Array bytes，summary 文本的 384-dim embedding |
+| `summary` | TEXT | 原始 summary（同一行，供 LLM 用） |
+| `keywords` | TEXT (JSON) | 提取自摘要的关键词（3-8 个） |
+| `started_at` | TEXT | 会话开始时间 |
 
-**写入时机**：session END 时，summary 写入 SQLite 的同时嵌入并存入 LanceDB。
+**Embedding 模型**：本地 `Xenova/all-MiniLM-L6-v2` int8 量化（q8），384 维，~25MB 下载。`@huggingface/transformers` 跑 ONNX，进程内 pipeline singleton 懒加载。`HF_ENDPOINT` env 支持镜像（`hf-mirror.com` 等）。**不引入 LanceDB**——v0.7.2 评估后决定 SQLite BLOB 已够用（brute-force cosine 在 1000 × 384 维 < 1ms，省一个进程外依赖）。
+
+**写入时机**：session END 时，summary 写入 SQLite 后嵌入成 1536-byte BLOB 写回同 row 的 `embedding` 列。占位 summary `"(summarization failed)"` 跳过 embed（不污染向量库）。
+
+**检索方式**：brute-force cosine similarity on candidate set（listWithEmbeddings 过滤 NULL）。**无 INDEX**（负优化）。
 
 ### 3.4 检索规则
 
 | 场景 | 时机 | 检索方式 | 返回数量 |
 |---|---|---|---|
 | **启动时回顾上次** | 新 session 启动 | `SELECT summary, keywords, topics_used FROM sessions ORDER BY started_at DESC LIMIT 1` | **1**（最近一次） |
-| 启动时引用相关（可选） | 新 session 启动 | 向量检索 `session_summaries`（query = 选题关键词） | top 2 |
+| 启动时引用相关（v0.7.2） | 新 session 启动 | cosine 检索 `sessions.embedding`（query = 上次 session 关键词） | top 2 |
 | 选题（去重 + 偏好） | 新 session 启动 | 见 §3.5.3 | 1 |
 | 错例复习 | 新 session 启动 | `SELECT * FROM mistakes WHERE reviewed = 0` | 全部 |
 | 作业跟进 | 新 session 启动 | `SELECT * FROM homework WHERE completed_at IS NULL` | 全部 |
@@ -530,7 +532,7 @@ loop:
      a. 摘要文本（50-150 tokens）
      b. 关键词数组（3-8 个英文词或短语）
    - 写入 SQLite `sessions.summary` 和 `sessions.keywords`
-   - 嵌入并存入 LanceDB session_summaries（vector + keywords 元数据）
+   - 嵌入并存入 SQLite `sessions.embedding` BLOB（1536 bytes）
 6. **关键词匹配 + 更新 topic_stats**（见 §3.5.2）：
    - 计算 session.keywords 与每个 topic.keywords 的 Jaccard 相似度
    - 命中 topic 写入 session.topics_used
@@ -580,7 +582,7 @@ loop:
 - **处理**：
   - SQLite 损坏 → 备份为 `<file>.corrupt.<ts>`，创建新库，提示用户
   - 话题库 md 解析失败 → 跳过该话题，警告日志
-  - LanceDB 损坏 → 同 SQLite
+  - SQLite 损坏（同 sessions.embedding BLOB） → 备份为 `<file>.corrupt.<ts>`，创建新库，提示用户
 
 ### 7.4 磁盘满
 
@@ -797,7 +799,7 @@ loop:
 
 ### 11.5 历史 session 检索
 
-- 在 [开始新练习] 之前，**自动**用新选题关键词去检索 LanceDB，top 3 摘要注入新 session 的 [System Context]（见 §6.1）
+- 在 [开始新练习] 之前，**自动**用新选题关键词去检索 SQLite `sessions.embedding` cosine top-K，top 2 摘要注入新 session 的 [System Context] 的 "Relevant past sessions" 段（见 §6.1）
 - 主界面搜索框支持手动跨 session 搜索（关键词 / 语义）
 
 ### 11.6 会话编号 vs 文件命名
@@ -816,3 +818,4 @@ loop:
 | 2026-06-02 | 0.2 | 新增 §9 UI 设置；USER.md schema 新增 `voice_accent` 字段；F9 验收增项 |
 | 2026-06-02 | 0.3 | **会话独立性原则**：去掉"最近 N 轮"滚动窗口；新 session 启动时一次性检索 top 3 摘要；session END 时显式 summarizer；新增 §11 UI 会话列表与编号；§10 变更为 §12 |
 | 2026-06-02 | 0.4 | **回顾上次机制**：新 session 启动默认加载最近 1 次 session（不再是 top 3 相关）；摘要新增 keywords 字段；新增 §3.5 话题统计与关键词匹配（topic_stats 表 + Jaccard 匹配 + 硬排除/软偏好选题） |
+| 2026-06-10 | 0.5 | **§3.3 向量索引改 SQLite BLOB**（v0.7.2）：LanceDB → `sessions.embedding BLOB` (1536 bytes)；embedding 模型定本地 MiniLM-L6-v2 int8 (384 维, ~25MB)；brute-force cosine on candidate set，无 INDEX；§3.1 跨会话语义层存储字段更新；§3.4 启动时引用相关改成 top 2 cosine 检索（排除 lastReview 自己）；§7.3 损坏处理去掉 LanceDB 行 |

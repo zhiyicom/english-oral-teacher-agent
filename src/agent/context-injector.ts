@@ -1,3 +1,4 @@
+import type { RelevantSession } from '../memory/retrieve-relevant.js'
 import type { Mistake } from '../storage/mistakes.js'
 import type { TopicStat } from '../storage/topics.js'
 import type { LastReview } from './retrieval.js'
@@ -21,6 +22,13 @@ import type { SessionState } from './state-machine.js'
  * unchanged for the whole session. Same load-once strategy as `activeTopics`;
  * see v0.7.1 design §3.2.
  *
+ * v0.7.2 — adds an optional "Relevant past sessions" segment for semantic
+ * cross-session recall (top-K cosine on summary embeddings). Rendered between
+ * "Last session" and "Active topics" so the two historical segments are
+ * physically adjacent. Parameter is appended at the end of the signature to
+ * keep older callers compiling; the render order is intentional, see §6.3 of
+ * v0.7.2 design.
+ *
  * `now` defaults to `Date.now()`; pass an explicit Date for deterministic tests.
  */
 export function buildSystemContext(
@@ -28,6 +36,7 @@ export function buildSystemContext(
   lastReview: LastReview | null = null,
   activeTopics: TopicStat[] = [],
   recentMistakes: Mistake[] = [],
+  relevantPast: RelevantSession[] = [],
   now: Date = new Date(),
 ): string {
   const lastTransitionAgo = Math.max(0, state.elapsedMin - state.lastTransitionAt)
@@ -45,6 +54,16 @@ export function buildSystemContext(
       `- Last session (${lastReview.daysAgo} ${dayWord} ago, ${durStr}): ${lastReview.summary}`,
     )
     lines.push(`- Last session keywords: ${lastReview.keywords.join(', ')}`)
+  }
+  if (relevantPast.length > 0) {
+    const top = relevantPast.slice(0, 2)
+    lines.push(`- Relevant past sessions (N=${top.length}):`)
+    for (const r of top) {
+      const truncated = r.summary.length > 80 ? `${r.summary.slice(0, 80)}...` : r.summary
+      const kwStr = r.keywords.join(', ')
+      const dayWord = r.daysAgo === 1 ? 'day' : 'days'
+      lines.push(`  - ${r.daysAgo} ${dayWord} ago: "${truncated}" (keywords: ${kwStr})`)
+    }
   }
   if (activeTopics.length > 0) {
     const top = activeTopics.slice(0, 5)

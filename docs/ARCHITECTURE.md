@@ -46,8 +46,8 @@
          ▼              ▼              ▼              ▼
 ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
 │ LLM Client   │ │ Voice I/O    │ │ Storage      │ │ Memory       │
-│ (provider    │ │ (Web Speech  │ │ (SQLite)     │ │ (LanceDB)    │
-│  abstraction)│ │  STT + TTS)  │ │              │ │              │
+│ (provider    │ │ (Web Speech  │ │ (SQLite)     │ │ (transformers│
+│  abstraction)│ │  STT + TTS)  │ │              │ │  .js + SQL)  │
 └──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
          │              │              │              │
          └──────────────┴──────────────┴──────────────┘
@@ -63,7 +63,7 @@
 **核心原则**
 
 1. **会话独立** —— 每个 session 是原子单元，对话原文不跨 session 滚动
-2. **摘要是跨 session 的唯一通道** —— 历史相关 → LanceDB top-N 摘要 → 注入新 session
+2. **摘要是跨 session 的唯一通道** —— 历史相关 → SQLite BLOB cosine top-N 摘要 → 注入新 session
 3. **单 agent + 工具** —— 主对话一个 agent；summarizer 是单独的 sub-agent
 4. **本地优先** —— 所有数据（DB、向量、文件）都在 `data/`
 5. **提示词即数据** —— SOUL/AGENTS/USER/topic 都是 markdown，git 进版本
@@ -344,24 +344,29 @@ src/storage/
 
 ### 3.4 Memory（`src/memory/`）
 
-**职责**：向量存储 + 语义检索。
+**职责**：向量嵌入 + 语义检索。新 session 启动时用上次 session 的关键词 query top-K cosine 命中历史 session 的 summary 嵌入，注入 [System Context] "Relevant past sessions" 段。
 
-**技术选型**：`lancedb`（嵌入式，文件式，零外部依赖）
+**技术选型**：SQLite `sessions.embedding BLOB`（raw Float32Array bytes，零外部依赖）。**不引入 LanceDB**——v0.7.2 评估后决定 SQLite BLOB 已够用（brute-force cosine 在 1000 × 384 维 < 1ms，且省一个进程外依赖）。
 
 **模块**：
 
 ```
 src/memory/
-├── embeddings.ts         # embedding 模型客户端
-├── vector-store.ts       # LanceDB 封装
+├── embedder.ts           # Embedder 接口 + transformers.js 实现 + mock factory
+├── vector-store.ts       # Float32Array ↔ Buffer + cosineSimilarity（纯函数）
+├── retrieve-relevant.ts  # top-K cosine retrieval（纯函数，candidates 由调用方注入）
 └── index.ts
 ```
 
-**Embedding 模型选型**（待决，v0.2 决定）：
+**Embedding 模型选型**（v0.7.2 决策）：
 
-- 候选 A：OpenAI `text-embedding-3-small`（便宜、效果好，但联网）
-- 候选 B：本地 `all-MiniLM-L6-v2`（~80MB，零网络）
-- 决策：v1.0 用 A（保证质量），v1.x 评估 B
+- **本地 `Xenova/all-MiniLM-L6-v2` int8（q8 量化，~25MB 下载，384 维）**
+- transformers.js v4 跑 ONNX，进程内 pipeline singleton（懒加载）
+- `HF_ENDPOINT` env 走镜像（`hf-mirror.com` 等）
+- 同 text → byte-identical vec（量化模型无随机性）
+- 升级路径：换更大模型或 OpenAI `text-embedding-3-small` 是 v1.x 范围
+
+**存储**：SQLite `sessions.embedding BLOB`（384 × 4 = 1536 字节/行）。`listWithEmbeddings()` 过滤 `summary IS NOT NULL AND embedding IS NOT NULL`，brute-force 算 cosine。**无 INDEX**（负优化）。
 
 ---
 
@@ -488,7 +493,7 @@ SessionManager.end(id)
    ├─→ saveSession({summary, keywords, topics_used, ...})
    │
    ├─→ embed(summary) → vector
-   ├─→ LanceDB.upsert({vector, text: summary, keywords, ...})
+   ├─→ sessions.setEmbedding(sessionId, vector) → SQLite BLOB
    │
    ├─→ matchKeywords(keywords) → 命中 topics
    │     └─→ UPDATE topic_stats SET discussion_count += 1, last_discussed_at = now
@@ -583,15 +588,15 @@ ui/  →  agent/  →  { llm/, voice/, storage/, memory/ }
 | # | 决策 | 理由 | 替代方案 |
 |---|---|---|---|
 | **D1** | 会话独立，不滚动跨 session 上下文 | 避免"长 context 膨胀" + 隐私隔离 | 滚动窗口（旧 OpenClaw 模型） |
-| **D2** | 跨 session 唯一通道：摘要 + LanceDB 检索 | 压缩信息、降低 token 消耗 | 滚动 N 轮原文 |
+| **D2** | 跨 session 唯一通道：摘要 + SQLite BLOB cosine 检索 | 压缩信息、降低 token 消耗、零外部依赖 | 滚动 N 轮原文 |
 | **D3** | 单 agent + 工具，不上多 agent | 简化 prompt 工程、易调试 | 多 agent（planner/executor/...） |
 | **D4** | Summarizer 是单独 agent 调用 | 任务 prompt 完全不同 | 在主 agent 里加 mode 切换 |
-| **D5** | Local-first（SQLite + LanceDB + 文件） | 隐私、零外部依赖、可移植 | 云存储 |
+| **D5** | Local-first（SQLite + 本地 ONNX + 文件） | 隐私、零外部依赖、可移植 | 云存储 |
 | **D6** | Voice 走浏览器 Web Speech API | 零部署、跨平台 | Whisper 本地 / 云 TTS |
 | **D7** | Prompts 是 markdown 数据 | 改 prompt 不需 rebuild、走 git diff | 写在 .ts 里 |
 | **D8** | 话题计数自动（关键词 Jaccard 匹配） | 无需手动标注 | 用户打 tag |
 | **D9** | Context Injector 设计成中间件链 | 扩展性好、单元测试容易 | 单一函数拼装 |
-| **D10** | Embedding 先用 OpenAI API | 质量保证 | 本地 MiniLM（v1.x 评估） |
+| **D10** | Embedding 用本地 MiniLM-L6-v2（v0.7.2 决策） | 零网络、隐私、25MB 下载可接受 | OpenAI API（v1.x 可升级） |
 
 每个决策的具体 rationale 见 `docs/adr/`（待 v0.2 启动时补 ADR 文件）。
 
@@ -604,9 +609,9 @@ ui/  →  agent/  →  { llm/, voice/, storage/, memory/ }
 | 包 | 用途 | 备选 |
 |---|---|---|
 | `@anthropic-ai/sdk` | Claude API | OpenAI |
-| `openai` | OpenAI API / embedding | — |
-| `better-sqlite3` | SQLite | node:sqlite (实验性) |
-| `lancedb` | 向量存储 | chromadb (需 server) |
+| `openai` | OpenAI API / embedding (fallback) | — |
+| `better-sqlite3` | SQLite（含 embedding BLOB） | node:sqlite (实验性) |
+| `@huggingface/transformers` + `onnxruntime-node` | 本地 embedding（MiniLM-L6-v2 q8） | OpenAI embedding API（v1.x 可切） |
 | `gray-matter` | frontmatter 解析 | 自己写 |
 | `zod` | schema 校验 | yup / ajv |
 
@@ -665,8 +670,9 @@ ui/  →  agent/  →  { llm/, voice/, storage/, memory/ }
 | `OPENAI_API_KEY` | — | OpenAI API key（fallback 或 embedding） |
 | `LLM_MODEL_MAIN` | `claude-sonnet-4-6` | 主对话模型 |
 | `LLM_MODEL_SUMMARIZER` | `claude-sonnet-4-6` | 摘要模型（可调小降本） |
-| `LLM_MODEL_EMBEDDING` | `text-embedding-3-small` | Embedding 模型 |
-| `LLM_EMBEDDING_PROVIDER` | `openai` | `openai` / `local`（v1.x） |
+| `LLM_MODEL_EMBEDDING` | `Xenova/all-MiniLM-L6-v2` (q8) | Embedding 模型（v0.7.2 用本地） |
+| `LLM_EMBEDDING_PROVIDER` | `local` | `local`（v0.7.2）/ `openai`（v1.x 可切） |
+| `HF_ENDPOINT` | — | HuggingFace 镜像 URL（可选，中国网络 `https://hf-mirror.com`） |
 | `LLM_TEMPERATURE` | `0.7` | 采样温度 |
 | `LLM_MAX_TOKENS` | `2048` | 单轮输出上限 |
 | `APP_PORT` | `3000` | 本地服务端口 |
@@ -691,10 +697,9 @@ ui/  →  agent/  →  { llm/, voice/, storage/, memory/ }
 
 | 路径 | 内容 | 何时写入 |
 |---|---|---|
-| `data/oral-teacher.db` | SQLite | 实时 |
-| `data/vectors/` | LanceDB 文件 | session END 时 |
+| `data/oral-teacher.db` | SQLite（含 sessions.embedding BLOB） | 实时 |
 | `data/sessions/*.md` | 完整 transcript | session END 时 |
-| `data/cache/` | 临时文件（embedding 缓存） | 实时 |
+| `~/.cache/huggingface/` | transformers.js 模型缓存 | 首次 `embed()` 时下载 |
 
 > `data/` 全部 gitignored。删掉 `data/` = 重置到全新状态（应用首次启动会创建空库）。
 
@@ -713,3 +718,4 @@ ui/  →  agent/  →  { llm/, voice/, storage/, memory/ }
 |---|---|---|
 | 2026-06-02 | 0.1 | 初稿：系统概览、Agent 核心 6 模块、支持模块、UI 层、3 个数据流、模块结构、10 项设计决策、依赖、待决问题 |
 | 2026-06-02 | 0.2 | 新增 §10 Configuration & Data Boundaries；`.env` 扩展为 provider 切换 + per-task 模型（main / summarizer / embedding）+ 生成参数；明确"UI 不可见"原则 |
+| 2026-06-10 | 0.3 | §3.4 Memory：LanceDB 换成 SQLite `sessions.embedding BLOB`（v0.7.2 决策）；模块结构改成 embedder + vector-store + retrieve-relevant；模型选型定到本地 MiniLM-L6-v2 int8（384 维）；D2/D5/D10 更新；§8 依赖 `lancedb` → `@huggingface/transformers` + `onnxruntime-node`；§10 `data/vectors/` 路径移除；env 增加 `HF_ENDPOINT` |

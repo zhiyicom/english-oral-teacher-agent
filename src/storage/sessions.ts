@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { PhaseTransition } from '../agent/state-machine.js'
+import { bufferToF32, f32ToBuffer } from '../memory/vector-store.js'
 import type { DbHandle } from './db.js'
 
 export interface Session {
@@ -10,6 +11,19 @@ export interface Session {
   phase_history: string | null
   summary: string | null
   keywords: string | null
+}
+
+/**
+ * Projection used by cross-session semantic retrieval (v0.7.2). Returned only
+ * for sessions that have both a summary and an embedding — partial rows are
+ * excluded by listWithEmbeddings.
+ */
+export interface SessionWithEmbedding {
+  id: string
+  startedAt: string
+  summary: string
+  keywords: string[]
+  embedding: Float32Array
 }
 
 export interface CreateSessionInput {
@@ -31,6 +45,8 @@ export interface SessionsDao {
   get(id: string): Session | null
   list(): Session[]
   markEnded(id: string, opts?: MarkEndedInput): Session
+  setEmbedding(id: string, vec: Float32Array): void
+  listWithEmbeddings(): SessionWithEmbedding[]
 }
 
 const SELECT_COLS = 'id, started_at, ended_at, duration_min, phase_history, summary, keywords'
@@ -46,6 +62,13 @@ export function createSessionsDao(handle: DbHandle): SessionsDao {
     'UPDATE sessions SET ended_at = ?, duration_min = ?, phase_history = COALESCE(?, phase_history), summary = COALESCE(?, summary), keywords = COALESCE(?, keywords) WHERE id = ?',
   )
   const selectAfterUpdate = raw.prepare(`SELECT ${SELECT_COLS} FROM sessions WHERE id = ?`)
+  const updateEmbedding = raw.prepare('UPDATE sessions SET embedding = ? WHERE id = ?')
+  const selectWithEmbeddings = raw.prepare(
+    `SELECT id, started_at, summary, keywords, embedding
+     FROM sessions
+     WHERE embedding IS NOT NULL AND summary IS NOT NULL
+     ORDER BY started_at DESC`,
+  )
 
   function computeDurationMin(id: string, endedAt: string): number {
     const row = selectStartedAt.get(id) as { started_at: string } | undefined
@@ -105,6 +128,25 @@ export function createSessionsDao(handle: DbHandle): SessionsDao {
         }
       }
       return after
+    },
+    setEmbedding(id: string, vec: Float32Array): void {
+      updateEmbedding.run(f32ToBuffer(vec), id)
+    },
+    listWithEmbeddings(): SessionWithEmbedding[] {
+      const rows = selectWithEmbeddings.all() as Array<{
+        id: string
+        started_at: string
+        summary: string
+        keywords: string | null
+        embedding: Buffer
+      }>
+      return rows.map((r) => ({
+        id: r.id,
+        startedAt: r.started_at,
+        summary: r.summary,
+        keywords: r.keywords ? (JSON.parse(r.keywords) as string[]) : [],
+        embedding: bufferToF32(r.embedding),
+      }))
     },
   }
 }

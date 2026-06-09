@@ -510,4 +510,65 @@ describe('CLI v0.4 state-machine integration', () => {
     }
     db.close()
   }, 40000)
+
+  // -------- v0.7.2 — semantic retrieval + summary-embedding persistence --------
+
+  it('v0.7.2 single session: END writes 1536-byte embedding BLOB (384 floats × 4 bytes)', async () => {
+    const result = await runCli('hi\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+      HF_ENDPOINT: 'https://hf-mirror.com',
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toMatch(/\[cli\] embedded session\.summary \(384 dim, 1536 bytes\)/)
+
+    const db = openDb({ dataDir })
+    applyMigrations(db, migrationsDir)
+    const row = db.raw
+      .prepare(
+        'SELECT summary, length(embedding) AS elen FROM sessions ORDER BY started_at DESC LIMIT 1',
+      )
+      .get() as { summary: string | null; elen: number | null }
+    expect(row.summary).toBeTruthy()
+    expect(row.summary).not.toBe('(summarization failed)')
+    expect(row.elen).toBe(1536)
+    db.close()
+  }, 120000)
+
+  it('v0.7.2 cross-session: session C startup retrieves 1 relevant past session (B excluded as lastReview)', async () => {
+    // Three minimal sessions, each 1 turn ('hi' → greeting fixture).
+    // The summarizer fixture is deterministic (always returns the same
+    // Minecraft summary + keywords for any transcript), so A/B/C end up
+    // with identical summary embeddings. When C starts:
+    //   - lastReview = B (most recent ended session)
+    //   - candidates = [A, B] (both have embedding + summary)
+    //   - excludeSessionId = B  →  result = [A]
+    // → stderr shows "retrieved 1 relevant sessions".
+    const a = await runCli('hi\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+      HF_ENDPOINT: 'https://hf-mirror.com',
+    })
+    expect(a.exitCode).toBe(0)
+    expect(a.stderr).toMatch(/\[cli\] embedded session\.summary/)
+
+    const b = await runCli('hi\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+      HF_ENDPOINT: 'https://hf-mirror.com',
+    })
+    expect(b.exitCode).toBe(0)
+    // Session B's startup: lastReview = A → retrieve excludes A → 0 results.
+    expect(b.stderr).toMatch(/\[cli\] retrieved 0 relevant sessions/)
+    expect(b.stderr).toMatch(/\[cli\] embedded session\.summary/)
+
+    const c = await runCli('hi\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+      HF_ENDPOINT: 'https://hf-mirror.com',
+    })
+    expect(c.exitCode).toBe(0)
+    // Session C: lastReview = B, candidates = [A, B], B excluded → 1 result.
+    expect(c.stderr).toMatch(/\[cli\] retrieved 1 relevant sessions/)
+  }, 240000)
 })

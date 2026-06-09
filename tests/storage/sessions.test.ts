@@ -144,4 +144,74 @@ describe('SessionsDao', () => {
     // ended_at should be updated to the new value
     expect(fetched?.ended_at).toBe('2026-06-05T10:06:00.000Z')
   })
+
+  // v0.7.2 — embedding BLOB persistence for cross-session semantic retrieval
+  it('setEmbedding + listWithEmbeddings roundtrip preserves Float32Array bit-for-bit', () => {
+    sessions.create({ id: 'v72-1', startedAt: '2026-06-05T10:00:00.000Z' })
+    sessions.markEnded('v72-1', {
+      endedAt: '2026-06-05T10:05:00.000Z',
+      summary: 'Student practiced Minecraft vocab.',
+      keywords: ['minecraft', 'castle'],
+    })
+    const vec = new Float32Array([0.1, -0.2, 3.14, 1e-10, 0])
+    sessions.setEmbedding('v72-1', vec)
+
+    const rows = sessions.listWithEmbeddings()
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.id).toBe('v72-1')
+    expect(rows[0]?.summary).toBe('Student practiced Minecraft vocab.')
+    expect(rows[0]?.keywords).toEqual(['minecraft', 'castle'])
+    expect(rows[0]?.embedding.length).toBe(vec.length)
+    for (let i = 0; i < vec.length; i++) {
+      expect(rows[0]?.embedding[i]).toBe(vec[i])
+    }
+  })
+
+  it('listWithEmbeddings excludes rows where embedding is NULL', () => {
+    // Row A: has summary AND embedding → should appear
+    sessions.create({ id: 'v72-A', startedAt: '2026-06-05T10:00:00.000Z' })
+    sessions.markEnded('v72-A', {
+      endedAt: '2026-06-05T10:05:00.000Z',
+      summary: 'A summary',
+      keywords: ['a'],
+    })
+    sessions.setEmbedding('v72-A', new Float32Array([1, 2, 3]))
+
+    // Row B: has summary but NO embedding → should NOT appear
+    sessions.create({ id: 'v72-B', startedAt: '2026-06-05T11:00:00.000Z' })
+    sessions.markEnded('v72-B', {
+      endedAt: '2026-06-05T11:05:00.000Z',
+      summary: 'B summary',
+      keywords: ['b'],
+    })
+
+    // Row C: has embedding but NO summary (pathological — markEnded without summary)
+    // → should NOT appear (WHERE summary IS NOT NULL)
+    sessions.create({ id: 'v72-C', startedAt: '2026-06-05T12:00:00.000Z' })
+    sessions.setEmbedding('v72-C', new Float32Array([4, 5, 6]))
+
+    const rows = sessions.listWithEmbeddings()
+    expect(rows.map((r) => r.id)).toEqual(['v72-A'])
+  })
+})
+
+// v0.7.2 — migration 005 schema check (L2)
+describe('Migration 005 — sessions.embedding column', () => {
+  it('PRAGMA table_info(sessions) includes the embedding BLOB column', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sessions-migration-test-'))
+    const db = openDb({ dataDir: dir })
+    try {
+      applyMigrations(db, migrationsDir)
+      const cols = db.raw.prepare('PRAGMA table_info(sessions)').all() as Array<{
+        name: string
+        type: string
+      }>
+      const embedding = cols.find((c) => c.name === 'embedding')
+      expect(embedding).toBeDefined()
+      expect(embedding?.type.toUpperCase()).toBe('BLOB')
+    } finally {
+      db.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

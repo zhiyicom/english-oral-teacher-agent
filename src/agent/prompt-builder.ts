@@ -1,3 +1,4 @@
+import type { RelevantSession } from '../memory/retrieve-relevant.js'
 import { type SystemPrompt, buildSystemString } from '../prompts/loader.js'
 import type { Mistake } from '../storage/mistakes.js'
 import type { TopicStat } from '../storage/topics.js'
@@ -20,6 +21,11 @@ import type { SessionState } from './state-machine.js'
  * v0.7.1 — `recentMistakes` is optional. Same load-once / pass-every-turn
  * pattern as `activeTopics` (see v0.7.1 design §3.2). The CLI loads
  * `mistakes.getRecent(5)` at startup and threads the same list to every turn.
+ *
+ * v0.7.2 — `relevantPast` is optional. Semantic top-K retrieval seeded by the
+ * previous session's keywords. CLI passes this ONLY on the first turn (same
+ * first-turn-only pattern as `lastReview` — after the conversation actually
+ * starts, the seed becomes stale and the tokens are wasted).
  */
 export function buildFinalSystem(
   systemPrompt: SystemPrompt,
@@ -27,10 +33,11 @@ export function buildFinalSystem(
   lastReview: LastReview | null = null,
   activeTopics: TopicStat[] = [],
   recentMistakes: Mistake[] = [],
+  relevantPast: RelevantSession[] = [],
 ): string {
   return [
     buildSystemString(systemPrompt),
     '',
-    buildSystemContext(state, lastReview, activeTopics, recentMistakes),
+    buildSystemContext(state, lastReview, activeTopics, recentMistakes, relevantPast),
   ].join('\n')
 }

@@ -25,6 +25,11 @@ import { loadEnv } from './config/env.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
 import { createReplayProvider } from './llm/testing.js'
 import type { LLMClient, Message } from './llm/types.js'
+import {
+  type RelevantSession,
+  createTransformersEmbedder,
+  retrieveRelevant,
+} from './memory/index.js'
 import { type SystemPrompt, loadSystemPrompt } from './prompts/loader.js'
 import {
   type Mistake,
@@ -168,6 +173,34 @@ export async function main(): Promise<void> {
   const recentMistakes: Mistake[] = mistakesDao.getRecent(5)
   process.stderr.write(`[cli] loaded ${recentMistakes.length} recent mistakes (cross-session)\n`)
 
+  // v0.7.2 — semantic retrieval of relevant past sessions. Seeded by the
+  // previous session's keywords (lastReview), excluding lastReview itself
+  // (already injected by the "Last session" segment). The embedder is lazy:
+  // the transformers.js pipeline only loads on the first embed() call, so
+  // creating the instance here is essentially free. Skip retrieval if there
+  // is no lastReview or no keywords to seed the query. Failures degrade
+  // gracefully to an empty result — the CLI never blocks on this.
+  const embedder = createTransformersEmbedder()
+  let relevantPast: RelevantSession[] = []
+  if (lastReview && lastReview.keywords.length > 0) {
+    try {
+      const queryText = lastReview.keywords.join(' ')
+      const queryVec = await embedder.embed(queryText)
+      const candidates = sessions.listWithEmbeddings()
+      relevantPast = retrieveRelevant({
+        candidates,
+        queryVec,
+        topK: 2,
+        excludeSessionId: lastReview.sessionId,
+      })
+      process.stderr.write(
+        `[cli] retrieved ${relevantPast.length} relevant sessions (query="${queryText}")\n`,
+      )
+    } catch (err) {
+      process.stderr.write(`[cli] retrieve relevant failed: ${(err as Error).message}\n`)
+    }
+  }
+
   // v0.7.1 — dedup set for mark_mistake. Whole-session scope (simpler than a
   // sliding window and good enough for ~30 turn sessions). Reset on each
   // process start, so a brand-new CLI invocation gets a fresh dedup view.
@@ -241,16 +274,40 @@ export async function main(): Promise<void> {
         isFirstTurn ? lastReview : null,
         activeTopics,
         recentMistakes,
+        isFirstTurn ? relevantPast : [],
       )
       // After the first buildFinalSystem call, freeze the last-review injection —
       // subsequent turns build the system string from a fresh state but without
       // the review (which would otherwise drift / look stale 25 min in).
+      const wasFirstTurn = isFirstTurn
       isFirstTurn = false
       // Surface the [System Context] block on stderr so L3 tests can verify
       // what phase the LLM sees (and so users can debug phase behavior live).
       process.stderr.write(
         `[cli] ctx: ${state.phase} elapsed=${state.elapsedMin.toFixed(1)} silence=${state.silenceMin.toFixed(1)}\n`,
       )
+      // v0.7.2 — also dump the full rendered [System Context] block on the
+      // FIRST turn so live demos and grep-based verification can see the
+      // "Relevant past sessions" segment without parsing stdout (the LLM
+      // response is replay-fixture text, not a copy of the system prompt).
+      // First-turn-only because the lastReview/relevantPast injection is
+      // first-turn-only too — the block would be identical on later turns
+      // and would just spam stderr. One extra block per session, not per turn.
+      if (wasFirstTurn) {
+        // Extract just the [System Context] block from the full system prompt
+        // (the LLM-bound system string is base + persona + block). Easier to
+        // build it again with the same args than to parse the assembled string.
+        const ctxBlock =
+          buildFinalSystem(
+            systemPrompt,
+            state,
+            lastReview,
+            activeTopics,
+            recentMistakes,
+            relevantPast,
+          ).split('[System Context]')[1] ?? ''
+        process.stderr.write(`[cli] ctx-block:\n[System Context]${ctxBlock}\n`)
+      }
       reader.writePrompt('[Teacher]: ')
       // v0.7 — buffer the full response BEFORE writing to stdout. We need to
       // strip any <tool>...</tool> block before the student sees it (the
@@ -348,6 +405,24 @@ export async function main(): Promise<void> {
         reason: exitReason,
       })
       process.stderr.write('[cli] markEnded done\n')
+
+      // v0.7.2 — embed the freshly written summary so the next session can
+      // find this one via cross-session semantic retrieval. Runs AFTER
+      // markEnded (the row already has summary populated). Skip the
+      // placeholder. Failure here is best-effort: the summary itself is
+      // saved; only the cross-session-lookup eligibility is lost (next
+      // listWithEmbeddings filters NULL rows).
+      if (summaryText && summaryText !== '(summarization failed)') {
+        try {
+          const summaryVec = await embedder.embed(summaryText)
+          sessions.setEmbedding(session.id, summaryVec)
+          process.stderr.write(
+            `[cli] embedded session.summary (${summaryVec.length} dim, ${summaryVec.byteLength} bytes)\n`,
+          )
+        } catch (err) {
+          process.stderr.write(`[cli] embed summary failed: ${(err as Error).message}\n`)
+        }
+      }
 
       // v0.6 — match summaryKeywords against the topic library; if a topic
       // hits, increment its stat row. Runs AFTER markEnded so a topic

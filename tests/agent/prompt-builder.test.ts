@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildFinalSystem } from '../../src/agent/prompt-builder.js'
 import type { SessionState } from '../../src/agent/state-machine.js'
+import type { RelevantSession } from '../../src/memory/retrieve-relevant.js'
 import type { SystemPrompt } from '../../src/prompts/loader.js'
 import type { Mistake } from '../../src/storage/mistakes.js'
 
@@ -71,5 +72,23 @@ describe('buildFinalSystem', () => {
     expect(out).toContain('- Recent mistakes (N=2):')
     expect(out).toContain('"I go to school yesterday" → "I went to school yesterday" (grammar)')
     expect(out).toContain('"delicius" → "delicious" (spelling)')
+  })
+
+  it('passes relevantPast through to the [System Context] block (v0.7.2)', () => {
+    const relevantPast: RelevantSession[] = [
+      {
+        sessionId: 'past-1',
+        startedAt: '2026-06-08T10:00:00.000Z',
+        summary: 'Talked about Lego building games.',
+        keywords: ['lego', 'build'],
+        similarity: 0.88,
+        daysAgo: 2,
+      },
+    ]
+    const out = buildFinalSystem(fakePrompt, fakeState, null, [], [], relevantPast)
+    expect(out).toContain('- Relevant past sessions (N=1):')
+    expect(out).toContain(
+      '  - 2 days ago: "Talked about Lego building games." (keywords: lego, build)',
+    )
   })
 })

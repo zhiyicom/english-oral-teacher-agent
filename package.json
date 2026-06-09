@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.41.0",
+    "@huggingface/transformers": "^4.2.0",
     "better-sqlite3": "^12.10.0",
     "dotenv": "^16.4.7",
     "gray-matter": "^4.0.3",
