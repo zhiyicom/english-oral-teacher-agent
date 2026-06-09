@@ -1,3 +1,4 @@
+import type { TopicStat } from '../storage/topics.js'
 import type { LastReview } from './retrieval.js'
 import type { SessionState } from './state-machine.js'
 
@@ -8,10 +9,19 @@ import type { SessionState } from './state-machine.js'
  * The segment is only added when `lastReview` is non-null; the caller (CLI) is
  * responsible for passing it ONLY on the first turn of the session (first-turn-only
  * injection per v0.5 design §2.5).
+ *
+ * v0.6 — adds an optional "Active topics" segment. Unlike `lastReview` (which
+ * is per-session retrospective and goes stale), `activeTopics` is a cross-session
+ * aggregate that stays useful for every turn, so the caller passes it for the
+ * entire session. Top 5 by recency (DAO already sorts DESC by last_discussed_at).
+ *
+ * `now` defaults to `Date.now()`; pass an explicit Date for deterministic tests.
  */
 export function buildSystemContext(
   state: SessionState,
   lastReview: LastReview | null = null,
+  activeTopics: TopicStat[] = [],
+  now: Date = new Date(),
 ): string {
   const lastTransitionAgo = Math.max(0, state.elapsedMin - state.lastTransitionAt)
   const lines = [
@@ -29,5 +39,27 @@ export function buildSystemContext(
     )
     lines.push(`- Last session keywords: ${lastReview.keywords.join(', ')}`)
   }
+  if (activeTopics.length > 0) {
+    const top = activeTopics.slice(0, 5)
+    const parts = top.map((t) => {
+      const daysAgo = computeDaysAgo(t.lastDiscussedAt, now)
+      const timeWord = t.discussionCount === 1 ? 'time' : 'times'
+      return `${t.topic} (${t.discussionCount} ${timeWord}, ${formatDaysAgo(daysAgo)})`
+    })
+    lines.push(`- Active topics: ${parts.join(', ')}`)
+  }
   return lines.join('\n')
+}
+
+function computeDaysAgo(isoTs: string | null, now: Date): number {
+  if (!isoTs) return Number.MAX_SAFE_INTEGER // never discussed → huge daysAgo
+  const tsMs = Date.parse(isoTs)
+  return Math.max(0, Math.floor((now.getTime() - tsMs) / 86_400_000))
+}
+
+function formatDaysAgo(n: number): string {
+  if (n === 0) return 'today'
+  if (n === 1) return 'yesterday'
+  if (n >= 2) return `${n} days ago`
+  return 'unknown'
 }

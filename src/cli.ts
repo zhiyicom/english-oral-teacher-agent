@@ -12,6 +12,7 @@ import {
   buildFinalSystem,
   initState,
   loadLastReview,
+  matchTopic,
   mockClock,
   realClock,
   summarize,
@@ -21,7 +22,15 @@ import { createAnthropicProvider } from './llm/anthropic.js'
 import { createReplayProvider } from './llm/testing.js'
 import type { LLMClient, Message } from './llm/types.js'
 import { type SystemPrompt, loadSystemPrompt } from './prompts/loader.js'
-import { applyMigrations, createMessagesDao, createSessionsDao, openDb } from './storage/index.js'
+import {
+  type TopicStat,
+  applyMigrations,
+  createMessagesDao,
+  createSessionsDao,
+  createTopicStatsDao,
+  createTopicsDao,
+  openDb,
+} from './storage/index.js'
 
 function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLMClient {
   if (process.env.RUN_LIVE_LLM === '1') {
@@ -111,6 +120,8 @@ export async function main(): Promise<void> {
   applyMigrations(db)
   const sessions = createSessionsDao(db)
   const messages = createMessagesDao(db)
+  const topics = createTopicsDao(db)
+  const topicStats = createTopicStatsDao(db)
   const session = sessions.create()
 
   const systemPrompt = loadSystemPrompt()
@@ -128,6 +139,14 @@ export async function main(): Promise<void> {
   // Injected only on the FIRST turn of this session (first-turn-only per v0.5 design §2.5).
   const lastReview: LastReview | null = loadLastReview(db)
   let isFirstTurn = true
+
+  // v0.6 — load aggregated topic_stats once at startup. Unlike lastReview
+  // (per-session retrospective, first-turn-only), active topics are a
+  // cross-session aggregate that stays useful for the WHOLE session, so we
+  // pass the same list to every turn. Re-read each turn is unnecessary:
+  // topic_stats is only mutated in the finally block of THIS process, after
+  // the loop ends, so within-session reading once is correct.
+  const activeTopics: TopicStat[] = topicStats.all()
 
   const rl = createInterface({
     input: process.stdin,
@@ -191,7 +210,12 @@ export async function main(): Promise<void> {
       history.push({ role: 'user', content: input })
       messages.append({ sessionId: session.id, role: 'user', content: input })
 
-      const system = buildFinalSystem(systemPrompt, state, isFirstTurn ? lastReview : null)
+      const system = buildFinalSystem(
+        systemPrompt,
+        state,
+        isFirstTurn ? lastReview : null,
+        activeTopics,
+      )
       // After the first buildFinalSystem call, freeze the last-review injection —
       // subsequent turns build the system string from a fresh state but without
       // the review (which would otherwise drift / look stale 25 min in).
@@ -256,6 +280,20 @@ export async function main(): Promise<void> {
         reason: exitReason,
       })
       process.stderr.write('[cli] markEnded done\n')
+
+      // v0.6 — match summaryKeywords against the topic library; if a topic
+      // hits, increment its stat row. Runs AFTER markEnded so a topic
+      // failure can never block session persistence. If summarize failed
+      // (summaryKeywords = []), matchTopic returns null and we skip.
+      const match = matchTopic(summaryKeywords, topics.list())
+      if (match) {
+        topicStats.incrementAndUpdate(match.topic, new Date())
+        process.stderr.write(
+          `[cli] topic match: ${match.topic} jaccard=${match.jaccard.toFixed(2)} shared=[${match.shared.join(',')}]\n`,
+        )
+      } else {
+        process.stderr.write(`[cli] topic match: none (keywords=[${summaryKeywords.join(',')}])\n`)
+      }
     } finally {
       rl.close()
       db.close()

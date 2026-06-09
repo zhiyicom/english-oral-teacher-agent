@@ -7,6 +7,8 @@ import {
   applyMigrations,
   createMessagesDao,
   createSessionsDao,
+  createTopicStatsDao,
+  createTopicsDao,
   openDb,
 } from '../../src/storage/index.js'
 import { resolveMigrationsDirForTesting } from '../storage/helpers.js'
@@ -304,4 +306,99 @@ describe('CLI v0.4 state-machine integration', () => {
     // summarize ok stderr line confirms buildSummaryInstruction reached the LLM call.
     expect(result.stderr).toMatch(/\[cli\] summarize ok summary=\d+c keywords=\d+/)
   }, 25000)
+
+  // -------- v0.6 — topic matching + topic_stats --------
+
+  it('5 turns (minecraft keywords): topic_stats.minecraft count=1 + stderr has "topic match: minecraft"', async () => {
+    const inputs = ['hi', 'fine', 'castle', 'creeper', 'played']
+    const result = await runCli(`${inputs.join('\n')}\n`, {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(result.exitCode).toBe(0)
+    // Summarizer must have produced Minecraft keywords from fixture
+    expect(result.stderr).toMatch(/\[cli\] summarize ok summary=\d+c keywords=\d+/)
+    // Topic matcher ran and matched minecraft
+    expect(result.stderr).toMatch(/\[cli\] topic match: minecraft jaccard=\d+\.\d{2} shared=\[/)
+
+    // DB: topic_stats has minecraft row with count=1
+    const db = openDb({ dataDir })
+    applyMigrations(db, migrationsDir)
+    const stats = createTopicStatsDao(db)
+    const mc = stats.get('minecraft')
+    expect(mc).not.toBeNull()
+    expect(mc?.discussionCount).toBe(1)
+    expect(mc?.lastDiscussedAt).not.toBeNull()
+    db.close()
+  }, 25000)
+
+  it('session A 5 turns + session B 5 turns: minecraft count=2 (UPSERT accumulation)', async () => {
+    const inputs = ['hi', 'fine', 'castle', 'creeper', 'played']
+    // Session A
+    const a = await runCli(`${inputs.join('\n')}\n`, {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(a.exitCode).toBe(0)
+    expect(a.stderr).toMatch(/\[cli\] topic match: minecraft/)
+
+    // Session B in SAME data dir
+    const b = await runCli(`${inputs.join('\n')}\n`, {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(b.exitCode).toBe(0)
+    expect(b.stderr).toMatch(/\[cli\] topic match: minecraft/)
+
+    // DB: count=2, first unchanged, last updated
+    const db = openDb({ dataDir })
+    applyMigrations(db, migrationsDir)
+    const stats = createTopicStatsDao(db)
+    const mc = stats.get('minecraft')
+    expect(mc?.discussionCount).toBe(2)
+    db.close()
+  }, 45000)
+
+  it('first session on empty library: minecraft match → stats row created, 6 other topics untouched', async () => {
+    // summarize fixture always returns minecraft/castle/creeper/wall/build
+    // keywords, so on any session topic match: minecraft fires. This test
+    // verifies that:
+    //   (a) the very first session on an empty library still matches a topic
+    //   (b) only minecraft gets a row, the other 6 seed topics stay untouched
+    // (The "topic match: none" path is unit-tested in topic-matcher.test.ts
+    // — there's no LLM fixture that returns [] keywords to exercise it at L3.)
+    const a = await runCli('hi\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(a.exitCode).toBe(0)
+    expect(a.stderr).toMatch(/\[cli\] topic match: minecraft/)
+
+    const db = openDb({ dataDir })
+    applyMigrations(db, migrationsDir)
+    const stats = createTopicStatsDao(db)
+    const all = stats.all()
+    expect(all).toHaveLength(1)
+    expect(all[0]?.topic).toBe('minecraft')
+    expect(all[0]?.discussionCount).toBe(1)
+    db.close()
+  }, 20000)
+
+  it('7 seed topics loaded by migration 003: TopicsDao.list() returns 7', async () => {
+    // Trigger a session so DB is initialized
+    const result = await runCli('hi\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(result.exitCode).toBe(0)
+
+    const db = openDb({ dataDir })
+    applyMigrations(db, migrationsDir)
+    const topics = createTopicsDao(db)
+    const all = topics.list()
+    expect(all).toHaveLength(7)
+    const names = all.map((t) => t.name).sort()
+    expect(names).toEqual(['family', 'food', 'minecraft', 'movies', 'music', 'school', 'sports'])
+    db.close()
+  }, 20000)
 })

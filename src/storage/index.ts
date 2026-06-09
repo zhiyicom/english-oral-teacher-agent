@@ -13,3 +13,11 @@ export {
   type MessageRow,
   type MessagesDao,
 } from './messages.js'
+export {
+  type Topic,
+  type TopicStat,
+  type TopicStatsDao,
+  type TopicsDao,
+  createTopicStatsDao,
+  createTopicsDao,
+} from './topics.js'
