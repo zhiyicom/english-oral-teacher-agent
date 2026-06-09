@@ -1,4 +1,5 @@
 import { type SystemPrompt, buildSystemString } from '../prompts/loader.js'
+import type { Mistake } from '../storage/mistakes.js'
 import type { TopicStat } from '../storage/topics.js'
 import { buildSystemContext } from './context-injector.js'
 import type { LastReview } from './retrieval.js'
@@ -15,16 +16,21 @@ import type { SessionState } from './state-machine.js'
  * v0.6 — `activeTopics` is optional. Unlike `lastReview` (first-turn-only),
  * active topics are an aggregate view useful for the whole session, so the
  * caller passes the same value to every turn.
+ *
+ * v0.7.1 — `recentMistakes` is optional. Same load-once / pass-every-turn
+ * pattern as `activeTopics` (see v0.7.1 design §3.2). The CLI loads
+ * `mistakes.getRecent(5)` at startup and threads the same list to every turn.
  */
 export function buildFinalSystem(
   systemPrompt: SystemPrompt,
   state: SessionState,
   lastReview: LastReview | null = null,
   activeTopics: TopicStat[] = [],
+  recentMistakes: Mistake[] = [],
 ): string {
   return [
     buildSystemString(systemPrompt),
     '',
-    buildSystemContext(state, lastReview, activeTopics),
+    buildSystemContext(state, lastReview, activeTopics, recentMistakes),
   ].join('\n')
 }

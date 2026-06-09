@@ -130,11 +130,11 @@ describe('MistakesDao (v0.7 migration 004)', () => {
   describe('constraints (L2: real DB enforcement)', () => {
     it('CHECK constraint rejects category outside the enum', () => {
       expect(() =>
-        // @ts-expect-error testing runtime CHECK
         mistakes.append({
           sessionId,
           original: 'x',
           corrected: 'y',
+          // @ts-expect-error testing runtime CHECK
           category: 'bogus',
         }),
       ).toThrow(/CHECK constraint failed|constraint failed/i)

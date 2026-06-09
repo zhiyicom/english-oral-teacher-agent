@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { buildFinalSystem } from '../../src/agent/prompt-builder.js'
 import type { SessionState } from '../../src/agent/state-machine.js'
 import type { SystemPrompt } from '../../src/prompts/loader.js'
+import type { Mistake } from '../../src/storage/mistakes.js'
 
 const fakePrompt: SystemPrompt = {
   soul: 'You are a friendly English tutor.',
@@ -14,6 +15,7 @@ const fakePrompt: SystemPrompt = {
     goals: ['fluency'],
     interests: ['minecraft'],
   },
+  tools: null,
 }
 
 const fakeState: SessionState = {
@@ -44,5 +46,30 @@ describe('buildFinalSystem', () => {
   it('contains current phase in the context block', () => {
     const out = buildFinalSystem(fakePrompt, { ...fakeState, phase: 'MAIN_ACTIVITY' })
     expect(out).toContain('Phase: MAIN_ACTIVITY')
+  })
+
+  it('passes recentMistakes through to the [System Context] block (v0.7.1)', () => {
+    const mistakes: Mistake[] = [
+      {
+        id: 1,
+        sessionId: 's1',
+        original: 'I go to school yesterday',
+        corrected: 'I went to school yesterday',
+        category: 'grammar',
+        ts: '2026-06-09T11:00:00.000Z',
+      },
+      {
+        id: 2,
+        sessionId: 's1',
+        original: 'delicius',
+        corrected: 'delicious',
+        category: 'spelling',
+        ts: '2026-06-09T11:01:00.000Z',
+      },
+    ]
+    const out = buildFinalSystem(fakePrompt, fakeState, null, [], mistakes)
+    expect(out).toContain('- Recent mistakes (N=2):')
+    expect(out).toContain('"I go to school yesterday" → "I went to school yesterday" (grammar)')
+    expect(out).toContain('"delicius" → "delicious" (spelling)')
   })
 })

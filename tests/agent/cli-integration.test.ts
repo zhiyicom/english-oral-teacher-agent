@@ -437,14 +437,19 @@ describe('CLI v0.4 state-machine integration', () => {
     db.close()
   }, 25000)
 
-  it('2 turns both with "yesterday": same session accumulates 2 mistake rows', async () => {
+  it('2 turns both with "yesterday": dedup blocks 2nd mark, DB has 1 row + stderr has dedup log', async () => {
     const result = await runCli('I go to school yesterday\nI see my friend yesterday\nexit\n', {
       MINIMAX_API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
+    // First turn: tool call fires
     const toolCallMatches = result.stderr.match(/\[cli\] tool call: mark_mistake/g) ?? []
-    expect(toolCallMatches.length).toBe(2)
+    expect(toolCallMatches.length).toBe(1)
+    // Second turn: dedup catches the same original
+    expect(result.stderr).toMatch(
+      /\[cli\] tool dedup: skipped \(already marked: "I go to school yesterday"\)/,
+    )
 
     const db = openDb({ dataDir })
     applyMigrations(db, migrationsDir)
@@ -452,9 +457,30 @@ describe('CLI v0.4 state-machine integration', () => {
     const mistakes = createMistakesDao(db)
     const session = sessions.list()[0]
     const rows = mistakes.getBySession(session?.id ?? '')
-    expect(rows).toHaveLength(2)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.original).toBe('I go to school yesterday')
     db.close()
   }, 25000)
+
+  it('cross-session: session A marks a mistake, session B startup loads it via getRecent(5)', async () => {
+    // Session A: 1 mistake
+    const a = await runCli('I go to school yesterday\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(a.exitCode).toBe(0)
+    expect(a.stderr).toMatch(/\[cli\] tool call: mark_mistake/)
+    // First session starts on empty library → no recent mistakes loaded
+    expect(a.stderr).toMatch(/\[cli\] loaded 0 recent mistakes \(cross-session\)/)
+
+    // Session B: same dataDir → startup log shows 1 recent mistake loaded
+    const b = await runCli('hi\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(b.exitCode).toBe(0)
+    expect(b.stderr).toMatch(/\[cli\] loaded 1 recent mistakes \(cross-session\)/)
+  }, 40000)
 
   it('session A + session B both produce mistakes: total 2 mistakes across 2 sessions', async () => {
     const a = await runCli('I go to school yesterday\nexit\n', {

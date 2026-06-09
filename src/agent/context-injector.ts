@@ -1,3 +1,4 @@
+import type { Mistake } from '../storage/mistakes.js'
 import type { TopicStat } from '../storage/topics.js'
 import type { LastReview } from './retrieval.js'
 import type { SessionState } from './state-machine.js'
@@ -15,12 +16,18 @@ import type { SessionState } from './state-machine.js'
  * aggregate that stays useful for every turn, so the caller passes it for the
  * entire session. Top 5 by recency (DAO already sorts DESC by last_discussed_at).
  *
+ * v0.7.1 — adds an optional "Recent mistakes" segment. Cross-session mistake
+ * history loaded once at startup (`mistakes.getRecent(5)`) and passed in
+ * unchanged for the whole session. Same load-once strategy as `activeTopics`;
+ * see v0.7.1 design §3.2.
+ *
  * `now` defaults to `Date.now()`; pass an explicit Date for deterministic tests.
  */
 export function buildSystemContext(
   state: SessionState,
   lastReview: LastReview | null = null,
   activeTopics: TopicStat[] = [],
+  recentMistakes: Mistake[] = [],
   now: Date = new Date(),
 ): string {
   const lastTransitionAgo = Math.max(0, state.elapsedMin - state.lastTransitionAt)
@@ -47,6 +54,13 @@ export function buildSystemContext(
       return `${t.topic} (${t.discussionCount} ${timeWord}, ${formatDaysAgo(daysAgo)})`
     })
     lines.push(`- Active topics: ${parts.join(', ')}`)
+  }
+  if (recentMistakes.length > 0) {
+    const top = recentMistakes.slice(0, 5)
+    lines.push(`- Recent mistakes (N=${top.length}):`)
+    for (const m of top) {
+      lines.push(`  - "${m.original}" → "${m.corrected}" (${m.category})`)
+    }
   }
   return lines.join('\n')
 }

@@ -27,9 +27,11 @@ import { createReplayProvider } from './llm/testing.js'
 import type { LLMClient, Message } from './llm/types.js'
 import { type SystemPrompt, loadSystemPrompt } from './prompts/loader.js'
 import {
+  type Mistake,
   type TopicStat,
   applyMigrations,
   createMessagesDao,
+  createMistakesDao,
   createSessionsDao,
   createTopicStatsDao,
   createTopicsDao,
@@ -157,6 +159,20 @@ export async function main(): Promise<void> {
   const toolRegistry = createToolRegistry()
   toolRegistry.register(createMarkMistakeTool(db, session.id))
 
+  // v0.7.1 — load recent cross-session mistakes once at startup. The CLI
+  // ALSO has its own mistakesDao instance separate from the one created
+  // inside the mark_mistake factory above. Both DAOs are stateless (the
+  // prepared statements are independent, and there's no shared cache), so
+  // running two instances against the same db handle is fine.
+  const mistakesDao = createMistakesDao(db)
+  const recentMistakes: Mistake[] = mistakesDao.getRecent(5)
+  process.stderr.write(`[cli] loaded ${recentMistakes.length} recent mistakes (cross-session)\n`)
+
+  // v0.7.1 — dedup set for mark_mistake. Whole-session scope (simpler than a
+  // sliding window and good enough for ~30 turn sessions). Reset on each
+  // process start, so a brand-new CLI invocation gets a fresh dedup view.
+  const markedOriginals = new Set<string>()
+
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -224,6 +240,7 @@ export async function main(): Promise<void> {
         state,
         isFirstTurn ? lastReview : null,
         activeTopics,
+        recentMistakes,
       )
       // After the first buildFinalSystem call, freeze the last-review injection —
       // subsequent turns build the system string from a fresh state but without
@@ -268,13 +285,21 @@ export async function main(): Promise<void> {
         if (!tool) {
           process.stderr.write(`[cli] tool unknown: ${parsed.name}\n`)
         } else {
-          try {
-            tool.execute(parsed.args)
-            process.stderr.write(
-              `[cli] tool call: ${parsed.name}(${JSON.stringify(parsed.args)})\n`,
-            )
-          } catch (err) {
-            process.stderr.write(`[cli] tool execute error: ${(err as Error).message}\n`)
+          const original = typeof parsed.args.original === 'string' ? parsed.args.original : ''
+          if (parsed.name === 'mark_mistake' && original && markedOriginals.has(original)) {
+            process.stderr.write(`[cli] tool dedup: skipped (already marked: "${original}")\n`)
+          } else {
+            try {
+              tool.execute(parsed.args)
+              if (parsed.name === 'mark_mistake' && original) {
+                markedOriginals.add(original)
+              }
+              process.stderr.write(
+                `[cli] tool call: ${parsed.name}(${JSON.stringify(parsed.args)})\n`,
+              )
+            } catch (err) {
+              process.stderr.write(`[cli] tool execute error: ${(err as Error).message}\n`)
+            }
           }
         }
       }
