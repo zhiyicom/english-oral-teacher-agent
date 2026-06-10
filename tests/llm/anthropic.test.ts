@@ -71,10 +71,71 @@ describe('AnthropicProvider', () => {
     expect(call.model).toBe('MiniMax-M3')
     expect(call.system).toBe('sys-prompt')
     expect(call.stream).toBe(true)
-    const messages = call.messages as Array<{ role: string; content: string }>
+    const messages = call.messages as Array<{ role: string; content: unknown }>
     expect(messages).toHaveLength(3)
+    // v0.7.6 B4 — the last 2 messages (indices 1 and 2 for a length-3 input)
+    // get wrapped with cache_control: ephemeral. The earlier message
+    // (index 0) keeps the legacy string content shape.
     expect(messages[0]).toEqual({ role: 'user', content: 'hello' })
-    expect(messages[1]).toEqual({ role: 'assistant', content: 'hi back' })
+    expect(messages[1]).toEqual({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'hi back', cache_control: { type: 'ephemeral' } }],
+    })
+    expect(messages[2]).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'how are you', cache_control: { type: 'ephemeral' } }],
+    })
+  })
+
+  it('B4 — wraps the last 2 messages with cache_control regardless of total length', async () => {
+    createSpy.mockResolvedValue(fakeStream([{ type: 'message_stop' }]))
+
+    const client = createAnthropicProvider(makeEnv())
+    await client.chat({
+      system: 's',
+      messages: [
+        { role: 'user', content: 'u1' },
+        { role: 'assistant', content: 'a1' },
+        { role: 'user', content: 'u2' },
+        { role: 'assistant', content: 'a2' },
+        { role: 'user', content: 'u3' },
+      ],
+    })
+
+    const call = createSpy.mock.calls[0]?.[0] as Record<string, unknown>
+    const messages = call.messages as Array<{ role: string; content: unknown }>
+    expect(messages).toHaveLength(5)
+    // First 3 messages: plain string content (not cache breakpoints).
+    expect(messages[0]).toEqual({ role: 'user', content: 'u1' })
+    expect(messages[1]).toEqual({ role: 'assistant', content: 'a1' })
+    expect(messages[2]).toEqual({ role: 'user', content: 'u2' })
+    // Last 2 messages: array content with cache_control breakpoint.
+    expect(messages[3]).toEqual({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'a2', cache_control: { type: 'ephemeral' } }],
+    })
+    expect(messages[4]).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'u3', cache_control: { type: 'ephemeral' } }],
+    })
+  })
+
+  it('B4 — single-message request still gets the cache_control breakpoint on that one message', async () => {
+    createSpy.mockResolvedValue(fakeStream([{ type: 'message_stop' }]))
+
+    const client = createAnthropicProvider(makeEnv())
+    await client.chat({
+      system: 's',
+      messages: [{ role: 'user', content: 'only one' }],
+    })
+
+    const call = createSpy.mock.calls[0]?.[0] as Record<string, unknown>
+    const messages = call.messages as Array<{ role: string; content: unknown }>
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'only one', cache_control: { type: 'ephemeral' } }],
+    })
   })
 
   it('separates thinking deltas from text deltas', async () => {

@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { Env } from '../config/env.js'
-import type { ChatChunk, ChatOpts, ChatResult, LLMClient, UsageChunk } from './types.js'
+import type { ChatChunk, ChatOpts, ChatResult, LLMClient, Message, UsageChunk } from './types.js'
 
 /**
  * Subset of Anthropic streaming events we care about. The SDK emits many
@@ -41,6 +41,54 @@ type AnthropicEvent =
         | 'error'
     }
 
+/**
+ * v0.7.6 B4 — convert Message[] to Anthropic message params, applying
+ * `cache_control: ephemeral` to the last `CACHE_LAST_N` messages.
+ *
+ * Why mark the END of messages[]:
+ *   - Anthropic caches the prefix UP TO AND INCLUDING the breakpoint.
+ *   - The latest user message is the only new content this turn; everything
+ *     before it is unchanged from the previous turn's request (modulo the
+ *     dynamic system block, which we deliberately keep small so the rest
+ *     of the prefix remains cacheable).
+ *   - On the NEXT turn, the message that was "latest" this turn becomes
+ *     second-to-latest. If we marked the last TWO messages, that "old
+ *     latest" still has its breakpoint, and the next turn can hit the
+ *     cache for the prefix up through it.
+ *
+ * Breakpoint budget: Anthropic allows up to 4 cache breakpoints per
+ * request. We already use 1 for the static system block (v0.7.5), so 3
+ * remain. We use 2 here, leaving 1 of headroom.
+ *
+ * v0.7.5 confirmed the SDK accepts cache_control on system blocks. If the
+ * SDK or upstream rejects cache_control on message content blocks, the
+ * existing chatStreamWithRetry classifies the resulting error as 4xx
+ * (non-retryable) and the CLI's fallback path kicks in — the operator
+ * will then see the failure and can disable B4 (revert this file) without
+ * data loss. The marking is intentionally minimal so a revert is cheap.
+ */
+const CACHE_LAST_N = 2
+
+function toAnthropicMessages(messages: Message[]): Anthropic.Messages.MessageParam[] {
+  const cacheStartIdx = Math.max(0, messages.length - CACHE_LAST_N)
+  return messages.map((m, i) => {
+    const role = m.role === 'system' ? ('user' as const) : m.role
+    if (i >= cacheStartIdx) {
+      return {
+        role,
+        content: [
+          {
+            type: 'text' as const,
+            text: m.content,
+            cache_control: { type: 'ephemeral' as const },
+          },
+        ],
+      }
+    }
+    return { role, content: m.content }
+  })
+}
+
 export function createAnthropicProvider(env: Env): LLMClient {
   const client = new Anthropic({
     apiKey: env.MINIMAX_API_KEY,
@@ -57,10 +105,7 @@ export function createAnthropicProvider(env: Env): LLMClient {
       max_tokens: opts.maxTokens ?? env.LLM_MAX_TOKENS,
       temperature: opts.temperature ?? env.LLM_TEMPERATURE,
       system: systemParam,
-      messages: opts.messages.map((m) => ({
-        role: m.role === 'system' ? 'user' : m.role,
-        content: m.content,
-      })),
+      messages: toAnthropicMessages(opts.messages),
       stream: true,
     })
 
