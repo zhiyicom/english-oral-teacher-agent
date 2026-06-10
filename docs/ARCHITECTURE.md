@@ -194,7 +194,8 @@ const middleware: Middleware[] = [
 | 工具名 | 输入 | 副作用 | 用途 | 状态 |
 |---|---|---|---|---|
 | `memory_search` | `{query: string, top_k: int}` | 只读 | 检索历史相关摘要 | ✅ v0.7.3（top_k 1-5, default 2）|
-| `topic_select` | `{phase: Phase, exclude_recent_days: int}` | 只读 | 选题（带去重） | 📋 v1.0+（未实现）|
+| `summarize_history` | `{target_tokens: int}` | 改写 history | 压缩历史（保留 anchor + 近期 6 条）| ✅ v0.7.6 B2（target_tokens 100-3000, default 500）|
+| `topic_select` | `{phase: Phase, exclude_recent_days: int}` | 只读 | 选题（带去重 + 加权随机）| ✅ v0.7.6 D5（exclude_recent_days 0-365, default 30）|
 | `mark_mistake` | `{type, original, corrected}` | 写 SQLite | 记录错例 | ✅ v0.7（实际 schema 含 `category`）|
 | `mark_vocabulary` | `{word, context_sentence}` | 写 SQLite | 记录新词 | 📋 v1.0+（未实现）|
 | `mark_homework` | `{content, due_days}` | 写 SQLite | 布置作业 | 📋 v1.0+（未实现）|
@@ -823,3 +824,4 @@ ui/  →  agent/  →  { llm/, voice/, storage/, memory/ }
 | 2026-06-02 | 0.2 | 新增 §10 Configuration & Data Boundaries；`.env` 扩展为 provider 切换 + per-task 模型（main / summarizer / embedding）+ 生成参数；明确"UI 不可见"原则 |
 | 2026-06-10 | 0.3 | §3.4 Memory：LanceDB 换成 SQLite `sessions.embedding BLOB`（v0.7.2 决策）；模块结构改成 embedder + vector-store + retrieve-relevant；模型选型定到本地 MiniLM-L6-v2 int8（384 维）；D2/D5/D10 更新；§8 依赖 `lancedb` → `@huggingface/transformers` + `onnxruntime-node`；§10 `data/vectors/` 路径移除；env 增加 `HF_ENDPOINT` |
 | 2026-06-10 | 0.4 | §2.3 Prompt Builder：新增 `buildFinalSystemSplit` → `{ static, dynamic }`；§3.1 LLM Client：`SystemBlock` / `UsageChunk` / `ChatChunk` v0.7.5 字段；§5.2 主对话循环：加 `truncateHistory` + `systemBlocks` + `cache_control` + usage log + 80% warn 步骤；§10.2 env 新增 `LLM_CONTEXT_BUDGET_TOKENS`（默认 6000） |
+| 2026-06-11 | 0.5 | **v0.7.6 (3-axis wrap-up)** — §2.3 Prompt Builder：`buildFinalSystemSplit` → `buildFinalSystemSegments` (return type 增 `segments: {phase,last,relevant,active,mistakes}` token counts)；§3.1 LLM Client：`toAnthropicMessages` 给 messages[] 末尾 2 条加 `cache_control: ephemeral` (B4)；§4 Tools：v0.7.6 B2 增 `summarize_history` (marker tool, CLI 改写 history → A+B 2nd call)，D5 增 `topic_select` (pure compute, A+B 2nd call)；§5.2 主循环：4 工具分支 (no-tool / mark_mistake / memory_search / summarize_history / topic_select)；`truncateHistory` 加 `anchorPair` 选项 (B1) 保护首对 user/assistant；`chatStreamWithRetry` 1x retry + catch-all 友好降级 + auto-save (V751-002)；`buildSystemContext` 返 `SystemContextResult` 带 5 段 token counts；`formatToolResult` 增 `[v076_*]` 标记 |
