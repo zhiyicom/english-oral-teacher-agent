@@ -270,6 +270,12 @@ export async function main(): Promise<void> {
   // process start, so a brand-new CLI invocation gets a fresh dedup view.
   const markedOriginals = new Set<string>()
 
+  // v0.7.6 B1 — anchor pair. Captures the first user/assistant exchange of
+  // this session so the truncate-history sliding window can protect it from
+  // being dropped. Populated AFTER the first LLM response is processed
+  // (turn 1 → turn 2 boundary). See v0.7.6-design.md §3.2.
+  const firstPair: Message[] = []
+
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -359,10 +365,15 @@ export async function main(): Promise<void> {
       // English + Chinese mixed; post-call SDK usage validates the real
       // number. Drops oldest user/assistant pairs; always keeps the most
       // recent pair (the loop's invariant — see truncate-history.ts).
+      // v0.7.6 B1 — also pass the captured firstPair (first user/assistant
+      // exchange of this session) as `anchorPair`. truncate-history preserves
+      // the anchor verbatim and only truncates the droppable middle/older
+      // portion. This protects the WARM_UP topic intro from being dropped
+      // as the session grows long. See v0.7.6-design.md §3.2.
       const { messages: truncMsgs, dropped } = truncateHistory(
         history,
         env.LLM_CONTEXT_BUDGET_TOKENS,
-        systemSize,
+        { systemSize, anchorPair: firstPair },
       )
       if (dropped > 0) {
         const estAfter = estimateMessagesTokens(truncMsgs) + systemSize
@@ -593,6 +604,23 @@ export async function main(): Promise<void> {
         process.stdout.write(`${display}\n\n`)
         history.push({ role: 'assistant', content: display })
         messages.append({ sessionId: session.id, role: 'assistant', content: display })
+      }
+
+      // v0.7.6 B1 — capture the first user/assistant pair of this session
+      // so truncateHistory can protect it from being dropped (anchor pair).
+      // Captured AFTER the assistant message is pushed (turn 1). Runs once
+      // per session because `firstPair.length === 0` gates subsequent calls.
+      // Safe across all 4 tool branches: at this point history[0..1] is
+      // the user's first input + the assistant's first response (or its
+      // tool-stripped variant for mark_mistake / unknown paths; the
+      // memory_search A+B path also has the original 1st-call response
+      // in history by line 502).
+      if (firstPair.length === 0 && history.length >= 2) {
+        const first = history[0]
+        const second = history[1]
+        if (first && second) {
+          firstPair.push(first, second)
+        }
       }
 
       // MOCK_TIME: advance the fake clock by 1 min per turn so the
