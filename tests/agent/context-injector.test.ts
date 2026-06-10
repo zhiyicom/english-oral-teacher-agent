@@ -6,6 +6,13 @@ import type { RelevantSession } from '../../src/memory/retrieve-relevant.js'
 import type { Mistake } from '../../src/storage/mistakes.js'
 import type { TopicStat } from '../../src/storage/topics.js'
 
+// v0.7.6 B3 — buildSystemContext now returns { text, segments }. Most legacy
+// tests assert on the rendered text, so this thin helper unwraps `.text` for
+// them. Tests that need the segment counts call `buildSystemContext` directly.
+function ctx(...args: Parameters<typeof buildSystemContext>): string {
+  return buildSystemContext(...args).text
+}
+
 function makeState(overrides: Partial<SessionState> = {}): SessionState {
   return {
     phase: 'WARM_UP',
@@ -33,7 +40,7 @@ function makeLastReview(overrides: Partial<LastReview> = {}): LastReview {
 
 describe('buildSystemContext (v0.4 base)', () => {
   it('includes all 4 fields (phase / elapsed / silence / last transition)', () => {
-    const out = buildSystemContext(makeState())
+    const out = ctx(makeState())
     expect(out).toContain('Phase: WARM_UP')
     expect(out).toContain('Elapsed: 2.3 min')
     expect(out).toContain('Silence: 0.5 min')
@@ -41,69 +48,69 @@ describe('buildSystemContext (v0.4 base)', () => {
   })
 
   it('starts with [System Context] header', () => {
-    const out = buildSystemContext(makeState())
+    const out = ctx(makeState())
     expect(out.startsWith('[System Context]\n')).toBe(true)
   })
 
   it('shows Silence: 0.0 even when silence is zero (hint is always visible)', () => {
-    const out = buildSystemContext(makeState({ silenceMin: 0 }))
+    const out = ctx(makeState({ silenceMin: 0 }))
     expect(out).toContain('Silence: 0.0 min')
   })
 })
 
 describe('buildSystemContext (v0.5 last review)', () => {
   it('lastReview=null omits the "Last session" segment entirely', () => {
-    const out = buildSystemContext(makeState(), null)
+    const out = ctx(makeState(), null)
     expect(out).not.toContain('Last session')
   })
 
   it('lastReview=undefined (omitted) also omits the "Last session" segment', () => {
-    const out = buildSystemContext(makeState())
+    const out = ctx(makeState())
     expect(out).not.toContain('Last session')
   })
 
   it('non-null lastReview appends "Last session (X day(s) ago, Y min): ..." line', () => {
-    const out = buildSystemContext(makeState(), makeLastReview())
+    const out = ctx(makeState(), makeLastReview())
     expect(out).toContain(
       '- Last session (1 day ago, 5 min): Student talked about Minecraft castles.',
     )
   })
 
   it('non-null lastReview appends "Last session keywords: ..." line', () => {
-    const out = buildSystemContext(makeState(), makeLastReview())
+    const out = ctx(makeState(), makeLastReview())
     expect(out).toContain('- Last session keywords: minecraft, castle, creeper')
   })
 
   it('uses singular "day" when daysAgo === 1', () => {
-    const out = buildSystemContext(makeState(), makeLastReview({ daysAgo: 1 }))
+    const out = ctx(makeState(), makeLastReview({ daysAgo: 1 }))
     expect(out).toContain('(1 day ago,')
     expect(out).not.toContain('(1 days ago,')
   })
 
   it('uses plural "days" when daysAgo === 2', () => {
-    const out = buildSystemContext(makeState(), makeLastReview({ daysAgo: 2 }))
+    const out = ctx(makeState(), makeLastReview({ daysAgo: 2 }))
     expect(out).toContain('(2 days ago,')
   })
 
   it('uses plural "days" when daysAgo === 0', () => {
-    const out = buildSystemContext(makeState(), makeLastReview({ daysAgo: 0 }))
+    const out = ctx(makeState(), makeLastReview({ daysAgo: 0 }))
     expect(out).toContain('(0 days ago,')
   })
 
   it('falls back to "unknown" duration string when durationMin is null', () => {
-    const out = buildSystemContext(makeState(), makeLastReview({ durationMin: null }))
+    const out = ctx(makeState(), makeLastReview({ durationMin: null }))
     expect(out).toContain('(1 day ago, unknown):')
   })
 
   it('keeps all v0.4 fields visible alongside the last review segment', () => {
-    const out = buildSystemContext(makeState(), makeLastReview())
+    const out = ctx(makeState(), makeLastReview())
     expect(out).toContain('Phase: WARM_UP')
     expect(out).toContain('Last transition:')
     expect(out).toContain('Last session (')
   })
 
   it('still appends the keywords line even when keywords array is empty', () => {
-    const out = buildSystemContext(makeState(), makeLastReview({ keywords: [] }))
+    const out = ctx(makeState(), makeLastReview({ keywords: [] }))
     expect(out).toContain('- Last session keywords:')
   })
 })
@@ -122,29 +129,22 @@ describe('buildSystemContext (v0.6 active topics)', () => {
   }
 
   it('activeTopics=[] omits the "Active topics" segment entirely', () => {
-    const out = buildSystemContext(makeState(), null, [], [], [], NOW)
+    const out = ctx(makeState(), null, [], [], [], NOW)
     expect(out).not.toContain('Active topics')
   })
 
   it('activeTopics=undefined (omitted) also omits the segment', () => {
-    const out = buildSystemContext(
-      makeState(),
-      null,
-      undefined as unknown as TopicStat[],
-      [],
-      [],
-      NOW,
-    )
+    const out = ctx(makeState(), null, undefined as unknown as TopicStat[], [], [], NOW)
     expect(out).not.toContain('Active topics')
   })
 
   it('one topic → "1 time, today"', () => {
-    const out = buildSystemContext(makeState(), null, [makeTopicStat()], [], [], NOW)
+    const out = ctx(makeState(), null, [makeTopicStat()], [], [], NOW)
     expect(out).toContain('- Active topics: minecraft (1 time, today)')
   })
 
   it('multiple topics → single line, comma-separated, "N times" pluralization', () => {
-    const out = buildSystemContext(
+    const out = ctx(
       makeState(),
       null,
       [
@@ -168,7 +168,7 @@ describe('buildSystemContext (v0.6 active topics)', () => {
     const six: TopicStat[] = Array.from({ length: 6 }, (_, i) =>
       makeTopicStat({ topic: `t${i}` as string }),
     )
-    const out = buildSystemContext(makeState(), null, six, [], [], NOW)
+    const out = ctx(makeState(), null, six, [], [], NOW)
     expect(out).toContain('t0')
     expect(out).toContain('t4')
     expect(out).not.toContain('t5')
@@ -183,20 +183,13 @@ describe('buildSystemContext (v0.6 active topics)', () => {
       ['2026-06-01T12:00:00.000Z', '8 days ago'],
     ]
     for (const [ts, expected] of cases) {
-      const out = buildSystemContext(
-        makeState(),
-        null,
-        [{ ...base, lastDiscussedAt: ts }],
-        [],
-        [],
-        NOW,
-      )
+      const out = ctx(makeState(), null, [{ ...base, lastDiscussedAt: ts }], [], [], NOW)
       expect(out).toContain(`(1 time, ${expected})`)
     }
   })
 
   it('keeps all v0.4 fields and v0.5 lastReview segment visible alongside active topics', () => {
-    const out = buildSystemContext(makeState(), makeLastReview(), [makeTopicStat()], [], [], NOW)
+    const out = ctx(makeState(), makeLastReview(), [makeTopicStat()], [], [], NOW)
     expect(out).toContain('Phase: WARM_UP')
     expect(out).toContain('Last transition:')
     expect(out).toContain('Last session (')
@@ -204,7 +197,7 @@ describe('buildSystemContext (v0.6 active topics)', () => {
   })
 
   it('segment appears AFTER lastReview (active topics is the outermost view)', () => {
-    const out = buildSystemContext(makeState(), makeLastReview(), [makeTopicStat()], [], [], NOW)
+    const out = ctx(makeState(), makeLastReview(), [makeTopicStat()], [], [], NOW)
     const lastReviewIdx = out.indexOf('Last session (')
     const activeTopicsIdx = out.indexOf('Active topics:')
     expect(lastReviewIdx).toBeGreaterThan(-1)
@@ -228,12 +221,12 @@ describe('buildSystemContext (v0.7.1 recent mistakes)', () => {
   }
 
   it('recentMistakes=[] omits the "Recent mistakes" segment entirely', () => {
-    const out = buildSystemContext(makeState(), null, [], [], [], NOW)
+    const out = ctx(makeState(), null, [], [], [], NOW)
     expect(out).not.toContain('Recent mistakes')
   })
 
   it('one mistake → header "Recent mistakes (N=1):" + 1 line', () => {
-    const out = buildSystemContext(makeState(), null, [], [makeMistake()], [], NOW)
+    const out = ctx(makeState(), null, [], [makeMistake()], [], NOW)
     expect(out).toContain('- Recent mistakes (N=1):')
     expect(out).toContain('  - "I go to school yesterday" → "I went to school yesterday" (grammar)')
   })
@@ -249,7 +242,7 @@ describe('buildSystemContext (v0.7.1 recent mistakes)', () => {
       makeMistake({ id: 2, original: 'delicius', corrected: 'delicious', category: 'spelling' }),
       makeMistake({ id: 3, original: 'I am agree', corrected: 'I agree', category: 'grammar' }),
     ]
-    const out = buildSystemContext(makeState(), null, [], mistakes, [], NOW)
+    const out = ctx(makeState(), null, [], mistakes, [], NOW)
     expect(out).toContain('- Recent mistakes (N=3):')
     expect(out).toContain('"I go to school yesterday" → "I went to school yesterday" (grammar)')
     expect(out).toContain('"delicius" → "delicious" (spelling)')
@@ -260,7 +253,7 @@ describe('buildSystemContext (v0.7.1 recent mistakes)', () => {
     const mistakes = Array.from({ length: 5 }, (_, i) =>
       makeMistake({ id: i + 1, original: `m${i}`, corrected: `M${i}` }),
     )
-    const out = buildSystemContext(makeState(), null, [], mistakes, [], NOW)
+    const out = ctx(makeState(), null, [], mistakes, [], NOW)
     expect(out).toContain('- Recent mistakes (N=5):')
     for (let i = 0; i < 5; i++) {
       expect(out).toContain(`"m${i}" → "M${i}"`)
@@ -271,7 +264,7 @@ describe('buildSystemContext (v0.7.1 recent mistakes)', () => {
     const mistakes = Array.from({ length: 8 }, (_, i) =>
       makeMistake({ id: i + 1, original: `orig${i}`, corrected: `CORR${i}` }),
     )
-    const out = buildSystemContext(makeState(), null, [], mistakes, [], NOW)
+    const out = ctx(makeState(), null, [], mistakes, [], NOW)
     expect(out).toContain('- Recent mistakes (N=5):')
     for (let i = 0; i < 5; i++) {
       expect(out).toContain(`"orig${i}" → "CORR${i}"`)
@@ -282,7 +275,7 @@ describe('buildSystemContext (v0.7.1 recent mistakes)', () => {
   })
 
   it('special characters in original (quotes, backslashes) do not break the format', () => {
-    const out = buildSystemContext(
+    const out = ctx(
       makeState(),
       null,
       [],
@@ -305,7 +298,7 @@ describe('buildSystemContext (v0.7.1 recent mistakes)', () => {
       firstDiscussedAt: '2026-06-09T10:00:00.000Z',
       lastDiscussedAt: '2026-06-09T10:00:00.000Z',
     }
-    const out = buildSystemContext(makeState(), makeLastReview(), [topic], [makeMistake()], [], NOW)
+    const out = ctx(makeState(), makeLastReview(), [topic], [makeMistake()], [], NOW)
     const phaseIdx = out.indexOf('Phase:')
     const lastReviewIdx = out.indexOf('Last session (')
     const activeTopicsIdx = out.indexOf('Active topics:')
@@ -333,12 +326,12 @@ describe('buildSystemContext (v0.7.2 relevant past sessions)', () => {
   }
 
   it('relevantPast=[] omits the "Relevant past sessions" segment entirely', () => {
-    const out = buildSystemContext(makeState(), null, [], [], [], NOW)
+    const out = ctx(makeState(), null, [], [], [], NOW)
     expect(out).not.toContain('Relevant past sessions')
   })
 
   it('one relevant → header "Relevant past sessions (N=1):" + 1 line with daysAgo + summary + keywords', () => {
-    const out = buildSystemContext(makeState(), null, [], [], [makeRelevant()], NOW)
+    const out = ctx(makeState(), null, [], [], [makeRelevant()], NOW)
     expect(out).toContain('- Relevant past sessions (N=1):')
     expect(out).toContain(
       '  - 2 days ago: "Student talked about Minecraft castles and creepers." (keywords: minecraft, castle, creeper)',
@@ -362,7 +355,7 @@ describe('buildSystemContext (v0.7.2 relevant past sessions)', () => {
         similarity: 0.7,
       }),
     ]
-    const out = buildSystemContext(makeState(), null, [], [], items, NOW)
+    const out = ctx(makeState(), null, [], [], items, NOW)
     expect(out).toContain('- Relevant past sessions (N=2):')
     const aIdx = out.indexOf('"first one"')
     const bIdx = out.indexOf('"second one"')
@@ -378,7 +371,7 @@ describe('buildSystemContext (v0.7.2 relevant past sessions)', () => {
       makeRelevant({ sessionId: 'b', summary: 'BBB' }),
       makeRelevant({ sessionId: 'c', summary: 'CCC' }),
     ]
-    const out = buildSystemContext(makeState(), null, [], [], items, NOW)
+    const out = ctx(makeState(), null, [], [], items, NOW)
     expect(out).toContain('- Relevant past sessions (N=2):')
     expect(out).toContain('"AAA"')
     expect(out).toContain('"BBB"')
@@ -387,14 +380,7 @@ describe('buildSystemContext (v0.7.2 relevant past sessions)', () => {
 
   it('long summary (> 80 chars) is truncated to 80 chars + "..."', () => {
     const longSummary = 'a'.repeat(200)
-    const out = buildSystemContext(
-      makeState(),
-      null,
-      [],
-      [],
-      [makeRelevant({ summary: longSummary })],
-      NOW,
-    )
+    const out = ctx(makeState(), null, [], [], [makeRelevant({ summary: longSummary })], NOW)
     // truncated body = 80 'a's then "..." then `"` (closing quote of "...")
     const expectedSlice = `"${'a'.repeat(80)}..."`
     expect(out).toContain(expectedSlice)
@@ -426,14 +412,7 @@ describe('buildSystemContext (v0.7.2 relevant past sessions)', () => {
       category: 'grammar',
       ts: '2026-06-09T11:00:00.000Z',
     }
-    const out = buildSystemContext(
-      makeState(),
-      lastReview,
-      [topic],
-      [mistake],
-      [makeRelevant()],
-      NOW,
-    )
+    const out = ctx(makeState(), lastReview, [topic], [mistake], [makeRelevant()], NOW)
     const phaseIdx = out.indexOf('Phase:')
     const lastSessionIdx = out.indexOf('Last session (')
     const relevantPastIdx = out.indexOf('Relevant past sessions')
@@ -445,5 +424,126 @@ describe('buildSystemContext (v0.7.2 relevant past sessions)', () => {
     expect(relevantPastIdx).toBeGreaterThan(lastSessionIdx)
     expect(activeTopicsIdx).toBeGreaterThan(relevantPastIdx)
     expect(mistakesIdx).toBeGreaterThan(activeTopicsIdx)
+  })
+})
+
+describe('buildSystemContext (v0.7.6 B3 — per-segment token counts)', () => {
+  const NOW = new Date('2026-06-10T12:00:00.000Z')
+
+  it('phase-only result: phase > 0; all other segments = 0', () => {
+    const r = buildSystemContext(
+      {
+        phase: 'WARM_UP',
+        startedAt: 0,
+        lastUserMsgAt: 0,
+        elapsedMin: 2.3,
+        silenceMin: 0.5,
+        lastTransitionAt: 0,
+      },
+      null,
+      [],
+      [],
+      [],
+      NOW,
+    )
+    expect(r.segments.phase).toBeGreaterThan(0)
+    expect(r.segments.last).toBe(0)
+    expect(r.segments.relevant).toBe(0)
+    expect(r.segments.active).toBe(0)
+    expect(r.segments.mistakes).toBe(0)
+  })
+
+  it('all 5 segments populated → all counts > 0 and roughly correlate with their text length', () => {
+    const r = buildSystemContext(
+      {
+        phase: 'TOPIC',
+        startedAt: 0,
+        lastUserMsgAt: 0,
+        elapsedMin: 5.0,
+        silenceMin: 0.1,
+        lastTransitionAt: 0,
+      },
+      {
+        sessionId: 's-y',
+        startedAt: '2026-06-09T10:00:00.000Z',
+        endedAt: '2026-06-09T10:05:00.000Z',
+        durationMin: 5,
+        summary: 'yesterday summary',
+        keywords: ['y1'],
+        daysAgo: 1,
+      },
+      [
+        {
+          topic: 'minecraft',
+          discussionCount: 2,
+          firstDiscussedAt: '2026-06-05T10:00:00.000Z',
+          lastDiscussedAt: '2026-06-09T10:00:00.000Z',
+        },
+      ],
+      [
+        {
+          id: 1,
+          sessionId: 's1',
+          original: 'orig',
+          corrected: 'CORR',
+          category: 'grammar',
+          ts: '2026-06-09T11:00:00.000Z',
+        },
+      ],
+      [
+        {
+          sessionId: 's-past-1',
+          startedAt: '2026-06-08T10:00:00.000Z',
+          summary: 'past summary about castles',
+          keywords: ['castle'],
+          similarity: 0.8,
+          daysAgo: 2,
+        },
+      ],
+      NOW,
+    )
+    expect(r.segments.phase).toBeGreaterThan(0)
+    expect(r.segments.last).toBeGreaterThan(0)
+    expect(r.segments.relevant).toBeGreaterThan(0)
+    expect(r.segments.active).toBeGreaterThan(0)
+    expect(r.segments.mistakes).toBeGreaterThan(0)
+    // phase block is the smallest (5 short lines); mistakes/last/relevant
+    // are bigger because each contains a quoted user fragment.
+    expect(r.segments.last).toBeGreaterThan(r.segments.phase / 2)
+  })
+
+  it('text and segments stay in sync: enabling a segment makes its count grow and others stay equal', () => {
+    const state: SessionState = {
+      phase: 'WARM_UP',
+      startedAt: 0,
+      lastUserMsgAt: 0,
+      elapsedMin: 1.0,
+      silenceMin: 0.0,
+      lastTransitionAt: 0,
+    }
+    const without = buildSystemContext(state, null, [], [], [], NOW)
+    const withMistake = buildSystemContext(
+      state,
+      null,
+      [],
+      [
+        {
+          id: 1,
+          sessionId: 's1',
+          original: 'orig',
+          corrected: 'CORR',
+          category: 'grammar',
+          ts: '2026-06-09T11:00:00.000Z',
+        },
+      ],
+      [],
+      NOW,
+    )
+    expect(without.segments.mistakes).toBe(0)
+    expect(withMistake.segments.mistakes).toBeGreaterThan(0)
+    // Phase segment is identical between the two.
+    expect(withMistake.segments.phase).toBe(without.segments.phase)
+    // The text grew (the mistakes block is rendered into `.text`).
+    expect(withMistake.text.length).toBeGreaterThan(without.text.length)
   })
 })

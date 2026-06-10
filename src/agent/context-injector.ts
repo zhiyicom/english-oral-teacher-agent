@@ -3,6 +3,30 @@ import type { Mistake } from '../storage/mistakes.js'
 import type { TopicStat } from '../storage/topics.js'
 import type { LastReview } from './retrieval.js'
 import type { SessionState } from './state-machine.js'
+import { estimateTokens } from './truncate-history.js'
+
+/**
+ * Result of building the [System Context] block. v0.7.6 B3 splits the
+ * result into:
+ *   - `text`  — the rendered multi-line block (same content as v0.7.5 returned)
+ *   - `segments` — per-segment estimated token counts (each field = the
+ *     chars/4 estimate of that segment's text, 0 if the segment was absent).
+ *
+ * The CLI logs `segments` to stderr so the operator can see which segment
+ * is the biggest contributor to context cost. v0.7.5 had no per-segment
+ * view — the whole [System Context] block was opaque. See v0.7.6-design.md
+ * §3.4.
+ */
+export interface SystemContextResult {
+  text: string
+  segments: {
+    phase: number
+    last: number
+    relevant: number
+    active: number
+    mistakes: number
+  }
+}
 
 /**
  * Build the `[System Context]` block that gets appended to the LLM system prompt.
@@ -29,6 +53,12 @@ import type { SessionState } from './state-machine.js'
  * keep older callers compiling; the render order is intentional, see §6.3 of
  * v0.7.2 design.
  *
+ * v0.7.6 B3 — returns `SystemContextResult` (text + per-segment token counts)
+ * instead of just a string. Existing callers that did `.text` keep working
+ * after the v0.7.5 callers are updated to use `buildFinalSystemSplit`/
+ * `buildFinalSystemSegments`. Old call sites that need the plain string
+ * can read `result.text`.
+ *
  * `now` defaults to `Date.now()`; pass an explicit Date for deterministic tests.
  */
 export function buildSystemContext(
@@ -38,33 +68,43 @@ export function buildSystemContext(
   recentMistakes: Mistake[] = [],
   relevantPast: RelevantSession[] = [],
   now: Date = new Date(),
-): string {
+): SystemContextResult {
   const lastTransitionAgo = Math.max(0, state.elapsedMin - state.lastTransitionAt)
-  const lines = [
+  const phaseSeg = [
     '[System Context]',
     `- Phase: ${state.phase}`,
     `- Elapsed: ${state.elapsedMin.toFixed(1)} min`,
     `- Silence: ${state.silenceMin.toFixed(1)} min`,
     `- Last transition: ${lastTransitionAgo.toFixed(1)} min ago (entered ${state.phase})`,
-  ]
+  ].join('\n')
+  const lines: string[] = [phaseSeg]
+
+  let lastSeg = ''
   if (lastReview) {
     const dayWord = lastReview.daysAgo === 1 ? 'day' : 'days'
     const durStr = lastReview.durationMin != null ? `${lastReview.durationMin} min` : 'unknown'
-    lines.push(
+    lastSeg = [
       `- Last session (${lastReview.daysAgo} ${dayWord} ago, ${durStr}): ${lastReview.summary}`,
-    )
-    lines.push(`- Last session keywords: ${lastReview.keywords.join(', ')}`)
+      `- Last session keywords: ${lastReview.keywords.join(', ')}`,
+    ].join('\n')
+    lines.push(lastSeg)
   }
+
+  let relevantSeg = ''
   if (relevantPast.length > 0) {
     const top = relevantPast.slice(0, 2)
-    lines.push(`- Relevant past sessions (N=${top.length}):`)
+    const segLines: string[] = [`- Relevant past sessions (N=${top.length}):`]
     for (const r of top) {
       const truncated = r.summary.length > 80 ? `${r.summary.slice(0, 80)}...` : r.summary
       const kwStr = r.keywords.join(', ')
       const dayWord = r.daysAgo === 1 ? 'day' : 'days'
-      lines.push(`  - ${r.daysAgo} ${dayWord} ago: "${truncated}" (keywords: ${kwStr})`)
+      segLines.push(`  - ${r.daysAgo} ${dayWord} ago: "${truncated}" (keywords: ${kwStr})`)
     }
+    relevantSeg = segLines.join('\n')
+    lines.push(relevantSeg)
   }
+
+  let activeSeg = ''
   if (activeTopics.length > 0) {
     const top = activeTopics.slice(0, 5)
     const parts = top.map((t) => {
@@ -72,16 +112,31 @@ export function buildSystemContext(
       const timeWord = t.discussionCount === 1 ? 'time' : 'times'
       return `${t.topic} (${t.discussionCount} ${timeWord}, ${formatDaysAgo(daysAgo)})`
     })
-    lines.push(`- Active topics: ${parts.join(', ')}`)
+    activeSeg = `- Active topics: ${parts.join(', ')}`
+    lines.push(activeSeg)
   }
+
+  let mistakesSeg = ''
   if (recentMistakes.length > 0) {
     const top = recentMistakes.slice(0, 5)
-    lines.push(`- Recent mistakes (N=${top.length}):`)
+    const segLines: string[] = [`- Recent mistakes (N=${top.length}):`]
     for (const m of top) {
-      lines.push(`  - "${m.original}" → "${m.corrected}" (${m.category})`)
+      segLines.push(`  - "${m.original}" → "${m.corrected}" (${m.category})`)
     }
+    mistakesSeg = segLines.join('\n')
+    lines.push(mistakesSeg)
   }
-  return lines.join('\n')
+
+  return {
+    text: lines.join('\n'),
+    segments: {
+      phase: estimateTokens(phaseSeg),
+      last: lastSeg ? estimateTokens(lastSeg) : 0,
+      relevant: relevantSeg ? estimateTokens(relevantSeg) : 0,
+      active: activeSeg ? estimateTokens(activeSeg) : 0,
+      mistakes: mistakesSeg ? estimateTokens(mistakesSeg) : 0,
+    },
+  }
 }
 
 function computeDaysAgo(isoTs: string | null, now: Date): number {

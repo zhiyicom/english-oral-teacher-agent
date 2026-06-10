@@ -2,7 +2,7 @@ import type { RelevantSession } from '../memory/retrieve-relevant.js'
 import { type SystemPrompt, buildSystemString } from '../prompts/loader.js'
 import type { Mistake } from '../storage/mistakes.js'
 import type { TopicStat } from '../storage/topics.js'
-import { buildSystemContext } from './context-injector.js'
+import { type SystemContextResult, buildSystemContext } from './context-injector.js'
 import type { LastReview } from './retrieval.js'
 import type { SessionState } from './state-machine.js'
 
@@ -30,6 +30,10 @@ import type { SessionState } from './state-machine.js'
  * v0.7.5 — kept as a thin wrapper for backwards compat. New callers should
  * use `buildFinalSystemSplit` to get the static/dynamic split needed for
  * Anthropic prompt caching.
+ *
+ * v0.7.6 B3 — `buildSystemContext` now returns `SystemContextResult` (text
+ * + per-segment token counts). We read `.text` to keep the legacy
+ * `buildFinalSystem` callers compiling.
  */
 export function buildFinalSystem(
   systemPrompt: SystemPrompt,
@@ -42,7 +46,7 @@ export function buildFinalSystem(
   return [
     buildSystemString(systemPrompt),
     '',
-    buildSystemContext(state, lastReview, activeTopics, recentMistakes, relevantPast),
+    buildSystemContext(state, lastReview, activeTopics, recentMistakes, relevantPast).text,
   ].join('\n')
 }
 
@@ -62,6 +66,10 @@ export function buildFinalSystem(
  * Returned as `{ static, dynamic }` so the caller can pass them to the
  * Anthropic client as separate `system` text blocks (the SDK concatenates
  * them in the order given). Old `buildFinalSystem` callers are unaffected.
+ *
+ * v0.7.6 B3 — `buildSystemContext` now returns `SystemContextResult`. We
+ * read `.text` for the dynamic field. Callers that want per-segment
+ * token counts should use `buildFinalSystemSegments` instead.
  */
 export function buildFinalSystemSplit(
   systemPrompt: SystemPrompt,
@@ -73,6 +81,29 @@ export function buildFinalSystemSplit(
 ): { static: string; dynamic: string } {
   return {
     static: buildSystemString(systemPrompt),
-    dynamic: buildSystemContext(state, lastReview, activeTopics, recentMistakes, relevantPast),
+    dynamic: buildSystemContext(state, lastReview, activeTopics, recentMistakes, relevantPast).text,
+  }
+}
+
+/**
+ * v0.7.6 B3 — like `buildFinalSystemSplit` but also exposes the per-segment
+ * token counts from the [System Context] block. The CLI uses this to log
+ * `[cli] ctx-segment: phase=X last=Y relevant=Z active=A mistakes=M`
+ * so the operator can see which segment is the biggest contributor to
+ * context cost. See v0.7.6-design.md §3.4.
+ */
+export function buildFinalSystemSegments(
+  systemPrompt: SystemPrompt,
+  state: SessionState,
+  lastReview: LastReview | null = null,
+  activeTopics: TopicStat[] = [],
+  recentMistakes: Mistake[] = [],
+  relevantPast: RelevantSession[] = [],
+): { static: string; dynamic: string; segments: SystemContextResult['segments'] } {
+  const ctx = buildSystemContext(state, lastReview, activeTopics, recentMistakes, relevantPast)
+  return {
+    static: buildSystemString(systemPrompt),
+    dynamic: ctx.text,
+    segments: ctx.segments,
   }
 }
