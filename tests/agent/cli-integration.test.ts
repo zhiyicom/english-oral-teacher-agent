@@ -578,6 +578,58 @@ describe('CLI v0.4 state-machine integration', () => {
 
   // -------- v0.7.3 — memory_search tool (A+B hybrid protocol) --------
 
+  // -------- v0.7.5 — context budget enforcement (truncation + usage log + warn) --------
+
+  it('v0.7.5 sliding-window truncate fires when budget is below input size', async () => {
+    // LLM_CONTEXT_BUDGET_TOKENS=1 is far below the system+history estimate
+    // (SOUL+AGENTS+USER alone is ~1000+ tokens). On turn 2, history has
+    // 3 messages (hi, r1, fine), so the truncate loop enters, drops the
+    // oldest pair, and logs. Same for turn 3.
+    const inputs = ['hi', 'fine', 'castle']
+    const result = await runCli(`${inputs.join('\n')}\n`, {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+      LLM_CONTEXT_BUDGET_TOKENS: '1',
+    })
+    expect(result.exitCode).toBe(0)
+    // Truncation log appears at least once (turn 2 and turn 3 both fire).
+    // Use a regex that tolerates the variable estimated-token count.
+    const truncLines =
+      result.stderr.match(
+        /\[cli\] truncated: dropped \d+ pairs, history now \d+ messages \(est \d+ tokens\)/g,
+      ) ?? []
+    expect(truncLines.length).toBeGreaterThanOrEqual(1)
+    // No truncation on turn 1 (history is only 1 message; loop guard
+    // `current.length > 2` prevents entering the truncate body).
+    // (This is implicit: the first ctx line in stderr is for turn 1 and
+    // would be followed by a truncation line for turn 2, if any. We don't
+    // assert on absence of turn-1 truncation because the loop's invariant
+    // is structural — it can't truncate a length-1 array.)
+  }, 25000)
+
+  it('v0.7.5 usage log + 80% warn: Replay fixture yields a usage chunk, CLI logs tokens + warn once', async () => {
+    // budget-warn.json fixture yields a usage chunk with inputTokens=95
+    // and a text chunk. With LLM_CONTEXT_BUDGET_TOKENS=100, 95/100=95% ≥ 80%
+    // so the warn fires (and is gated to once-per-session).
+    const result = await runCli('budget please\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+      LLM_CONTEXT_BUDGET_TOKENS: '100',
+    })
+    expect(result.exitCode).toBe(0)
+    // (a) Token usage log line — proves the Replay provider forwards the
+    //     usage chunk and the CLI captures it from chatStream().
+    expect(result.stderr).toMatch(
+      /\[cli\] tokens: input=95 output=12 cache_read=0 cache_creation=0/,
+    )
+    // (b) 80% warn fires (95% rounded → "95%") and is logged once.
+    expect(result.stderr).toMatch(/\[cli\] warn: context usage 95% \(budget=100\)/)
+    const warnCount = result.stderr.match(/\[cli\] warn: context usage/g) ?? []
+    expect(warnCount.length).toBe(1)
+    // (c) The teacher's natural text reply (the text chunk) still reaches stdout.
+    expect(result.stdout).toMatch(/let's keep going/i)
+  }, 20000)
+
   it('v0.7.3 memory_search: triggers 2nd LLM call + stdout shows 2nd-call fixture + no <tool> leak', async () => {
     // Pre-seed session A so memory_search has 1 candidate to retrieve.
     // A's fixture (greeting) is the simplest "happy path" — the session

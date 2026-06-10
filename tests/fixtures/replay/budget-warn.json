@@ -1,0 +1,15 @@
+{
+  "name": "budget-warn",
+  "match": { "userSaysContains": "budget please" },
+  "chunks": [
+    {
+      "type": "usage",
+      "inputTokens": 95,
+      "outputTokens": 12,
+      "cacheReadTokens": 0,
+      "cacheCreationTokens": 0
+    },
+    { "type": "text", "delta": "Sure, let's keep going!" }
+  ],
+  "result": { "content": "Sure, let's keep going!" }
+}

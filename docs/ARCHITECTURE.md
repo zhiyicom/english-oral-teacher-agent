@@ -151,6 +151,10 @@ interface PromptBuilder {
 }
 ```
 
+**v0.7.5 拆分**：Prompt Builder 暴露两个函数：
+- `buildFinalSystem(...)` —— legacy，返回拼接好的 string（既有 5 L1 + L3 测试不破）
+- `buildFinalSystemSplit(...)` —— 新增，返回 `{ static, dynamic }` 两段。CLI 把两段作为独立 `systemBlocks` 传给 Anthropic SDK；第一段（SOUL + AGENTS + USER）带 `cache_control: ephemeral`，后续 turn 命中 prompt cache
+
 **实现**：见 PRD §5.4 注入顺序
 
 ### 2.4 Context Injector
@@ -300,17 +304,25 @@ interface Summarizer {
 
 ```ts
 interface LLMClient {
-  chat(opts: ChatOpts): AsyncIterable<Token>          // 流式
-  complete(opts: CompleteOpts): Promise<Completion>   // 一次性
+  chat(opts: ChatOpts): Promise<ChatResult>           // 一次性
+  chatStream(opts: ChatOpts): AsyncIterable<ChatChunk>// 流式
 }
 
 interface ChatOpts {
-  system: Message[]
+  /** Legacy: 单一 string 形式 system prompt（无 cache_control） */
+  system?: string
+  /** v0.7.5+：分块形式；首块可带 cache_control: ephemeral */
+  systemBlocks?: SystemBlock[]
   messages: Message[]
-  tools?: ToolDef[]
   temperature?: number
-  max_tokens?: number
+  maxTokens?: number
 }
+
+type ChatChunk =
+  | { type: 'text'; delta: string }
+  | { type: 'thinking'; delta: string }
+  /** v0.7.5: 流开头 yield 一次（对应 Anthropic message_start.usage） */
+  | { type: 'usage'; inputTokens; outputTokens; cacheReadTokens; cacheCreationTokens }
 ```
 
 **v1.0 provider**：
@@ -318,12 +330,18 @@ interface ChatOpts {
 - `AnthropicProvider`（首选，claude-sonnet-4-6）
 - `OpenAIProvider`（备选）
 
+**v0.7.5 增强**：
+- Anthropic SDK 0.41 支持 `cache_control: ephemeral` 标记 system 文本块（v0.7.5 用上）
+- Provider 在 `message_start` 事件里捕获 `usage.{input,output,cache_read,cache_creation}_tokens`，作为 1 个 `usage` chunk 在流开头 yield 一次
+- CLI 用这个 usage 做 post-call token log + 80% budget warn
+
 **抽象层职责**：
 
 - 消息格式转换（Anthropic content blocks vs OpenAI messages）
 - 工具调用格式转换
 - 流式协议差异
 - 错误码统一
+- prompt cache 协议差异（Anthropic cache_control vs OpenAI prompt caching）
 
 ### 3.2 Voice I/O（`src/voice/`）
 
@@ -501,15 +519,32 @@ StateMachine.tick(user_message)
    │  - 可能触发 transition
    │
    ▼
-ContextInjector.run(messages)
-   │  - injectSystemContext
-   │  - injectLastReview
-   │  - injectHomework
-   │  - injectMistakes
+v0.7.5: buildFinalSystemSplit() → { static, dynamic }
+   │  - static:  SOUL + AGENTS + USER（session 内不变，cacheable）
+   │  - dynamic: [System Context] 块（每 turn 变）
    │
    ▼
-LLMClient.chat(streaming)   ← 1st call
-   │  - 流式返回 tokens
+v0.7.5: truncateHistory(history, env.LLM_CONTEXT_BUDGET_TOKENS, systemSize)
+   │  - estimator: chars/4（保守，零依赖）
+   │  - drop oldest user/assistant pairs until under budget
+   │  - 永远保留最近 1 对（loop invariant）
+   │  - if dropped > 0: stderr "[cli] truncated: dropped N pairs, ..."
+   │
+   ▼
+systemBlocks = [
+  { type: 'text', text: static, cache_control: { type: 'ephemeral' } },
+  { type: 'text', text: dynamic }
+]
+   │
+   ▼
+LLMClient.chatStream({ systemBlocks, messages: history })   ← 1st call
+   │  - 流开头 yield 1 次 usage chunk（Anthropic message_start.usage）
+   │  - 后续 yield text/thinking chunks
+   │
+   ├─→ capture usage: inputTokens / outputTokens / cache_read / cache_creation
+   ├─→ v0.7.5: stderr "[cli] tokens: input=X output=Y cache_read=Z cache_creation=W"
+   ├─→ v0.7.5: if inputTokens / budget >= 0.8 (per session, 1 次):
+   │     stderr "[cli] warn: context usage X% (budget=Y)"
    │
    ├─→ UI: 边显示边 TTS（按句切分增量合成）
    │
@@ -524,7 +559,7 @@ LLMClient.chat(streaming)   ← 1st call
    │     ├─→ ToolRegistry.execute(toolCall)  // embed + DB read
    │     ├─→ push assistant 1st-call (含 tool 块) 到 history
    │     ├─→ push synthetic user message 含 [v073_followup_responder] marker
-   │     ├─→ LLMClient.chat()  ← 2nd call（非流式, 同 summarize()）
+   │     ├─→ LLMClient.chat({ systemBlocks, ... })  ← 2nd call（非流式）
    │     ├─→ safety strip 2nd-call response（防 LLM 误输出 tool 块）
    │     └─→ stdout 2nd-call 剥过的 response
    │
@@ -539,6 +574,8 @@ LLMClient.chat(streaming)   ← 1st call
 - `memory_search` 走 A+B = **1 round-trip**（2nd-call 不递归调 tool）
 - 1 round-trip 总 token 成本 ~400（result 200 + 2nd-call 200）
 - 2nd-call LLM 误调 tool → safety strip 兜底（prompt 显式禁止 + cli 兜底）
+- v0.7.5 budget: pre-truncate 用 estimator（chars/4），post-call 用 SDK usage 校验；80% warn 一次/每 session
+- v0.7.5 cache: `static` 段带 `cache_control: ephemeral`，跨 turn 复用（hit 时 cache_read 上升）
 
 ### 5.3 END + 归档
 
@@ -740,6 +777,7 @@ ui/  →  agent/  →  { llm/, voice/, storage/, memory/ }
 | `HF_ENDPOINT` | — | HuggingFace 镜像 URL（可选，中国网络 `https://hf-mirror.com`） |
 | `LLM_TEMPERATURE` | `0.7` | 采样温度 |
 | `LLM_MAX_TOKENS` | `2048` | 单轮输出上限 |
+| `LLM_CONTEXT_BUDGET_TOKENS` | `6000` | v0.7.5：单轮 input token cap；超此值 sliding window truncate；80% 时 warn（per session 1 次） |
 | `APP_PORT` | `3000` | 本地服务端口 |
 | `APP_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `APP_DATA_DIR` | `./data` | 数据目录 |
@@ -784,3 +822,4 @@ ui/  →  agent/  →  { llm/, voice/, storage/, memory/ }
 | 2026-06-02 | 0.1 | 初稿：系统概览、Agent 核心 6 模块、支持模块、UI 层、3 个数据流、模块结构、10 项设计决策、依赖、待决问题 |
 | 2026-06-02 | 0.2 | 新增 §10 Configuration & Data Boundaries；`.env` 扩展为 provider 切换 + per-task 模型（main / summarizer / embedding）+ 生成参数；明确"UI 不可见"原则 |
 | 2026-06-10 | 0.3 | §3.4 Memory：LanceDB 换成 SQLite `sessions.embedding BLOB`（v0.7.2 决策）；模块结构改成 embedder + vector-store + retrieve-relevant；模型选型定到本地 MiniLM-L6-v2 int8（384 维）；D2/D5/D10 更新；§8 依赖 `lancedb` → `@huggingface/transformers` + `onnxruntime-node`；§10 `data/vectors/` 路径移除；env 增加 `HF_ENDPOINT` |
+| 2026-06-10 | 0.4 | §2.3 Prompt Builder：新增 `buildFinalSystemSplit` → `{ static, dynamic }`；§3.1 LLM Client：`SystemBlock` / `UsageChunk` / `ChatChunk` v0.7.5 字段；§5.2 主对话循环：加 `truncateHistory` + `systemBlocks` + `cache_control` + usage log + 80% warn 步骤；§10.2 env 新增 `LLM_CONTEXT_BUDGET_TOKENS`（默认 6000） |

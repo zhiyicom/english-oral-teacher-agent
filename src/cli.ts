@@ -9,10 +9,12 @@ import {
   type PhaseTransition,
   type SessionState,
   applyEvent,
-  buildFinalSystem,
+  buildFinalSystemSplit,
   createMarkMistakeTool,
   createMemorySearchTool,
   createToolRegistry,
+  estimateMessagesTokens,
+  estimateTokens,
   initState,
   loadLastReview,
   matchTopic,
@@ -21,11 +23,12 @@ import {
   realClock,
   stripToolCall,
   summarize,
+  truncateHistory,
 } from './agent/index.js'
 import { loadEnv } from './config/env.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
 import { createReplayProvider } from './llm/testing.js'
-import type { LLMClient, Message } from './llm/types.js'
+import type { LLMClient, Message, SystemBlock, UsageChunk } from './llm/types.js'
 import {
   type RelevantSession,
   createTransformersEmbedder,
@@ -173,6 +176,10 @@ export async function main(): Promise<void> {
   let state: SessionState = initState(clock.now())
   phaseHistory.push({ phase: state.phase, at: 0, reason: 'time' })
   let exitReason: 'user_exit' | 'user_stop' | 'phase_end' = 'user_exit'
+  // v0.7.5 — 80%-budget warn fires once per session, not every turn (see
+  // v0.7.5-scope.md §6 risk #5). Reset implicitly per process start, so a
+  // fresh CLI invocation gets a fresh warn window.
+  let warned = false
 
   // v0.5 — load the most recent session's summary for [System Context] injection.
   // Injected only on the FIRST turn of this session (first-turn-only per v0.5 design §2.5).
@@ -306,60 +313,106 @@ export async function main(): Promise<void> {
       history.push({ role: 'user', content: input })
       messages.append({ sessionId: session.id, role: 'user', content: input })
 
-      const system = buildFinalSystem(
-        systemPrompt,
-        state,
-        isFirstTurn ? lastReview : null,
-        activeTopics,
-        recentMistakes,
-        isFirstTurn ? relevantPast : [],
-      )
-      // After the first buildFinalSystem call, freeze the last-review injection —
-      // subsequent turns build the system string from a fresh state but without
-      // the review (which would otherwise drift / look stale 25 min in).
+      // After the first system build, freeze the last-review / relevantPast
+      // injection — subsequent turns build the system string from a fresh
+      // state but without the review (which would otherwise drift / look
+      // stale 25 min in).
       const wasFirstTurn = isFirstTurn
       isFirstTurn = false
+
+      // v0.7.5 — build the system prompt as two segments so Anthropic can
+      // cache the static portion (SOUL + AGENTS + USER) across turns. We
+      // build it ONCE per turn and reuse the same `systemBlocks` for the
+      // 2nd call in the A+B memory_search path (no state change between
+      // 1st and 2nd call within one turn).
+      const sysSeg = buildFinalSystemSplit(
+        systemPrompt,
+        state,
+        wasFirstTurn ? lastReview : null,
+        activeTopics,
+        recentMistakes,
+        wasFirstTurn ? relevantPast : [],
+      )
+      const systemSize = estimateTokens(sysSeg.static) + estimateTokens(sysSeg.dynamic)
+
+      // v0.7.5 — sliding-window truncate history by estimated total input
+      // (system + messages). The estimator (chars/4) is conservative for
+      // English + Chinese mixed; post-call SDK usage validates the real
+      // number. Drops oldest user/assistant pairs; always keeps the most
+      // recent pair (the loop's invariant — see truncate-history.ts).
+      const { messages: truncMsgs, dropped } = truncateHistory(
+        history,
+        env.LLM_CONTEXT_BUDGET_TOKENS,
+        systemSize,
+      )
+      if (dropped > 0) {
+        const estAfter = estimateMessagesTokens(truncMsgs) + systemSize
+        process.stderr.write(
+          `[cli] truncated: dropped ${dropped} pairs, history now ${truncMsgs.length} messages (est ${estAfter} tokens)\n`,
+        )
+        history.length = 0
+        history.push(...truncMsgs)
+      }
+
+      const systemBlocks: SystemBlock[] = [
+        { type: 'text', text: sysSeg.static, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: sysSeg.dynamic },
+      ]
+
       // Surface the [System Context] block on stderr so L3 tests can verify
       // what phase the LLM sees (and so users can debug phase behavior live).
       process.stderr.write(
         `[cli] ctx: ${state.phase} elapsed=${state.elapsedMin.toFixed(1)} silence=${state.silenceMin.toFixed(1)}\n`,
       )
-      // v0.7.2 — also dump the full rendered [System Context] block on the
-      // FIRST turn so live demos and grep-based verification can see the
-      // "Relevant past sessions" segment without parsing stdout (the LLM
-      // response is replay-fixture text, not a copy of the system prompt).
-      // First-turn-only because the lastReview/relevantPast injection is
-      // first-turn-only too — the block would be identical on later turns
-      // and would just spam stderr. One extra block per session, not per turn.
+      // v0.7.2 — dump the full rendered [System Context] block on the FIRST
+      // turn (the [cli] ctx line above covers the per-turn summary; this
+      // dump shows the actual segment content). First-turn-only because the
+      // lastReview/relevantPast injection is first-turn-only too — would be
+      // identical on later turns and would just spam stderr.
       if (wasFirstTurn) {
-        // Extract just the [System Context] block from the full system prompt
-        // (the LLM-bound system string is base + persona + block). Easier to
-        // build it again with the same args than to parse the assembled string.
-        const ctxBlock =
-          buildFinalSystem(
-            systemPrompt,
-            state,
-            lastReview,
-            activeTopics,
-            recentMistakes,
-            relevantPast,
-          ).split('[System Context]')[1] ?? ''
-        process.stderr.write(`[cli] ctx-block:\n[System Context]${ctxBlock}\n`)
+        process.stderr.write(`[cli] ctx-block:\n[System Context]${sysSeg.dynamic}\n`)
       }
       reader.writePrompt('[Teacher]: ')
       // v0.7 — buffer the full response BEFORE writing to stdout. We need to
       // strip any <tool>...</tool> block before the student sees it (the
-      // tool block is an internal CLI signal, not student-facing text). The
-      // performance impact is negligible (50-200 tokens per turn) and the
-      // existing L3 tests only assert on the final stdout string, so this
-      // is not a breaking change for tests.
+      // tool block is an internal CLI signal, not student-facing text).
+      // v0.7.5 — also capture the usage chunk (yielded once at start of
+      // stream, mirroring Anthropic's message_start.usage event) for the
+      // post-call token log + 80% warn. The Replay provider doesn't emit
+      // usage chunks, so this is silent under L3 tests.
       let response = ''
+      let usage: UsageChunk | null = null
       for await (const chunk of client.chatStream({
-        system,
+        systemBlocks,
         messages: history,
       })) {
         if (chunk.type === 'text') {
           response += chunk.delta
+        } else if (chunk.type === 'usage') {
+          usage = chunk
+        }
+      }
+
+      // v0.7.5 — log actual token usage after each LLM call. Silent under
+      // Replay fixtures (no usage chunk emitted). With RUN_LIVE_LLM=1 the
+      // Anthropic provider yields the real message_start.usage event.
+      if (usage) {
+        process.stderr.write(
+          `[cli] tokens: input=${usage.inputTokens} output=${usage.outputTokens} cache_read=${usage.cacheReadTokens} cache_creation=${usage.cacheCreationTokens}\n`,
+        )
+        // 80% warn — fires at most once per session (per v0.7.5-scope §6
+        // risk #5). The guard `env.LLM_CONTEXT_BUDGET_TOKENS > 0` is
+        // defensive; zod already enforces min(1).
+        if (
+          !warned &&
+          env.LLM_CONTEXT_BUDGET_TOKENS > 0 &&
+          usage.inputTokens / env.LLM_CONTEXT_BUDGET_TOKENS >= 0.8
+        ) {
+          const pct = Math.round((usage.inputTokens / env.LLM_CONTEXT_BUDGET_TOKENS) * 100)
+          process.stderr.write(
+            `[cli] warn: context usage ${pct}% (budget=${env.LLM_CONTEXT_BUDGET_TOKENS})\n`,
+          )
+          warned = true
         }
       }
 
@@ -443,7 +496,9 @@ export async function main(): Promise<void> {
           // 2nd LLM call (non-streaming — simpler; matches how summarize()
           // calls chat). If the 2nd-call response accidentally contains a
           // tool block, strip it as a safety net (don't recurse).
-          const followup = await client.chat({ system, messages: history })
+          // v0.7.5 — reuse the same systemBlocks (state hasn't changed
+          // mid-turn; cache_control on the static prefix still applies).
+          const followup = await client.chat({ systemBlocks, messages: history })
           // Log the 2nd-call as observability: a topK/argCount summary is
           // enough — we don't dump the full result text to stderr.
           const argSummary =

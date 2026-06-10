@@ -9,6 +9,10 @@ const EnvSchema = z.object({
   LLM_MODEL_SUMMARIZER: z.string().default('MiniMax-M3'),
   LLM_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.7),
   LLM_MAX_TOKENS: z.coerce.number().int().positive().default(2048),
+  // v0.7.5 — single-turn input token cap. CLI truncates oldest history
+  // (sliding window) when the estimated input exceeds this. Default 6000
+  // per PRD §5.3; range 1..200_000. Per-session warn fires at 80%.
+  LLM_CONTEXT_BUDGET_TOKENS: z.coerce.number().int().min(1).max(200000).default(6000),
   APP_DATA_DIR: z.string().default('./data'),
   APP_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   RUN_LIVE_LLM: z.enum(['0', '1']).optional(),

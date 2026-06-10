@@ -26,6 +26,10 @@ import type { SessionState } from './state-machine.js'
  * previous session's keywords. CLI passes this ONLY on the first turn (same
  * first-turn-only pattern as `lastReview` — after the conversation actually
  * starts, the seed becomes stale and the tokens are wasted).
+ *
+ * v0.7.5 — kept as a thin wrapper for backwards compat. New callers should
+ * use `buildFinalSystemSplit` to get the static/dynamic split needed for
+ * Anthropic prompt caching.
  */
 export function buildFinalSystem(
   systemPrompt: SystemPrompt,
@@ -40,4 +44,35 @@ export function buildFinalSystem(
     '',
     buildSystemContext(state, lastReview, activeTopics, recentMistakes, relevantPast),
   ].join('\n')
+}
+
+/**
+ * v0.7.5 — split the final system prompt into the two segments that
+ * Anthropic's prompt cache can reuse independently:
+ *
+ *   - `static`  = SOUL + AGENTS + USER  (constant for the whole session;
+ *                safe to mark with `cache_control: ephemeral` so subsequent
+ *                turns hit the cache for ~90% cost reduction on this prefix).
+ *   - `dynamic` = [System Context]        (changes every turn: phase,
+ *                lastReview, active topics, recent mistakes, relevant
+ *                past). The CLI also appends an empty trailing newline
+ *                so the two segments join with the same single-blank
+ *                separator that the legacy `buildFinalSystem` used.
+ *
+ * Returned as `{ static, dynamic }` so the caller can pass them to the
+ * Anthropic client as separate `system` text blocks (the SDK concatenates
+ * them in the order given). Old `buildFinalSystem` callers are unaffected.
+ */
+export function buildFinalSystemSplit(
+  systemPrompt: SystemPrompt,
+  state: SessionState,
+  lastReview: LastReview | null = null,
+  activeTopics: TopicStat[] = [],
+  recentMistakes: Mistake[] = [],
+  relevantPast: RelevantSession[] = [],
+): { static: string; dynamic: string } {
+  return {
+    static: buildSystemString(systemPrompt),
+    dynamic: buildSystemContext(state, lastReview, activeTopics, recentMistakes, relevantPast),
+  }
 }
