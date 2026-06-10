@@ -692,4 +692,83 @@ describe('CLI v0.4 state-machine integration', () => {
     expect(b.stdout).not.toContain('<tool>')
     expect(b.stdout).not.toContain('</tool>')
   }, 240000)
+
+  // -------- v0.7.6 — V751-002: chatStream error handling + auto-save --------
+
+  it('v0.7.6 V751-002: 5xx (retryable) on every call → catch-all fires: fallback message + auto-save + exit 1', async () => {
+    // LLM_TEST_FAIL=500 → every chatStream() call throws an Anthropic-shaped
+    // error with .status=500. chatStreamWithRetry logs + retries 1x, then
+    // both attempts fail. The CLI's catch-all writes the friendly fallback
+    // message to stdout, auto-saves the session with a placeholder summary,
+    // and exits with code 1.
+    const result = await runCli('hi\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+      LLM_TEST_FAIL: '500',
+    })
+    // Exit code 1 — graceful failure (process did not crash; we set exitCode
+    // explicitly in the catch-all).
+    expect(result.exitCode).toBe(1)
+    // (a) Friendly fallback message reached the student.
+    expect(result.stdout).toMatch(/Sorry, I lost my train of thought/)
+    // (b) Stderr shows the wrapper's classification + the catch-all's
+    //     "falling back" + "session auto-saved" lines.
+    expect(result.stderr).toMatch(/\[cli\] llm error: 5xx/)
+    expect(result.stderr).toMatch(/\[cli\] retrying in 1s\.\.\. \(attempt 2\/2\)/)
+    expect(result.stderr).toMatch(/\[cli\] persistent llm failure; falling back/)
+    expect(result.stderr).toMatch(/\[cli\] session auto-saved: /)
+    expect(result.stderr).toMatch(/\[cli\] persistence skipped \(handled by V751-002 catch-all\)/)
+    // (c) DB has a session row that was ended (the auto-save wrote it).
+    const db = openDb({ dataDir })
+    applyMigrations(db, migrationsDir)
+    const sessions = createSessionsDao(db)
+    const all = sessions.list()
+    expect(all).toHaveLength(1)
+    expect(all[0]?.summary).toBe('(summarization failed after llm error)')
+    db.close()
+  }, 30000)
+
+  it('v0.7.6 V751-002: 4xx (non-retryable) on every call → catch-all fires immediately (no retry) + exit 1', async () => {
+    // LLM_TEST_FAIL=401 → .status=401 → classifyLLMError says retryable=false
+    // → chatStreamWithRetry fails fast (no "retrying in 1s..." line). The
+    // catch-all still fires because the wrapper throws on the (single) attempt.
+    const result = await runCli('hi\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+      LLM_TEST_FAIL: '401',
+    })
+    expect(result.exitCode).toBe(1)
+    // (a) Friendly fallback to stdout.
+    expect(result.stdout).toMatch(/Sorry, I lost my train of thought/)
+    // (b) Classification logged; NO "retrying in" line (4xx is not retryable).
+    expect(result.stderr).toMatch(/\[cli\] llm error: 4xx/)
+    expect(result.stderr).not.toMatch(/retrying in/)
+    // (c) Catch-all still fires.
+    expect(result.stderr).toMatch(/\[cli\] persistent llm failure; falling back/)
+    expect(result.stderr).toMatch(/\[cli\] session auto-saved: /)
+  }, 30000)
+
+  it('v0.7.6 V751-002: 429 (rate_limit, retryable) on every call → catch-all fires + session ended cleanly', async () => {
+    // 429 is retryable. The wrapper retries once. If both fail, catch-all
+    // fires. This test mirrors the 5xx test but uses 429 to confirm the
+    // classification path for rate limits works end-to-end.
+    const result = await runCli('hi\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+      LLM_TEST_FAIL: '429',
+    })
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toMatch(/Sorry, I lost my train of thought/)
+    expect(result.stderr).toMatch(/\[cli\] llm error: rate_limit/)
+    expect(result.stderr).toMatch(/\[cli\] persistent llm failure; falling back/)
+    expect(result.stderr).toMatch(/\[cli\] session auto-saved: /)
+
+    // DB: session is persisted with a placeholder summary.
+    const db = openDb({ dataDir })
+    applyMigrations(db, migrationsDir)
+    const all = createSessionsDao(db).list()
+    expect(all).toHaveLength(1)
+    expect(all[0]?.summary).toBe('(summarization failed after llm error)')
+    db.close()
+  }, 30000)
 })

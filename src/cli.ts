@@ -27,7 +27,8 @@ import {
 } from './agent/index.js'
 import { loadEnv } from './config/env.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
-import { createReplayProvider } from './llm/testing.js'
+import { chatStreamWithRetry } from './llm/retry.js'
+import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
 import type { LLMClient, Message, SystemBlock, UsageChunk } from './llm/types.js'
 import {
   type RelevantSession,
@@ -48,6 +49,17 @@ import {
 } from './storage/index.js'
 
 function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLMClient {
+  // v0.7.6 (V751-002) — test-only path: if LLM_TEST_FAIL is set, return a
+  // provider that throws an error with the configured HTTP status on every
+  // call. Used by L3 tests to exercise the catch-all + auto-save path. Not
+  // documented in .env.example (intentionally test-only).
+  const testFail = process.env.LLM_TEST_FAIL
+  if (testFail) {
+    const status = Number.parseInt(testFail, 10)
+    if (Number.isFinite(status)) {
+      return createThrowingProvider(status, `LLM_TEST_FAIL=${status}`)
+    }
+  }
   if (process.env.RUN_LIVE_LLM === '1') {
     return createAnthropicProvider(env)
   }
@@ -211,6 +223,13 @@ export async function main(): Promise<void> {
   const mistakesDao = createMistakesDao(db)
   const recentMistakes: Mistake[] = mistakesDao.getRecent(5)
   process.stderr.write(`[cli] loaded ${recentMistakes.length} recent mistakes (cross-session)\n`)
+
+  // v0.7.6 — V751-002: chatStream error handling. Set by the catch-all
+  // around chatStreamWithRetry() in the main loop when the LLM fails
+  // persistently. The `finally` block checks this flag to skip its
+  // normal summarize+markEnded+embed+topic-match (the catch-all already
+  // did its own auto-save with a placeholder summary).
+  let sessionPersisted = false
 
   // v0.7.2 — semantic retrieval of relevant past sessions. Seeded by the
   // previous session's keywords (lastReview), excluding lastReview itself
@@ -380,17 +399,52 @@ export async function main(): Promise<void> {
       // stream, mirroring Anthropic's message_start.usage event) for the
       // post-call token log + 80% warn. The Replay provider doesn't emit
       // usage chunks, so this is silent under L3 tests.
+      // v0.7.6 — wrap the stream in chatStreamWithRetry (1x retry on
+      // retryable errors per V751-002). On persistent failure, fall back
+      // to a friendly message + auto-save the session so the next session
+      // has at least the transcript context. See v0.7.6-design.md §3.1.
       let response = ''
       let usage: UsageChunk | null = null
-      for await (const chunk of client.chatStream({
-        systemBlocks,
-        messages: history,
-      })) {
-        if (chunk.type === 'text') {
-          response += chunk.delta
-        } else if (chunk.type === 'usage') {
-          usage = chunk
+      try {
+        const streamResult = await chatStreamWithRetry(client, {
+          systemBlocks,
+          messages: history,
+        })
+        response = streamResult.response
+        usage = streamResult.usage
+      } catch (_err) {
+        // Persistent LLM failure — graceful degradation. The student sees
+        // a friendly fallback message; the session is auto-saved with a
+        // placeholder summary so the next session retains the transcript
+        // context (if it can be summarized) and the session row is
+        // properly marked ended (reason: current exitReason).
+        process.stderr.write('[cli] persistent llm failure; falling back\n')
+        process.stdout.write(
+          '\n[Teacher]: Sorry, I lost my train of thought. Could you say that again? 😊\n\n',
+        )
+        const allMessages = messages.getBySession(session.id)
+        let summaryText = '(summarization failed after llm error)'
+        let summaryKeywords: string[] = []
+        try {
+          const review = await summarize(
+            allMessages.map((m) => ({ role: m.role, content: m.content })),
+            client,
+          )
+          summaryText = review.summary
+          summaryKeywords = review.keywords
+        } catch {
+          // LLM is broken — keep the placeholder already in summaryText.
         }
+        sessions.markEnded(session.id, {
+          phaseHistory,
+          summary: summaryText,
+          keywords: summaryKeywords,
+          reason: exitReason,
+        })
+        sessionPersisted = true
+        process.stderr.write(`[cli] session auto-saved: ${session.id}\n`)
+        process.exitCode = 1
+        break
       }
 
       // v0.7.5 — log actual token usage after each LLM call. Silent under
@@ -550,68 +604,78 @@ export async function main(): Promise<void> {
   } finally {
     // Persist the session as ended and close the DB regardless of how we exit.
     try {
-      // v0.5 — call the summarizer over the full session transcript. On any
-      // failure (LLM error / JSON parse / schema mismatch) fall back to a
-      // placeholder summary so markEnded can still write and the session
-      // is not lost.
-      const allMessages = messages.getBySession(session.id)
-      let summaryText: string
-      let summaryKeywords: string[]
-      try {
-        const review = await summarize(
-          allMessages.map((m) => ({ role: m.role, content: m.content })),
-          client,
-        )
-        summaryText = review.summary
-        summaryKeywords = review.keywords
-        process.stderr.write(
-          `[cli] summarize ok summary=${summaryText.length}c keywords=${summaryKeywords.length}\n`,
-        )
-      } catch (err) {
-        process.stderr.write(`[cli] summarize failed: ${(err as Error).message}\n`)
-        summaryText = '(summarization failed)'
-        summaryKeywords = []
-      }
-
-      process.stderr.write(`[cli] markEnded ${session.id} reason=${exitReason}\n`)
-      sessions.markEnded(session.id, {
-        phaseHistory,
-        summary: summaryText,
-        keywords: summaryKeywords,
-        reason: exitReason,
-      })
-      process.stderr.write('[cli] markEnded done\n')
-
-      // v0.7.2 — embed the freshly written summary so the next session can
-      // find this one via cross-session semantic retrieval. Runs AFTER
-      // markEnded (the row already has summary populated). Skip the
-      // placeholder. Failure here is best-effort: the summary itself is
-      // saved; only the cross-session-lookup eligibility is lost (next
-      // listWithEmbeddings filters NULL rows).
-      if (summaryText && summaryText !== '(summarization failed)') {
+      // v0.7.6 (V751-002) — if the catch-all around chatStreamWithRetry()
+      // already persisted the session, skip the normal pipeline. The
+      // catch-all uses a placeholder summary when the LLM is broken, and
+      // re-running summarize() here would just retry the same failing call.
+      if (sessionPersisted) {
+        process.stderr.write('[cli] persistence skipped (handled by V751-002 catch-all)\n')
+      } else {
+        // v0.5 — call the summarizer over the full session transcript. On any
+        // failure (LLM error / JSON parse / schema mismatch) fall back to a
+        // placeholder summary so markEnded can still write and the session
+        // is not lost.
+        const allMessages = messages.getBySession(session.id)
+        let summaryText: string
+        let summaryKeywords: string[]
         try {
-          const summaryVec = await embedder.embed(summaryText)
-          sessions.setEmbedding(session.id, summaryVec)
+          const review = await summarize(
+            allMessages.map((m) => ({ role: m.role, content: m.content })),
+            client,
+          )
+          summaryText = review.summary
+          summaryKeywords = review.keywords
           process.stderr.write(
-            `[cli] embedded session.summary (${summaryVec.length} dim, ${summaryVec.byteLength} bytes)\n`,
+            `[cli] summarize ok summary=${summaryText.length}c keywords=${summaryKeywords.length}\n`,
           )
         } catch (err) {
-          process.stderr.write(`[cli] embed summary failed: ${(err as Error).message}\n`)
+          process.stderr.write(`[cli] summarize failed: ${(err as Error).message}\n`)
+          summaryText = '(summarization failed)'
+          summaryKeywords = []
         }
-      }
 
-      // v0.6 — match summaryKeywords against the topic library; if a topic
-      // hits, increment its stat row. Runs AFTER markEnded so a topic
-      // failure can never block session persistence. If summarize failed
-      // (summaryKeywords = []), matchTopic returns null and we skip.
-      const match = matchTopic(summaryKeywords, topics.list())
-      if (match) {
-        topicStats.incrementAndUpdate(match.topic, new Date())
-        process.stderr.write(
-          `[cli] topic match: ${match.topic} jaccard=${match.jaccard.toFixed(2)} shared=[${match.shared.join(',')}]\n`,
-        )
-      } else {
-        process.stderr.write(`[cli] topic match: none (keywords=[${summaryKeywords.join(',')}])\n`)
+        process.stderr.write(`[cli] markEnded ${session.id} reason=${exitReason}\n`)
+        sessions.markEnded(session.id, {
+          phaseHistory,
+          summary: summaryText,
+          keywords: summaryKeywords,
+          reason: exitReason,
+        })
+        process.stderr.write('[cli] markEnded done\n')
+
+        // v0.7.2 — embed the freshly written summary so the next session can
+        // find this one via cross-session semantic retrieval. Runs AFTER
+        // markEnded (the row already has summary populated). Skip the
+        // placeholder. Failure here is best-effort: the summary itself is
+        // saved; only the cross-session-lookup eligibility is lost (next
+        // listWithEmbeddings filters NULL rows).
+        if (summaryText && summaryText !== '(summarization failed)') {
+          try {
+            const summaryVec = await embedder.embed(summaryText)
+            sessions.setEmbedding(session.id, summaryVec)
+            process.stderr.write(
+              `[cli] embedded session.summary (${summaryVec.length} dim, ${summaryVec.byteLength} bytes)\n`,
+            )
+          } catch (err) {
+            process.stderr.write(`[cli] embed summary failed: ${(err as Error).message}\n`)
+          }
+        }
+
+        // v0.6 — match summaryKeywords against the topic library; if a topic
+        // hits, increment its stat row. Runs AFTER markEnded so a topic
+        // failure can never block session persistence. If summarize failed
+        // (summaryKeywords = []), matchTopic returns null and we skip.
+        const match = matchTopic(summaryKeywords, topics.list())
+        if (match) {
+          topicStats.incrementAndUpdate(match.topic, new Date())
+          process.stderr.write(
+            `[cli] topic match: ${match.topic} jaccard=${match.jaccard.toFixed(2)} shared=[${match.shared.join(',')}]\n`,
+          )
+        } else {
+          process.stderr.write(
+            `[cli] topic match: none (keywords=[${summaryKeywords.join(',')}])\n`,
+          )
+        }
       }
     } finally {
       rl.close()

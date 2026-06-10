@@ -64,3 +64,31 @@ export function createReplayProvider(fixturesDir: string): LLMClient {
 
   return { chatStream, chat }
 }
+
+/**
+ * v0.7.6 — LLM test provider that throws a configured error on every call.
+ * Used by V751-002 L3 tests to exercise the CLI's catch-all + auto-save
+ * path. Error shape mirrors the Anthropic SDK's `APIError` (with a `.status`
+ * field) so `classifyLLMError` can classify it correctly.
+ *
+ * Set `LLM_TEST_FAIL=<status>` (e.g. `500`, `429`, `401`) to enable. See
+ * tests/agent/cli-integration.test.ts for usage.
+ */
+export function createThrowingProvider(status: number, message = 'mock LLM failure'): LLMClient {
+  const err = new Error(message) as Error & { status: number }
+  err.status = status
+
+  return {
+    async *chatStream(_opts: ChatOpts): AsyncIterable<ChatChunk> {
+      // Throw immediately when iteration starts (mimics Anthropic SDK
+      // raising the error mid-stream). The `await Promise.resolve()` is
+      // not strictly needed; the throw is the first body statement so
+      // it fires on the first `.next()` call from `for await`.
+      // biome-ignore lint/correctness/useYield: throw-only iterator; no chunks yielded by design
+      throw err
+    },
+    async chat(_opts: ChatOpts): Promise<ChatResult> {
+      throw err
+    },
+  }
+}

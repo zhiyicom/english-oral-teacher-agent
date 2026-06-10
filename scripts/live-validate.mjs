@@ -15,8 +15,8 @@
 // This script does NOT make any product code changes. It is a dev tool.
 
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
-import { resolve, join } from 'node:path'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -74,19 +74,15 @@ function runProcess(opts) {
   } = opts
 
   return new Promise((res) => {
-    const child = spawn(
-      process.execPath,
-      ['--import', 'tsx', resolve(ROOT, 'src', 'cli.ts')],
-      {
-        cwd: ROOT,
-        env: {
-          ...process.env,
-          APP_DATA_DIR: dataDir,
-          HF_ENDPOINT,
-        },
-        stdio: ['pipe', 'pipe', 'pipe'],
+    const child = spawn(process.execPath, ['--import', 'tsx', resolve(ROOT, 'src', 'cli.ts')], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        APP_DATA_DIR: dataDir,
+        HF_ENDPOINT,
       },
-    )
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
 
     let stdout = ''
     let stderr = ''
@@ -222,12 +218,22 @@ scenarios.push(
   }),
 )
 
-// 4: cross-session retrieval — process A writes 1 session, process B sees it
+// 4: cross-session retrieval — V741-001 fix. Originally this scenario was
+// 2 processes: A wrote 1 session, B was supposed to see it via startup
+// retrieval. But B's `lastReview` IS A, and the startup retrieval excludes
+// `lastReview.sessionId` (correctly — "Last session" already shows A's
+// summary in the [System Context] block). With only 1 prior session, the
+// exclude filters the only candidate → 0 results. v0.7.6 fix: spawn 3
+// processes sharing `_data/`:
+//   - p0: minecraft session (becomes A)
+//   - p1: roblox session (becomes B = new lastReview for p2)
+//   - p2: p2's lastReview=B; candidates=[A, B]; exclude B → 1 result (A)
 scenarios.push(
   await scenario({
     label: '4-cross-session-retrieval',
     inputs: [
       ['hi', 'i played minecraft yesterday', 'i usually build castles', 'exit'],
+      ['hi', 'i also like roblox', 'exit'],
       ['hi', 'fine thanks', 'exit'],
     ],
     sharedDataDir: join(outRoot, '4-cross-session-retrieval', '_data'),
