@@ -29,8 +29,8 @@
 
 import 'dotenv/config' // auto-load .env into process.env (no-op if file missing)
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
-import { resolve, join } from 'node:path'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -91,20 +91,16 @@ function runProcess(opts) {
   } = opts
 
   return new Promise((res) => {
-    const child = spawn(
-      process.execPath,
-      ['--import', 'tsx', resolve(ROOT, 'src', 'cli.ts')],
-      {
-        cwd: ROOT,
-        env: {
-          ...process.env,
-          APP_DATA_DIR: dataDir,
-          HF_ENDPOINT,
-          ...extraEnv,
-        },
-        stdio: ['pipe', 'pipe', 'pipe'],
+    const child = spawn(process.execPath, ['--import', 'tsx', resolve(ROOT, 'src', 'cli.ts')], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        APP_DATA_DIR: dataDir,
+        HF_ENDPOINT,
+        ...extraEnv,
       },
-    )
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
 
     let stdout = ''
     let stderr = ''

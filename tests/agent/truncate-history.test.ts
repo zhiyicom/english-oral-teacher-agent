@@ -140,9 +140,7 @@ describe('truncateHistory', () => {
     //   current=[m6, m7], total = 4×260=1040 > 300, current.length=2 not > 2, exit.
     // Result: anchor (m0, m1) + droppable (m6, m7). dropped=2.
     const big = 'x'.repeat(1000)
-    const m = Array.from({ length: 8 }, (_, i) =>
-      msg(i % 2 === 0 ? 'user' : 'assistant', big),
-    )
+    const m = Array.from({ length: 8 }, (_, i) => msg(i % 2 === 0 ? 'user' : 'assistant', big))
     const [a0, a1, , , , , b6, b7] = m
     if (!a0 || !a1 || !b6 || !b7) throw new Error('test setup: expected 8 messages')
     const r = truncateHistory(m, 300, { anchorPair: [a0, a1] })
