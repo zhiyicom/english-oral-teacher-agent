@@ -1,0 +1,15 @@
+{
+  "name": "topic-select-input",
+  "match": {
+    "userSaysContains": "pick a topic"
+  },
+  "chunks": [
+    {
+      "type": "text",
+      "delta": "<tool>topic_select({\"phase\": \"MAIN_ACTIVITY\", \"exclude_recent_days\": 30})</tool>"
+    }
+  ],
+  "result": {
+    "content": "<tool>topic_select({\"phase\": \"MAIN_ACTIVITY\", \"exclude_recent_days\": 30})</tool>"
+  }
+}

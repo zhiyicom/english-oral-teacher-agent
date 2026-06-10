@@ -9,12 +9,14 @@ import {
   type PhaseTransition,
   type SessionState,
   type SummarizeHistoryResult,
+  type TopicSelectResult,
   applyEvent,
   buildFinalSystemSegments,
   createMarkMistakeTool,
   createMemorySearchTool,
   createSummarizeHistoryTool,
   createToolRegistry,
+  createTopicSelectTool,
   estimateMessagesTokens,
   estimateTokens,
   initState,
@@ -155,10 +157,21 @@ const STOP_REGEX = /(?:^|[.!?]\s+|\n)(stop|quit|end|bye|done|结束|停)\b[.!?\s
 // v0.7.6 — `summarize_history` adds a new marker `[v076_history_summary]`
 // so the 2nd-call Replay fixture can match it without colliding with the
 // v0.7.3 `[tool_result_v073]` prefix. Same A+B path, different marker.
+// v0.7.6 D5 — `topic_select` adds a new marker `[v076_topic_select_result]`
+// following the same pattern. Each tool's 2nd-call fixture is matched on
+// its own unique marker, so the fixtures never collide.
 function formatToolResult(name: string, result: unknown): string {
   if (name === 'summarize_history') {
     const r = result as SummarizeHistoryResult
     return `[v076_history_summary]\nHistory compressed to ~${r.targetTokens} tokens. Continue the conversation naturally.`
+  }
+  if (name === 'topic_select') {
+    if (typeof result === 'object' && result !== null && 'error' in result) {
+      const r = result as { error: string }
+      return `[v076_topic_select_result]\n${r.error}. Pick a topic manually or continue.`
+    }
+    const r = result as TopicSelectResult
+    return `[v076_topic_select_result]\nSelected topic: ${r.title} (slug=${r.slug}, ~${r.est_minutes} min). Start discussing it.`
   }
   if (name !== 'memory_search') {
     return `[tool_result_v073]\n[v073_followup_responder]\n[Tool result: ${name}]\n${JSON.stringify(result)}`
@@ -260,6 +273,19 @@ export async function main(): Promise<void> {
   // main loop (where `history` lives). The tool just validates args and
   // returns a typed signal so the CLI knows to invoke the summarizer.
   toolRegistry.register(createSummarizeHistoryTool())
+  // v0.7.6 D5 — topic_select. Pure compute: receives the topic library +
+  // stats at registration time. The tool returns a typed result that the
+  // CLI feeds back to the LLM via the 2nd-call A+B path (no history rewrite,
+  // just a follow-up LLM call). Interests are empty for now — the persona
+  // doesn't load a separate interest list, and D3 still works (returns 0
+  // overlap, no boost applied). v0.8+ can wire real interests from USER.md.
+  toolRegistry.register(
+    createTopicSelectTool({
+      topics: topics.list(),
+      stats: topicStats.all(),
+      interests: [],
+    }),
+  )
   let relevantPast: RelevantSession[] = []
   if (lastReview && lastReview.keywords.length > 0) {
     try {
@@ -700,6 +726,53 @@ export async function main(): Promise<void> {
             `[cli] tool 2nd-call: ${parsed.name}(target=${result.targetTokens})\n`,
           )
           // Safety strip: same as memory_search path.
+          let followupDisplay = followup.content
+          const followupParsed = (() => {
+            try {
+              return parseToolCall(followup.content)
+            } catch {
+              return null
+            }
+          })()
+          if (followupParsed) {
+            followupDisplay = stripToolCall(followup.content, followupParsed)
+          }
+          process.stdout.write(`${followupDisplay}\n\n`)
+          history.push({ role: 'assistant', content: followupDisplay })
+          messages.append({ sessionId: session.id, role: 'assistant', content: followupDisplay })
+        }
+      } else if (parsed.name === 'topic_select') {
+        // v0.7.6 D5 — A+B hybrid. Pure-compute tool: no history rewrite, no DB
+        // write. CLI just executes the tool, feeds the result back to the LLM
+        // via a synthetic user message, and makes a 2nd LLM call so the LLM
+        // can produce the student-facing reply (e.g. "Great! Let's talk about
+        // sports."). Mirrors the memory_search A+B shape — same marker
+        // pattern, no history mutation.
+        const tool = toolRegistry.get(parsed.name)
+        if (!tool) {
+          process.stderr.write(`[cli] tool unknown: ${parsed.name}\n`)
+          display = stripToolCall(response, parsed)
+          process.stdout.write(`${display}\n\n`)
+          history.push({ role: 'assistant', content: display })
+          messages.append({ sessionId: session.id, role: 'assistant', content: display })
+        } else {
+          process.stderr.write(`[cli] tool call: ${parsed.name}(${JSON.stringify(parsed.args)})\n`)
+          let result: TopicSelectResult | { error: string }
+          try {
+            result = tool.execute(parsed.args) as TopicSelectResult | { error: string }
+          } catch (err) {
+            process.stderr.write(`[cli] tool execute error: ${(err as Error).message}\n`)
+            result = { error: `tool execution failed: ${(err as Error).message}` }
+          }
+          // A+B 2nd call. No history rewrite (topic_select doesn't change
+          // history — it only suggests a new topic for the LLM to bring up).
+          history.push({ role: 'assistant', content: response })
+          const resultText = formatToolResult(parsed.name, result)
+          history.push({ role: 'user', content: resultText })
+          const followup = await client.chat({ systemBlocks, messages: history })
+          const errOrSlug = 'error' in result ? 'error' : `slug=${result.slug}`
+          process.stderr.write(`[cli] tool 2nd-call: ${parsed.name}(${errOrSlug})\n`)
+          // Safety strip: same as memory_search / summarize_history paths.
           let followupDisplay = followup.content
           const followupParsed = (() => {
             try {

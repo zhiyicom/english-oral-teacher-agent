@@ -848,4 +848,42 @@ describe('CLI v0.4 state-machine integration', () => {
     expect(result.stdout).not.toContain('<tool>')
     expect(result.stdout).not.toContain('</tool>')
   }, 30000)
+
+  // -------- v0.7.6 D5 — topic_select tool (A+B hybrid, no history rewrite) --------
+
+  it('v0.7.6 D5: topic_select triggers 2nd LLM call + stdout shows 2nd-call fixture + no <tool> leak', async () => {
+    // Send "pick a topic" as the user input — the 1-topic-select-input
+    // fixture (prefix `1-`) matches that substring and emits
+    // `<tool>topic_select(...)</tool>`. The CLI's D5 branch executes the
+    // tool (pure compute), feeds the result back via a synthetic user
+    // message containing `[v076_topic_select_result]`, and makes a 2nd
+    // LLM call matched by the 1-topic-select-followup fixture.
+    //
+    // Unlike B2 (which rewrites history), D5 leaves history untouched —
+    // it just suggests a topic for the LLM to bring up. The student
+    // sees the 2nd-call fixture text ("Great! Let's talk about sports.")
+    // which is the LLM's natural reply to the selected topic.
+    const result = await runCli('pick a topic\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(result.exitCode).toBe(0)
+    // (a) Both stderr markers fire.
+    expect(result.stderr).toMatch(/\[cli\] tool call: topic_select\(/)
+    expect(result.stderr).toMatch(/\[cli\] tool 2nd-call: topic_select\(slug=/)
+    // (b) Stdout shows the 2nd-call fixture text (NOT the 1st-call tool
+    //     block, which would indicate the A+B path failed and the CLI
+    //     displayed the raw 1st-call text).
+    expect(result.stdout).toMatch(/Great! Let's talk about sports/)
+    // (c) No tool block leaks to stdout (safety strip on 2nd-call).
+    expect(result.stdout).not.toContain('<tool>')
+    expect(result.stdout).not.toContain('</tool>')
+    // (d) Session completes normally.
+    const db = openDb({ dataDir })
+    applyMigrations(db, migrationsDir)
+    const all = createSessionsDao(db).list()
+    expect(all).toHaveLength(1)
+    expect(all[0]?.summary).toBeTruthy()
+    db.close()
+  }, 30000)
 })

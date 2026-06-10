@@ -1,0 +1,10 @@
+{
+  "name": "topic-select-followup",
+  "match": {
+    "userSaysContains": "v076_topic_select_result"
+  },
+  "chunks": [{ "type": "text", "delta": "Great! Let's talk about sports." }],
+  "result": {
+    "content": "Great! Let's talk about sports."
+  }
+}

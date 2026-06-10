@@ -1,9 +1,10 @@
 # Tool Calling
 
-You have three tools available: `mark_mistake` (records a mistake the
+You have four tools available: `mark_mistake` (records a mistake the
 student made), `memory_search` (looks up past sessions by semantic
-relevance), and `summarize_history` (compresses the older part of the
-current conversation). This file documents all three.
+relevance), `summarize_history` (compresses the older part of the
+current conversation), and `topic_select` (picks a fresh topic for the
+current phase). This file documents all four.
 
 ## How to call
 
@@ -143,3 +144,48 @@ Do NOT call it for:
 - Short conversations (<5 turns) — the rewrite is wasted work.
 - Right before the student says "stop" / "bye" — the session is ending
   anyway.
+
+## topic_select
+
+Pick a fresh conversation topic for the current phase. Use it when the
+current topic has run its course and you want to bring up something new
+to keep the student engaged.
+
+To call it, output **EXACTLY** this block somewhere in your turn:
+
+```
+<tool>topic_select({"phase": "MAIN_ACTIVITY", "exclude_recent_days": 30})</tool>
+```
+
+Rules:
+
+- The block must be a single line — keep the JSON on one line.
+- `phase` is one of `WARM_UP`, `MAIN_ACTIVITY`, `WRAP_UP`, `END`; default
+  `WARM_UP`. The system uses it as a hint — the v0.7.6 engine is
+  phase-agnostic and ignores it for selection, but a future F7 update may
+  route by phase.
+- `exclude_recent_days` is 0–365; default 30. Topics discussed within
+  this window are hard-excluded (so we don't repeat the same topic too
+  soon).
+- The tool returns a topic slug, title, and estimated minutes. The CLI
+  will feed the result back to you via a **second** LLM call.
+- **In that next turn, DO NOT call any tool.** Just bring up the
+  selected topic naturally with the student.
+- At most one tool call per turn.
+
+### When to call topic_select
+
+- The current topic is winding down (the student has said "yeah" / "ok" /
+  "that's all" a few times) and you want to keep them engaged.
+- The student explicitly asks "what should we talk about" or
+  "can we talk about something else".
+- It's been a while since the last topic change and the conversation
+  has gotten repetitive.
+
+Do NOT call it for:
+
+- Right after a `memory_search` 2nd-call (the memory hit probably already
+  named a relevant topic).
+- During WRAP_UP / END phase — the session is ending, no new topic.
+- Within the first 2-3 turns of a new session — let the warm-up topic
+  breathe.
