@@ -8,10 +8,12 @@ import {
   type Phase,
   type PhaseTransition,
   type SessionState,
+  type SummarizeHistoryResult,
   applyEvent,
-  buildFinalSystemSplit,
+  buildFinalSystemSegments,
   createMarkMistakeTool,
   createMemorySearchTool,
+  createSummarizeHistoryTool,
   createToolRegistry,
   estimateMessagesTokens,
   estimateTokens,
@@ -149,7 +151,15 @@ const STOP_REGEX = /(?:^|[.!?]\s+|\n)(stop|quit|end|bye|done|结束|停)\b[.!?\s
 // is added on the first line to guarantee the Replay matcher only sees
 // the 2nd-call fixture. The marker is safe for the LLM to see (it's a
 // structural signal, like system prefixes).
+//
+// v0.7.6 — `summarize_history` adds a new marker `[v076_history_summary]`
+// so the 2nd-call Replay fixture can match it without colliding with the
+// v0.7.3 `[tool_result_v073]` prefix. Same A+B path, different marker.
 function formatToolResult(name: string, result: unknown): string {
+  if (name === 'summarize_history') {
+    const r = result as SummarizeHistoryResult
+    return `[v076_history_summary]\nHistory compressed to ~${r.targetTokens} tokens. Continue the conversation naturally.`
+  }
   if (name !== 'memory_search') {
     return `[tool_result_v073]\n[v073_followup_responder]\n[Tool result: ${name}]\n${JSON.stringify(result)}`
   }
@@ -245,6 +255,11 @@ export async function main(): Promise<void> {
   // short keyword strings, but the same embedder instance is reused, so the
   // pipeline is already hot by the time the LLM calls this tool.
   toolRegistry.register(createMemorySearchTool(db, embedder))
+  // v0.7.6 B2 — summarize_history is a marker tool: it has no DB / embedder
+  // dependencies because the actual history rewrite happens in the CLI's
+  // main loop (where `history` lives). The tool just validates args and
+  // returns a typed signal so the CLI knows to invoke the summarizer.
+  toolRegistry.register(createSummarizeHistoryTool())
   let relevantPast: RelevantSession[] = []
   if (lastReview && lastReview.keywords.length > 0) {
     try {
@@ -350,7 +365,11 @@ export async function main(): Promise<void> {
       // build it ONCE per turn and reuse the same `systemBlocks` for the
       // 2nd call in the A+B memory_search path (no state change between
       // 1st and 2nd call within one turn).
-      const sysSeg = buildFinalSystemSplit(
+      // v0.7.6 B3 — use buildFinalSystemSegments (vs .Split) so we can log
+      // per-segment token costs to stderr. The [System Context] block has
+      // 5 segments (phase/last/relevant/active/mistakes); if one grows
+      // out of control, the operator can see it in the log.
+      const sysSeg = buildFinalSystemSegments(
         systemPrompt,
         state,
         wasFirstTurn ? lastReview : null,
@@ -359,6 +378,12 @@ export async function main(): Promise<void> {
         wasFirstTurn ? relevantPast : [],
       )
       const systemSize = estimateTokens(sysSeg.static) + estimateTokens(sysSeg.dynamic)
+      // Per-segment log: 5 numbers, 0 = segment absent on this turn.
+      // First-turn-only is NOT applied here — the operator wants to see
+      // the per-segment breakdown on every turn to spot drift.
+      process.stderr.write(
+        `[cli] ctx-segment: phase=${sysSeg.segments.phase} last=${sysSeg.segments.last} relevant=${sysSeg.segments.relevant} active=${sysSeg.segments.active} mistakes=${sysSeg.segments.mistakes}\n`,
+      )
 
       // v0.7.5 — sliding-window truncate history by estimated total input
       // (system + messages). The estimator (chars/4) is conservative for
@@ -582,6 +607,99 @@ export async function main(): Promise<void> {
           // (Prompt tells it not to, and cli.ts only does 1 round-trip per
           // turn, so this is purely cosmetic — but it prevents tool-block
           // leakage into the student's stdout.)
+          let followupDisplay = followup.content
+          const followupParsed = (() => {
+            try {
+              return parseToolCall(followup.content)
+            } catch {
+              return null
+            }
+          })()
+          if (followupParsed) {
+            followupDisplay = stripToolCall(followup.content, followupParsed)
+          }
+          process.stdout.write(`${followupDisplay}\n\n`)
+          history.push({ role: 'assistant', content: followupDisplay })
+          messages.append({ sessionId: session.id, role: 'assistant', content: followupDisplay })
+        }
+      } else if (parsed.name === 'summarize_history') {
+        // v0.7.6 B2 — A+B hybrid marker tool. The tool itself just returns a
+        // typed signal { kind, targetTokens }. The CLI does the actual work:
+        //   1. Run `summarize()` over older history (skipping the anchor pair
+        //      and the most recent KEEP_RECENT messages).
+        //   2. Rebuild `history` as [...firstPair, summaryMsg, ...recent] so
+        //      the next LLM call sees a compressed transcript.
+        //   3. Make a 2nd LLM call (matching the memory_search A+B pattern)
+        //      so the LLM can produce the student-facing response.
+        //
+        // KEEP_RECENT = 6 messages (3 user/assistant pairs). Empirical
+        // choice: enough recent context for natural follow-up, small enough
+        // that B2 is actually useful for long sessions.
+        const KEEP_RECENT = 6
+        const tool = toolRegistry.get(parsed.name)
+        if (!tool) {
+          process.stderr.write(`[cli] tool unknown: ${parsed.name}\n`)
+          display = stripToolCall(response, parsed)
+          process.stdout.write(`${display}\n\n`)
+          history.push({ role: 'assistant', content: display })
+          messages.append({ sessionId: session.id, role: 'assistant', content: display })
+        } else {
+          process.stderr.write(`[cli] tool call: ${parsed.name}(${JSON.stringify(parsed.args)})\n`)
+          let result: SummarizeHistoryResult
+          try {
+            result = (await tool.execute(parsed.args)) as SummarizeHistoryResult
+          } catch (err) {
+            process.stderr.write(`[cli] tool execute error: ${(err as Error).message}\n`)
+            // Fallback: skip the compression but still do the 2nd-call A+B
+            // so the LLM can respond. targetTokens=500 is a harmless default.
+            result = { kind: 'summarize_history', targetTokens: 500 }
+          }
+
+          // History rewrite: only compress if there's enough older history
+          // to compress (anchor pair + at least 2 older messages + KEEP_RECENT
+          // recent ones). Skip silently otherwise — the tool was called too
+          // early or the LLM mis-judged the context size.
+          const anchorLen = firstPair.length
+          if (history.length > anchorLen + KEEP_RECENT + 2) {
+            const older = history.slice(anchorLen, history.length - KEEP_RECENT)
+            const recent = history.slice(history.length - KEEP_RECENT)
+            let summaryText: string
+            try {
+              const review = await summarize(
+                older.map((m) => ({ role: m.role, content: m.content })),
+                client,
+              )
+              summaryText = review.summary
+            } catch (err) {
+              process.stderr.write(`[cli] tool summarize error: ${(err as Error).message}\n`)
+              summaryText = '(earlier conversation could not be summarized)'
+            }
+            const summaryMsg: Message = {
+              role: 'assistant',
+              content: `[Earlier conversation summary]: ${summaryText}`,
+            }
+            history.length = 0
+            history.push(...firstPair, summaryMsg, ...recent)
+            process.stderr.write(
+              `[cli] tool summarize: compressed ${older.length} → 1 message (target=${result.targetTokens}t)\n`,
+            )
+          } else {
+            process.stderr.write(
+              `[cli] tool summarize: skipped (history too short: ${history.length} msgs)\n`,
+            )
+          }
+
+          // A+B 2nd LLM call. Push the original 1st-call assistant message
+          // (with the tool block intact) + the synthetic user message with
+          // the marker, then call chat (non-streaming, matches memory_search).
+          history.push({ role: 'assistant', content: response })
+          const resultText = formatToolResult(parsed.name, result)
+          history.push({ role: 'user', content: resultText })
+          const followup = await client.chat({ systemBlocks, messages: history })
+          process.stderr.write(
+            `[cli] tool 2nd-call: ${parsed.name}(target=${result.targetTokens})\n`,
+          )
+          // Safety strip: same as memory_search path.
           let followupDisplay = followup.content
           const followupParsed = (() => {
             try {

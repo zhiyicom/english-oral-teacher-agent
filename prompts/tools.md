@@ -1,8 +1,9 @@
 # Tool Calling
 
-You have two tools available: `mark_mistake` (records a mistake the
-student made) and `memory_search` (looks up past sessions by semantic
-relevance). This file documents both.
+You have three tools available: `mark_mistake` (records a mistake the
+student made), `memory_search` (looks up past sessions by semantic
+relevance), and `summarize_history` (compresses the older part of the
+current conversation). This file documents all three.
 
 ## How to call
 
@@ -101,3 +102,44 @@ Do NOT call it for:
 - The current session (it's in the message history already)
 - "Last session" type questions (the previous session's summary is
   already in your [System Context] as the "Last session" segment)
+
+## summarize_history
+
+Compress the older part of the current conversation so newer turns
+stay within the context budget. Use it when you notice the conversation
+has gotten long enough that recent messages might soon get dropped by
+the sliding window.
+
+To call it, output **EXACTLY** this block somewhere in your turn:
+
+```
+<tool>summarize_history({"target_tokens": 500})</tool>
+```
+
+Rules:
+
+- The block must be a single line — keep the JSON on one line.
+- `target_tokens` is 100–3000; default 500. This is the approximate
+  size the older history should be compressed to. 500 is a good default.
+- The CLI will replace the older part of the conversation (everything
+  except the first user/assistant exchange and the last few turns) with
+  a short summary, then make a **second** LLM call so you can respond.
+- **In that next turn, DO NOT call any tool.** Just respond to the
+  student naturally. The CLI only does one round-trip per turn — no
+  recursion.
+- At most one tool call per turn.
+
+### When to call summarize_history
+
+- The conversation is ~10+ turns deep and the topic has shifted, so
+  the older messages add cost without adding context.
+- The student asked you to "wrap up the earlier topic" or signaled they
+  want a fresh direction.
+- You see the system warn that context is approaching the budget (rare —
+  the sliding window normally handles this automatically).
+
+Do NOT call it for:
+
+- Short conversations (<5 turns) — the rewrite is wasted work.
+- Right before the student says "stop" / "bye" — the session is ending
+  anyway.

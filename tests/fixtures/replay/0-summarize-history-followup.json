@@ -1,0 +1,18 @@
+{
+  "name": "summarize-history-followup",
+  "match": {
+    "userSaysContains": "v076_history_summary"
+  },
+  "chunks": [
+    {
+      "type": "thinking",
+      "delta": "History was compressed. I should respond naturally to the student without calling any tool."
+    },
+    { "type": "text", "delta": "Got it — let's keep going! " },
+    { "type": "text", "delta": "What else would you like to talk about?" }
+  ],
+  "result": {
+    "content": "Got it — let's keep going! What else would you like to talk about?",
+    "thinking": "History was compressed. I should respond naturally to the student without calling any tool."
+  }
+}

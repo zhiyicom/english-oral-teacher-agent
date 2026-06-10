@@ -1,0 +1,21 @@
+{
+  "name": "summarize-history-input",
+  "match": {
+    "userSaysContains": "compress chat"
+  },
+  "chunks": [
+    {
+      "type": "thinking",
+      "delta": "The conversation has gotten long. I should compress the older history before it pushes the context budget."
+    },
+    {
+      "type": "text",
+      "delta": "<tool>summarize_history({\"target_tokens\":500})</tool>"
+    },
+    { "type": "text", "delta": " One moment while I tighten my notes..." }
+  ],
+  "result": {
+    "content": "<tool>summarize_history({\"target_tokens\":500})</tool> One moment while I tighten my notes...",
+    "thinking": "The conversation has gotten long. I should compress the older history before it pushes the context budget."
+  }
+}

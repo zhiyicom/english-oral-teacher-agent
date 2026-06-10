@@ -811,4 +811,41 @@ describe('CLI v0.4 state-machine integration', () => {
     expect(all[0]?.summary).toBeTruthy()
     db.close()
   }, 25000)
+
+  // -------- v0.7.6 B2 — summarize_history tool (A+B hybrid, history rewrite) --------
+
+  it('v0.7.6 B2: summarize_history triggers 2nd LLM call + stdout shows 2nd-call fixture + no <tool> leak', async () => {
+    // Send "compress chat" as the user input — the 0-summarize-history-input
+    // fixture (alphabetically first, prefix `0-`) matches that substring
+    // first and emits `<tool>summarize_history(...)</tool>`. The CLI's
+    // B2 branch executes the tool, runs the A+B 2nd LLM call (the synthetic
+    // user message contains `[v076_history_summary]`, which the 0-summarize-
+    // history-followup fixture matches), and prints the followup text.
+    //
+    // History will only have 1 user turn before the trigger, so the
+    // compression block itself is skipped (anchorLen=0, KEEP_RECENT=6,
+    // threshold=8, history.length=1). That's intentional — this test
+    // verifies the A+B wiring and stdout/stderr observability. The actual
+    // rewrite path is exercised by the live demo (B-DoD #2).
+    const result = await runCli('compress chat\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(result.exitCode).toBe(0)
+    // (a) Both stderr markers fire (1st-call execute + 2nd-call A+B).
+    expect(result.stderr).toMatch(/\[cli\] tool call: summarize_history\(/)
+    expect(result.stderr).toMatch(/\[cli\] tool 2nd-call: summarize_history\(target=500\)/)
+    // (b) The compression was skipped because the history was too short.
+    //     (This branch is verified explicitly so a regression that makes
+    //     the compression fire on a 1-turn session would be caught.)
+    expect(result.stderr).toMatch(/\[cli\] tool summarize: skipped \(history too short:/)
+    // (c) Stdout shows the 2nd-call fixture text — NOT the 1st-call's
+    //     "One moment while I tighten my notes..." which would only appear
+    //     if the A+B loop was broken (e.g. the CLI fell into the no-tool
+    //     branch and stdout'd the 1st-call text directly).
+    expect(result.stdout).toMatch(/Got it — let's keep going/)
+    // (d) No tool block leaks to stdout (safety strip pass on 2nd-call).
+    expect(result.stdout).not.toContain('<tool>')
+    expect(result.stdout).not.toContain('</tool>')
+  }, 30000)
 })
