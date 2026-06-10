@@ -11,6 +11,7 @@ import {
   applyEvent,
   buildFinalSystem,
   createMarkMistakeTool,
+  createMemorySearchTool,
   createToolRegistry,
   initState,
   loadLastReview,
@@ -121,6 +122,33 @@ function createLineReader(rl: Interface): {
 //   - "stop", "Stop.", "okay. stop" → matched
 const STOP_REGEX = /(?:^|[.!?]\s+|\n)(stop|quit|end|bye|done|结束|停)\b[.!?\s]*$/i
 
+// v0.7.3 — format a memory_search result as a human-readable block that
+// gets pushed back to the LLM as a synthetic user message (so the 2nd
+// LLM call can answer the student using this context). Keep it compact
+// and structured — the LLM parses it, the student never sees it.
+//
+// Marker note: the prefix `[tool_result_v073]` is a unique substring used
+// as the fixture match key for the 2nd-call Replay fixture. The
+// retrieved session summary (and keywords) can contain any natural-
+// language word, so a more specific tag like `[v073_followup_responder]`
+// is added on the first line to guarantee the Replay matcher only sees
+// the 2nd-call fixture. The marker is safe for the LLM to see (it's a
+// structural signal, like system prefixes).
+function formatToolResult(name: string, result: unknown): string {
+  if (name !== 'memory_search') {
+    return `[tool_result_v073]\n[v073_followup_responder]\n[Tool result: ${name}]\n${JSON.stringify(result)}`
+  }
+  const sessions = result as RelevantSession[]
+  if (!Array.isArray(sessions) || sessions.length === 0) {
+    return '[tool_result_v073]\n[v073_followup_responder]\n[Tool result: memory_search]\nNo relevant past sessions found.'
+  }
+  const lines = sessions.map((s, i) => {
+    const summary = s.summary.length > 80 ? `${s.summary.slice(0, 80)}...` : s.summary
+    return `${i + 1}. ${s.daysAgo} day${s.daysAgo === 1 ? '' : 's'} ago: "${summary}" (keywords: ${s.keywords.join(', ')})`
+  })
+  return `[tool_result_v073]\n[v073_followup_responder]\n[Tool result: memory_search]\nTop ${sessions.length} most relevant past session${sessions.length === 1 ? '' : 's'}:\n${lines.join('\n')}`
+}
+
 export async function main(): Promise<void> {
   const env = loadEnv()
   const clock = selectClock()
@@ -161,6 +189,10 @@ export async function main(): Promise<void> {
 
   // v0.7 — register tools. mark_mistake is bound to this session's id so the
   // LLM never has to pass sessionId (and can't cross sessions by accident).
+  // v0.7.3 — memory_search is bound to the (already-instantiated) embedder
+  // and DB. It uses the A+B hybrid protocol (LLM emits a text tool block,
+  // CLI executes + feeds result back as a synthetic user message, then makes
+  // a 2nd LLM call). See v0.7.3-design.md §2.
   const toolRegistry = createToolRegistry()
   toolRegistry.register(createMarkMistakeTool(db, session.id))
 
@@ -181,6 +213,12 @@ export async function main(): Promise<void> {
   // is no lastReview or no keywords to seed the query. Failures degrade
   // gracefully to an empty result — the CLI never blocks on this.
   const embedder = createTransformersEmbedder()
+  // Register memory_search now that the embedder singleton exists. Note: the
+  // first memory_search execute() will be the first user-facing call that
+  // actually triggers the model load — startup retrieval above only embeds
+  // short keyword strings, but the same embedder instance is reused, so the
+  // pipeline is already hot by the time the LLM calls this tool.
+  toolRegistry.register(createMemorySearchTool(db, embedder))
   let relevantPast: RelevantSession[] = []
   if (lastReview && lastReview.keywords.length > 0) {
     try {
@@ -325,10 +363,14 @@ export async function main(): Promise<void> {
         }
       }
 
-      // v0.7 — parse + execute + strip the tool block, then write the
-      // student-facing text. Tool failures (parse/schema/execute) are
-      // logged to stderr and skipped; they never block the conversation
-      // because mark_mistake is best-effort.
+      // v0.7 — parse the tool block. v0.7.3 — dispatch into 4 branches:
+      //   no tool            → stdout the LLM text as-is
+      //   mark_mistake       → sync side-effect, v0.7 path unchanged
+      //   memory_search      → A+B hybrid: execute, feed result to LLM, 2nd call
+      //   unknown / errored  → strip the block, log, treat as no-tool
+      // Tool failures (parse/schema/execute) are logged to stderr and
+      // skipped; they never block the conversation. mark_mistake and
+      // memory_search are best-effort.
       let display = response
       let parsed: ReturnType<typeof parseToolCall> = null
       try {
@@ -336,34 +378,104 @@ export async function main(): Promise<void> {
       } catch (err) {
         process.stderr.write(`[cli] tool parse error: ${(err as Error).message}\n`)
       }
-      if (parsed) {
+
+      if (!parsed) {
+        // No tool: stdout the LLM text as-is (v0.7 path).
+        process.stdout.write(`${display}\n\n`)
+        history.push({ role: 'assistant', content: display })
+        messages.append({ sessionId: session.id, role: 'assistant', content: display })
+      } else if (parsed.name === 'mark_mistake') {
+        // Sync side-effect tool. Strip the tool block, execute, log.
         display = stripToolCall(response, parsed)
-        const tool = toolRegistry.get(parsed.name)
-        if (!tool) {
-          process.stderr.write(`[cli] tool unknown: ${parsed.name}\n`)
+        const original = typeof parsed.args.original === 'string' ? parsed.args.original : ''
+        if (original && markedOriginals.has(original)) {
+          process.stderr.write(`[cli] tool dedup: skipped (already marked: "${original}")\n`)
         } else {
-          const original = typeof parsed.args.original === 'string' ? parsed.args.original : ''
-          if (parsed.name === 'mark_mistake' && original && markedOriginals.has(original)) {
-            process.stderr.write(`[cli] tool dedup: skipped (already marked: "${original}")\n`)
-          } else {
-            try {
+          try {
+            const tool = toolRegistry.get(parsed.name)
+            if (!tool) {
+              process.stderr.write(`[cli] tool unknown: ${parsed.name}\n`)
+            } else {
               tool.execute(parsed.args)
-              if (parsed.name === 'mark_mistake' && original) {
-                markedOriginals.add(original)
-              }
+              if (original) markedOriginals.add(original)
               process.stderr.write(
                 `[cli] tool call: ${parsed.name}(${JSON.stringify(parsed.args)})\n`,
               )
-            } catch (err) {
-              process.stderr.write(`[cli] tool execute error: ${(err as Error).message}\n`)
             }
+          } catch (err) {
+            process.stderr.write(`[cli] tool execute error: ${(err as Error).message}\n`)
           }
         }
+        process.stdout.write(`${display}\n\n`)
+        history.push({ role: 'assistant', content: display })
+        messages.append({ sessionId: session.id, role: 'assistant', content: display })
+      } else if (parsed.name === 'memory_search') {
+        // A+B hybrid: execute, push result as synthetic user message, 2nd
+        // LLM call, use 2nd response as the final student-facing text.
+        // The first response (with the tool block intact) goes into history
+        // verbatim — the 2nd-call LLM needs to see what it just did.
+        // We DO NOT strip the tool block from history (the LLM must see it
+        // for context), but we also don't echo it to stdout or messages.
+        const tool = toolRegistry.get(parsed.name)
+        if (!tool) {
+          process.stderr.write(`[cli] tool unknown: ${parsed.name}\n`)
+          // Fall through to the unknown-tool path below: strip + display.
+          display = stripToolCall(response, parsed)
+          process.stdout.write(`${display}\n\n`)
+          history.push({ role: 'assistant', content: display })
+          messages.append({ sessionId: session.id, role: 'assistant', content: display })
+        } else {
+          process.stderr.write(`[cli] tool call: ${parsed.name}(${JSON.stringify(parsed.args)})\n`)
+          let result: unknown
+          try {
+            result = await tool.execute(parsed.args)
+          } catch (err) {
+            process.stderr.write(`[cli] tool execute error: ${(err as Error).message}\n`)
+            result = []
+          }
+          // Build history for the 2nd call: keep the original 1st-call
+          // assistant message (with the tool block), then push a synthetic
+          // user message containing the formatted result. The [tool_result_v073]
+          // marker is the fixture match key for the 2nd Replay fixture.
+          history.push({ role: 'assistant', content: response })
+          const resultText = formatToolResult(parsed.name, result)
+          history.push({ role: 'user', content: resultText })
+          // 2nd LLM call (non-streaming — simpler; matches how summarize()
+          // calls chat). If the 2nd-call response accidentally contains a
+          // tool block, strip it as a safety net (don't recurse).
+          const followup = await client.chat({ system, messages: history })
+          // Log the 2nd-call as observability: a topK/argCount summary is
+          // enough — we don't dump the full result text to stderr.
+          const argSummary =
+            typeof parsed.args.top_k === 'number' ? `top_k=${parsed.args.top_k}` : ''
+          process.stderr.write(`[cli] tool 2nd-call: ${parsed.name}(${argSummary})\n`)
+          // Safety strip: if 2nd-call LLM emitted another <tool> block, drop it.
+          // (Prompt tells it not to, and cli.ts only does 1 round-trip per
+          // turn, so this is purely cosmetic — but it prevents tool-block
+          // leakage into the student's stdout.)
+          let followupDisplay = followup.content
+          const followupParsed = (() => {
+            try {
+              return parseToolCall(followup.content)
+            } catch {
+              return null
+            }
+          })()
+          if (followupParsed) {
+            followupDisplay = stripToolCall(followup.content, followupParsed)
+          }
+          process.stdout.write(`${followupDisplay}\n\n`)
+          history.push({ role: 'assistant', content: followupDisplay })
+          messages.append({ sessionId: session.id, role: 'assistant', content: followupDisplay })
+        }
+      } else {
+        // Unknown tool name: strip the block, log, treat as no-tool output.
+        display = stripToolCall(response, parsed)
+        process.stderr.write(`[cli] tool unknown: ${parsed.name}\n`)
+        process.stdout.write(`${display}\n\n`)
+        history.push({ role: 'assistant', content: display })
+        messages.append({ sessionId: session.id, role: 'assistant', content: display })
       }
-
-      process.stdout.write(`${display}\n\n`)
-      history.push({ role: 'assistant', content: display })
-      messages.append({ sessionId: session.id, role: 'assistant', content: display })
 
       // MOCK_TIME: advance the fake clock by 1 min per turn so the
       // state machine sees time progress without real waiting.

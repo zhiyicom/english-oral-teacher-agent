@@ -264,16 +264,20 @@ describe('CLI v0.4 state-machine integration', () => {
     expect(b.stderr).toMatch(/\[cli\] summarize ok/)
   }, 30000)
 
-  it('empty library: first session stderr has NO "Last session" string anywhere (no NPE)', async () => {
+  it('empty library: first session stderr has NO "Last session" segment (no NPE)', async () => {
     const result = await runCli('hi\nexit\n', {
       MINIMAX_API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
-    // Empty DB → loadLastReview returns null → no "Last session" appears anywhere.
-    // Note: the LLM fixture "greeting.json" doesn't include "Last session" so a
-    // false positive from the assistant response is impossible in this input.
-    expect(result.stderr).not.toMatch(/Last session/)
+    // Empty DB → loadLastReview returns null → the rendered [System Context]
+    // block must NOT contain the "Last session" segment. We check for the
+    // specific rendered pattern "- Last session (" (from context-injector.ts
+    // line 54), not just "Last session" — the latter appears in prompts/tools.md
+    // (v0.7.3 doc added a reference like "...in your [System Context] as the
+    // 'Last session' segment") and in the agent-context-injector.ts doc
+    // comments, neither of which are part of the rendered block.
+    expect(result.stderr).not.toMatch(/- Last session \(/)
   }, 20000)
 
   it('5 turns: 5 chat-stream calls + 1 summarizer chat call (call count 5+1)', async () => {
@@ -570,5 +574,45 @@ describe('CLI v0.4 state-machine integration', () => {
     expect(c.exitCode).toBe(0)
     // Session C: lastReview = B, candidates = [A, B], B excluded → 1 result.
     expect(c.stderr).toMatch(/\[cli\] retrieved 1 relevant sessions/)
+  }, 240000)
+
+  // -------- v0.7.3 — memory_search tool (A+B hybrid protocol) --------
+
+  it('v0.7.3 memory_search: triggers 2nd LLM call + stdout shows 2nd-call fixture + no <tool> leak', async () => {
+    // Pre-seed session A so memory_search has 1 candidate to retrieve.
+    // A's fixture (greeting) is the simplest "happy path" — the session
+    // gets a summary + embedding written at END (v0.7.2 wiring).
+    const a = await runCli('hi\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+      HF_ENDPOINT: 'https://hf-mirror.com',
+    })
+    expect(a.exitCode).toBe(0)
+    expect(a.stderr).toMatch(/\[cli\] embedded session\.summary/)
+
+    // Session B: user input triggers the memory-search-input fixture
+    // (matches on "earlier session"). The 1st-call fixture emits a
+    // <tool>memory_search(...)</tool> block; the CLI executes, feeds the
+    // result back as a synthetic user message, and makes a 2nd call.
+    // The 2nd-call fixture (memory-search-followup) matches on the
+    // [tool_result_v073] marker in that synthetic message.
+    const b = await runCli('earlier session\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+      HF_ENDPOINT: 'https://hf-mirror.com',
+    })
+    expect(b.exitCode).toBe(0)
+    // (a) Both stderr markers must appear in order.
+    expect(b.stderr).toMatch(/\[cli\] tool call: memory_search\(/)
+    expect(b.stderr).toMatch(/\[cli\] tool 2nd-call: memory_search\(top_k=2\)/)
+    // (b) stdout must show the 2nd-call fixture text (not the 1st-call
+    //     "Let me check your past sessions..." which is what the student
+    //     would see if the A+B loop was broken).
+    expect(b.stdout).toMatch(/I remember you mentioned Minecraft last week/)
+    // (c) No <tool> block must leak — neither the 1st-call's tool block
+    //     (we already strip on the no-tool fallback path; the A+B path
+    //     also strips via safety pass) nor any 2nd-call one.
+    expect(b.stdout).not.toContain('<tool>')
+    expect(b.stdout).not.toContain('</tool>')
   }, 240000)
 })

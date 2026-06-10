@@ -6,15 +6,19 @@ import type { z } from 'zod'
  * - `name` is the bare identifier the LLM writes.
  * - `description` is what we paste into the system prompt for that tool.
  * - `schema` validates `args` before `execute` runs.
- * - `execute` performs a synchronous side-effect (e.g. DB write) and returns
- *   any value. Whether/how the LLM sees the return value is the caller's
- *   choice — in v0.7 nothing is fed back to the LLM (sync side-effect tool).
+ * - `execute` runs the tool and returns its result. The return type is
+ *   `Promise<unknown> | unknown` to admit both sync side-effect tools
+ *   (v0.7 `mark_mistake` — DB write, no feedback) and async information
+ *   retrieval tools (v0.7.3 `memory_search` — embed + DB read, result
+ *   fed back to the LLM via the A+B hybrid protocol in cli.ts). Callers
+ *   that need the return value can `await` it; awaiting a non-Promise
+ *   just resolves to the value, so sync tools are unaffected.
  */
 export interface Tool {
   readonly name: string
   readonly description: string
   readonly schema: z.ZodTypeAny
-  execute(args: unknown): unknown
+  execute(args: unknown): Promise<unknown> | unknown
 }
 
 export interface ToolRegistry {

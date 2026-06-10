@@ -187,13 +187,41 @@ const middleware: Middleware[] = [
 
 **v1.0 工具清单**：
 
-| 工具名 | 输入 | 副作用 | 用途 |
-|---|---|---|---|
-| `memory_search` | `{query: string, top_k: int}` | 只读 | 检索历史相关摘要 |
-| `topic_select` | `{phase: Phase, exclude_recent_days: int}` | 只读 | 选题（带去重） |
-| `mark_mistake` | `{type, original, corrected}` | 写 SQLite | 记录错例 |
-| `mark_vocabulary` | `{word, context_sentence}` | 写 SQLite | 记录新词 |
-| `mark_homework` | `{content, due_days}` | 写 SQLite | 布置作业 |
+| 工具名 | 输入 | 副作用 | 用途 | 状态 |
+|---|---|---|---|---|
+| `memory_search` | `{query: string, top_k: int}` | 只读 | 检索历史相关摘要 | ✅ v0.7.3（top_k 1-5, default 2）|
+| `topic_select` | `{phase: Phase, exclude_recent_days: int}` | 只读 | 选题（带去重） | 📋 v1.0+（未实现）|
+| `mark_mistake` | `{type, original, corrected}` | 写 SQLite | 记录错例 | ✅ v0.7（实际 schema 含 `category`）|
+| `mark_vocabulary` | `{word, context_sentence}` | 写 SQLite | 记录新词 | 📋 v1.0+（未实现）|
+| `mark_homework` | `{content, due_days}` | 写 SQLite | 布置作业 | 📋 v1.0+（未实现）|
+
+**Tool 接口（`src/agent/tool-registry.ts`）**：
+
+```ts
+export interface Tool {
+  readonly name: string
+  readonly description: string
+  readonly schema: z.ZodTypeAny
+  // v0.7.3 — widened to `Promise<unknown> | unknown` to admit both
+  // sync side-effect tools (mark_mistake, v0.7) and async info-retrieval
+  // tools (memory_search, v0.7.3 — embed is async). Callers can `await`
+  // unconditionally; awaiting a non-Promise resolves to the value, so
+  // sync tools are unaffected.
+  execute(args: unknown): Promise<unknown> | unknown
+}
+```
+
+**v0.7.3 A+B 混合协议**（用于 `memory_search`）：
+
+v0.7 的 `mark_mistake` 是 sync 副作用工具（写 DB，LLM 不需要看 result）。v0.7.3 新增的 `memory_search` 是 async 信息检索工具（LLM 必须看 result 才能回复学生）。两者的 LLM ↔ CLI 协议不同：
+
+- **A 形状**（v0.7 现有）：LLM 仍输出 `<tool>name({json})</tool>` 文本块；CLI 解析 → execute → 把工具块从 stdout 剥掉 → 学生看不到 tool 痕迹
+- **A+B 混合**（v0.7.3 新增）：A 形状仍用，但 execute 完不直接写 stdout —— 而是把 tool result 拼成 synthetic user message 推回 history，**再做 1 次 LLM call（非流式）**，用 2nd-call 的回复作为 final output
+
+A+B 的关键不变量：
+- **1 round-trip**（2nd-call 不再调 tool，递归上限明确）
+- 2nd-call 完成后 safety strip（防 LLM 误输出 `<tool>` 块；prompt 显式禁止 + cli 兜底）
+- synthetic user message 含唯一 marker `[v073_followup_responder]` 供 Replay fixture 匹配 2nd call
 
 **注册方式**：
 
@@ -201,15 +229,34 @@ const middleware: Middleware[] = [
 const tools = [
   defineTool({
     name: 'memory_search',
-    description: '搜索历史 session 摘要',
+    description: '搜索历史 session 摘要（v0.7.3，async + A+B 协议）',
     input: z.object({
-      query: z.string(),
-      top_k: z.number().int().min(1).max(10).default(3)
+      query: z.string().min(1).max(200),
+      top_k: z.number().int().min(1).max(5).default(2)
     }),
-    execute: async (input, ctx) => { /* ... */ }
+    execute: async (input, ctx) => {
+      // 1. embed query
+      // 2. sessions.listWithEmbeddings() → candidates
+      // 3. retrieveRelevant({candidates, queryVec, topK: input.top_k})
+    }
   }),
   // ...
 ]
+```
+
+**v0.7.3 CLI 主循环分支**（`src/cli.ts`，替代 v0.7 的单分支）：
+
+```
+1st-call LLM chatStream
+   │
+   ▼
+parseToolCall(response)  // null or {name, args, rawMatch}
+   │
+   ├─ null                       → stdout response, push to history（v0.7 旧行为）
+   ├─ name === 'mark_mistake'    → strip + execute(sync) + log + stdout（v0.7 旧行为）
+   ├─ name === 'memory_search'   → execute(async) → push synthetic user →
+   │                                client.chat() 2nd call → safety strip → stdout
+   └─ unknown                    → strip + log "tool unknown" + stdout
 ```
 
 ### 2.6 Summarizer
@@ -461,19 +508,37 @@ ContextInjector.run(messages)
    │  - injectMistakes
    │
    ▼
-LLMClient.chat(streaming)
+LLMClient.chat(streaming)   ← 1st call
    │  - 流式返回 tokens
    │
    ├─→ UI: 边显示边 TTS（按句切分增量合成）
    │
-   ├─→ 若有 tool_call:
-   │     ├─→ ToolRegistry.execute(toolCall)
-   │     ├─→ 把 tool result 追加到 messages
-   │     └─→ 递归调用 LLMClient.chat
+   ├─→ parseToolCall(response)  // v0.7.3 — 4 分支
+   │
+   ├─→ name === 'mark_mistake'   (sync side-effect, A 形状):
+   │     ├─→ ToolRegistry.execute(toolCall)  // 写 SQLite
+   │     ├─→ strip tool block from response
+   │     └─→ stdout 剥过的 response
+   │
+   ├─→ name === 'memory_search'  (async info-retrieval, A+B 形状):
+   │     ├─→ ToolRegistry.execute(toolCall)  // embed + DB read
+   │     ├─→ push assistant 1st-call (含 tool 块) 到 history
+   │     ├─→ push synthetic user message 含 [v073_followup_responder] marker
+   │     ├─→ LLMClient.chat()  ← 2nd call（非流式, 同 summarize()）
+   │     ├─→ safety strip 2nd-call response（防 LLM 误输出 tool 块）
+   │     └─→ stdout 2nd-call 剥过的 response
+   │
+   └─→ name === null / unknown
+         └─→ stdout response（v0.7 旧行为）
    │
    ▼
 完成本 turn，等待下一用户消息
 ```
+
+**关键不变量**：
+- `memory_search` 走 A+B = **1 round-trip**（2nd-call 不递归调 tool）
+- 1 round-trip 总 token 成本 ~400（result 200 + 2nd-call 200）
+- 2nd-call LLM 误调 tool → safety strip 兜底（prompt 显式禁止 + cli 兜底）
 
 ### 5.3 END + 归档
 

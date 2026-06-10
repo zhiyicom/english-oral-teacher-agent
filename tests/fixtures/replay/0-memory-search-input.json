@@ -1,0 +1,21 @@
+{
+  "name": "memory-search-input",
+  "match": {
+    "userSaysContains": "earlier session"
+  },
+  "chunks": [
+    {
+      "type": "thinking",
+      "delta": "The student is asking about a past conversation. I should search memory before answering."
+    },
+    {
+      "type": "text",
+      "delta": "<tool>memory_search({\"query\":\"what the student did in an earlier session\",\"top_k\":2})</tool>"
+    },
+    { "type": "text", "delta": " Let me check your past sessions..." }
+  ],
+  "result": {
+    "content": "<tool>memory_search({\"query\":\"what the student did in an earlier session\",\"top_k\":2})</tool> Let me check your past sessions...",
+    "thinking": "The student is asking about a past conversation. I should search memory before answering."
+  }
+}

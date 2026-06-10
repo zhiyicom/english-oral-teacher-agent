@@ -1,0 +1,18 @@
+{
+  "name": "memory-search-followup",
+  "match": {
+    "userSaysContains": "v073_followup_responder"
+  },
+  "chunks": [
+    {
+      "type": "thinking",
+      "delta": "The tool returned past session info. I should reference it naturally in my response to the student."
+    },
+    { "type": "text", "delta": "I remember you mentioned Minecraft last week! " },
+    { "type": "text", "delta": "Tell me more about what you were building." }
+  ],
+  "result": {
+    "content": "I remember you mentioned Minecraft last week! Tell me more about what you were building.",
+    "thinking": "The tool returned past session info. I should reference it naturally in my response to the student."
+  }
+}
