@@ -1,0 +1,15 @@
+{
+  "name": "budget-warn-cache",
+  "match": { "userSaysContains": "cache budget" },
+  "chunks": [
+    {
+      "type": "usage",
+      "inputTokens": 200,
+      "outputTokens": 12,
+      "cacheReadTokens": 1800,
+      "cacheCreationTokens": 0
+    },
+    { "type": "text", "delta": "Got it, let's keep going!" }
+  ],
+  "result": { "content": "Got it, let's keep going!" }
+}

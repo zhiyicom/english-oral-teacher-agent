@@ -630,6 +630,31 @@ describe('CLI v0.4 state-machine integration', () => {
     expect(result.stdout).toMatch(/let's keep going/i)
   }, 20000)
 
+  it('v0.7.5.1 (V751-001 fix) warn fires when TOTAL context (fresh + cache_read) >= 80% of budget', async () => {
+    // Regression test for V751-001. The pre-fix warn used only
+    // `usage.inputTokens` (fresh), so under Anthropic prompt caching the
+    // warn would never fire — fresh stays small (~30-700) but the cached
+    // static portion (~1800-2400) still counts against the LLM's context
+    // window. v0.7.5.1 fixes this: warn uses
+    // `inputTokens + cacheReadTokens + cacheCreationTokens`.
+    //
+    // Fixture: inputTokens=200 (fresh), cacheReadTokens=1800 (cached
+    // static), total=2000. With budget=2000, 2000/2000=100% ≥ 80% → warn.
+    // Pre-fix code would have computed 200/2000=10% and NOT warned.
+    const result = await runCli('cache budget\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+      LLM_CONTEXT_BUDGET_TOKENS: '2000',
+    })
+    expect(result.exitCode).toBe(0)
+    // Usage log shows the raw values (for grep-based debug).
+    expect(result.stderr).toMatch(
+      /\[cli\] tokens: input=200 output=12 cache_read=1800 cache_creation=0/,
+    )
+    // Warn fires at 100% (rounded from 2000/2000=1.0).
+    expect(result.stderr).toMatch(/\[cli\] warn: context usage 100% \(budget=2000\)/)
+  }, 20000)
+
   it('v0.7.3 memory_search: triggers 2nd LLM call + stdout shows 2nd-call fixture + no <tool> leak', async () => {
     // Pre-seed session A so memory_search has 1 candidate to retrieve.
     // A's fixture (greeting) is the simplest "happy path" — the session

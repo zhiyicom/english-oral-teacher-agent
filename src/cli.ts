@@ -396,6 +396,14 @@ export async function main(): Promise<void> {
       // v0.7.5 — log actual token usage after each LLM call. Silent under
       // Replay fixtures (no usage chunk emitted). With RUN_LIVE_LLM=1 the
       // Anthropic provider yields the real message_start.usage event.
+      // v0.7.5.1 (V751-001 fix) — the 80% warn uses the TOTAL context the
+      // LLM actually sees: `inputTokens + cacheReadTokens + cacheCreationTokens`.
+      // Anthropic's `input_tokens` is the FRESH count (cached portion reported
+      // separately). With cache_control: ephemeral in effect, fresh stays
+      // small (~30-700) but the cached static portion (~1800-2400) still
+      // counts against the LLM's context window. Checking fresh alone would
+      // make the warn never fire under caching — see v0.7.5-validation-report.md
+      // §scenario-1 analysis.
       if (usage) {
         process.stderr.write(
           `[cli] tokens: input=${usage.inputTokens} output=${usage.outputTokens} cache_read=${usage.cacheReadTokens} cache_creation=${usage.cacheCreationTokens}\n`,
@@ -403,12 +411,13 @@ export async function main(): Promise<void> {
         // 80% warn — fires at most once per session (per v0.7.5-scope §6
         // risk #5). The guard `env.LLM_CONTEXT_BUDGET_TOKENS > 0` is
         // defensive; zod already enforces min(1).
+        const totalInput = usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens
         if (
           !warned &&
           env.LLM_CONTEXT_BUDGET_TOKENS > 0 &&
-          usage.inputTokens / env.LLM_CONTEXT_BUDGET_TOKENS >= 0.8
+          totalInput / env.LLM_CONTEXT_BUDGET_TOKENS >= 0.8
         ) {
-          const pct = Math.round((usage.inputTokens / env.LLM_CONTEXT_BUDGET_TOKENS) * 100)
+          const pct = Math.round((totalInput / env.LLM_CONTEXT_BUDGET_TOKENS) * 100)
           process.stderr.write(
             `[cli] warn: context usage ${pct}% (budget=${env.LLM_CONTEXT_BUDGET_TOKENS})\n`,
           )
