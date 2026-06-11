@@ -280,6 +280,31 @@ describe('CLI v0.4 state-machine integration', () => {
     expect(result.stderr).not.toMatch(/- Last session \(/)
   }, 20000)
 
+  it('first-turn ctx-block dump has NO duplicate [System Context] prefix (v0.7.7 / V752-001 fix)', async () => {
+    // Fresh session → first turn → CLI dumps the rendered [System Context]
+    // block to stderr (first-turn-only log). v0.7.6 and earlier produced a
+    // double "[System Context][System Context]" prefix on the first content
+    // line because the CLI template prepended an extra token that
+    // sysSeg.dynamic already starts with. v0.7.7 drops the redundant
+    // literal so the dump reads cleanly (V752-001 cosmetic fix).
+    const result = await runCli('hi\nexit\n', {
+      MINIMAX_API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(result.exitCode).toBe(0)
+
+    const stderrLines = result.stderr.split('\n')
+    const ctxBlockIdx = stderrLines.findIndex((l) => l.startsWith('[cli] ctx-block:'))
+    expect(ctxBlockIdx).toBeGreaterThanOrEqual(0)
+    // The first content line right after the "[cli] ctx-block:" header must
+    // be the exact dynamic-block header, not a doubled prefix.
+    expect(stderrLines[ctxBlockIdx + 1]).toBe('[System Context]')
+    // Belt-and-suspenders: the doubled-prefix string appears nowhere in the
+    // dump body (defends against future refactors that re-introduce it).
+    const dumpBody = stderrLines.slice(ctxBlockIdx).join('\n')
+    expect(dumpBody).not.toContain('[System Context][System Context]')
+  }, 20000)
+
   it('5 turns: 5 chat-stream calls + 1 summarizer chat call (call count 5+1)', async () => {
     const inputs = ['hi', 'fine', 'castle', 'creeper', 'played']
     const result = await runCli(`${inputs.join('\n')}\n`, {

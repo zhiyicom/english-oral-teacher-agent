@@ -451,7 +451,13 @@ export async function main(): Promise<void> {
       // lastReview/relevantPast injection is first-turn-only too — would be
       // identical on later turns and would just spam stderr.
       if (wasFirstTurn) {
-        process.stderr.write(`[cli] ctx-block:\n[System Context]${sysSeg.dynamic}\n`)
+        // v0.7.7 V752-001 fix: sysSeg.dynamic already starts with the
+        // "[System Context]" header (buildSystemContext emits it; see
+        // context-injector.test.ts L1 "starts with [System Context] header"),
+        // so the CLI no longer prepends another one. v0.7.6 and earlier
+        // produced a double prefix on the stderr dump (cosmetic; LLM never
+        // saw it because the dynamic block is sent to the SDK directly).
+        process.stderr.write(`[cli] ctx-block:\n${sysSeg.dynamic}\n`)
       }
       reader.writePrompt('[Teacher]: ')
       // v0.7 — buffer the full response BEFORE writing to stdout. We need to
