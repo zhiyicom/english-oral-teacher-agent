@@ -15,13 +15,28 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  UI Layer                                                        │
-│  ┌──────────┐  ┌──────────────┐  ┌────────────┐                 │
-│  │  Main    │  │  Session     │  │  Settings  │                 │
-│  │  Screen  │  │  Window      │  │  Panel     │                 │
-│  └──────────┘  └──────────────┘  └────────────┘                 │
+│  UI Layer (v0.8 — React 19 + Vite 6)                             │
+│  ┌──────────┐  ┌──────────────┐  ┌────────────┐  ┌──────────┐  │
+│  │  Main    │  │  Session     │  │  History   │  │ Settings │  │
+│  │  Page    │  │  Window      │  │  Detail    │  │  Panel   │  │
+│  └──────────┘  └──────────────┘  └────────────┘  └──────────┘  │
 └──────────────────────────────────────────────────────────────────┘
-                              │ IPC / events
+                              │ HTTP REST + SSE
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Web Server (v0.8 — Hono on Node, src/server.ts)                 │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │
+│  │  Sessions    │  │  Settings    │  │  SSE Stream  │            │
+│  │  REST API    │  │  REST API    │  │  Handler     │            │
+│  └──────────────┘  └──────────────┘  └──────────────┘            │
+│                              │ uses                               │
+│                              ▼                                   │
+│  ┌──────────────────────────────────────────────────┐            │
+│  │  turn.ts (v0.8.1 — extracted from cli.ts)        │            │
+│  │  runTurn(input) → AsyncGenerator<TurnEvent>      │            │
+│  └──────────────────────────────────────────────────┘            │
+└──────────────────────────────────────────────────────────────────┘
+                              │ (CLI 不退役: pnpm dev → src/cli.ts → 同一个 turn.ts)
                               ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │  Agent Core                                                      │
@@ -67,6 +82,7 @@
 3. **单 agent + 工具** —— 主对话一个 agent；summarizer 是单独的 sub-agent
 4. **本地优先** —— 所有数据（DB、向量、文件）都在 `data/`
 5. **提示词即数据** —— SOUL/AGENTS/USER/topic 都是 markdown，git 进版本
+6. **v0.8+ 双形态入口** —— CLI (`pnpm dev`) 和 Web (`pnpm serve` + 浏览器) 共享同一个 `turn.ts`，agent core 不动
 
 ---
 
@@ -438,38 +454,53 @@ src/memory/
 
 ## 4. UI 层
 
-### 4.1 框架选型（待决）
+### 4.1 框架选型
 
-候选：
+**v0.8 决策（2026-06-11）**：**React 19 + Vite 6 + Tailwind v4** + React Router 7
 
-| 框架 | 优点 | 缺点 |
-|---|---|---|
-| **React** | 生态最大、招人容易 | 包大 |
-| **Svelte** | 编译时优化、响应式简洁 | 生态较小 |
-| **Solid** | 细粒度响应式、性能极佳 | 生态最小 |
+理由：
+- React 19 生态最大，OSS 社区最熟悉（PRD F9.1 目标是 future-GitHub）
+- Vite 6 dev 体验最佳（HMR < 50ms）
+- Tailwind v4 zero-config（v4 是首个原生支持 Vite 6 的版本）
+- React Router 7 = Remix 思路 + 简化 API，client-side 路由够用
+- 状态管理：**用 React 19 内置 hooks（useState + useReducer）+ 自写 30 行 `useApi` cache**，**不引** Redux/Zustand/React Query
 
-**建议**：Svelte（性能 + 简洁性最佳，符合"轻量"基调）；v0.2 拍板。
+### 4.2 桌面壳
 
-### 4.2 桌面壳（待决）
+**v0.8 决策（2026-06-11）**：**纯 Web**（localhost:3000 / dev 5173）
 
-候选：
+理由：
+- DEV_PLAN §8 风险：Tauri Windows 麻烦（Rust toolchain 链）
+- 符合"minimal setups"偏好（无额外 deps）
+- 单进程部署：server (Hono) 既 serve API 又 serve `web/dist/` static + SPA fallback
+- 未来 Tauri 评估：v0.8.5+ 看用户反馈；包装 v0.8 已有的 server 即可
 
-| 方案 | 优点 | 缺点 |
-|---|---|---|
-| **Tauri** | 小（~5MB）、快、Rust 后端 | 需装 Rust |
-| **Electron** | 成熟、npm 生态 | 大（>100MB） |
-| **纯 Web**（localhost） | 零安装 | 每次启动需开服务 |
+### 4.3 组件划分（v0.8 实际布局）
 
-**建议**：先做**纯 Web**（localhost），v1.0 后评估 Tauri 包装。
+| 组件 | 路径 | 状态 | Sub-sprint |
+|---|---|---|---|
+| Main Page（会话列表） | `web/src/components/MainPage.tsx` | PRD §11.2 | v0.8.2 |
+| Session Window | `web/src/components/SessionPage.tsx` | PRD §11.3 | v0.8.3 |
+| History Detail（只读） | `web/src/components/HistoryPage.tsx` | PRD §11.2 | v0.8.4 |
+| Settings Panel | `web/src/components/SettingsPage.tsx` | PRD §9 | v0.8.4 |
+| Shared (Header / Bubble / PhaseTag / Spinner) | `web/src/components/shared/` | — | v0.8.2-v0.8.5 |
+| API client + SSE consumer | `web/src/lib/{api,sse,settings}.ts` | — | v0.8.2-v0.8.4 |
+| i18n (zh + en stub) | `web/src/i18n/` | REQUIREMENTS §4 "中英双语"| v0.8.5 |
 
-### 4.3 组件划分
+### 4.4 Web Server（v0.8 新模块）
 
-| 组件 | 路径 | 状态 |
-|---|---|---|
-| Main Screen（会话列表） | `src/ui/main/` | PRD §11.2 |
-| Session Window | `src/ui/session/` | PRD §11.3 |
-| Settings Panel | `src/ui/settings/` | PRD §9 |
-| Session Detail（只读） | `src/ui/session-detail/` | PRD §11.2 |
+| 路径 | 用途 |
+|---|---|
+| `src/server.ts` | Hono HTTP + SSE 入口；启动时 listen `env.PORT`（默认 3000）|
+| `src/agent/turn.ts` | [v0.8.1 新] REPL 主循环抽出 → `runTurn(input): AsyncGenerator<TurnEvent, TurnOutput>`；CLI 和 server 共用 |
+| `src/prompts/loader.ts` | [v0.8.4 加 `updateUserSettings()` API] 原子写 USER.md frontmatter（proper-lockfile）|
+
+API contract（详见 [v0.8-design.md §3](./sprint/v0.8-design.md#3-server-api-contract)）：
+- `GET /api/sessions` / `POST /api/sessions` / `GET /api/sessions/:id`
+- `GET /api/sessions/:id/stream?action=turn&input=...` (SSE)
+- `GET /api/settings` / `PUT /api/settings`
+
+SSE events: `phase / text-chunk / tool-call / tool-result / usage / segment / error / done`（v0.7.6 已有的 5 段 per-segment logging 自然对应 `segment` event）。
 
 ---
 
@@ -825,3 +856,5 @@ ui/  →  agent/  →  { llm/, voice/, storage/, memory/ }
 | 2026-06-10 | 0.3 | §3.4 Memory：LanceDB 换成 SQLite `sessions.embedding BLOB`（v0.7.2 决策）；模块结构改成 embedder + vector-store + retrieve-relevant；模型选型定到本地 MiniLM-L6-v2 int8（384 维）；D2/D5/D10 更新；§8 依赖 `lancedb` → `@huggingface/transformers` + `onnxruntime-node`；§10 `data/vectors/` 路径移除；env 增加 `HF_ENDPOINT` |
 | 2026-06-10 | 0.4 | §2.3 Prompt Builder：新增 `buildFinalSystemSplit` → `{ static, dynamic }`；§3.1 LLM Client：`SystemBlock` / `UsageChunk` / `ChatChunk` v0.7.5 字段；§5.2 主对话循环：加 `truncateHistory` + `systemBlocks` + `cache_control` + usage log + 80% warn 步骤；§10.2 env 新增 `LLM_CONTEXT_BUDGET_TOKENS`（默认 6000） |
 | 2026-06-11 | 0.5 | **v0.7.6 (3-axis wrap-up)** — §2.3 Prompt Builder：`buildFinalSystemSplit` → `buildFinalSystemSegments` (return type 增 `segments: {phase,last,relevant,active,mistakes}` token counts)；§3.1 LLM Client：`toAnthropicMessages` 给 messages[] 末尾 2 条加 `cache_control: ephemeral` (B4)；§4 Tools：v0.7.6 B2 增 `summarize_history` (marker tool, CLI 改写 history → A+B 2nd call)，D5 增 `topic_select` (pure compute, A+B 2nd call)；§5.2 主循环：4 工具分支 (no-tool / mark_mistake / memory_search / summarize_history / topic_select)；`truncateHistory` 加 `anchorPair` 选项 (B1) 保护首对 user/assistant；`chatStreamWithRetry` 1x retry + catch-all 友好降级 + auto-save (V751-002)；`buildSystemContext` 返 `SystemContextResult` 带 5 段 token counts；`formatToolResult` 增 `[v076_*]` 标记 |
+| 2026-06-11 | 0.6 | **v0.7.7 (V752-001 cosmetic closeout)** — `src/cli.ts:454` 去掉 stderr 模板里冗余 `[System Context]` 前缀（`sysSeg.dynamic` 已自带 header；`context-injector.test.ts:50` L1 锁住）；新增 1 L3 test (`tests/agent/cli-integration.test.ts`) 断言 ctx-block 第一内容行精确等于 `[System Context]` + 双前缀 string 全文不出现；v0.7.x **真正收官**。 |
+| 2026-06-11 | 0.7 | **v0.8 计划 (Web UI)** — §1 系统概览加 Web Server 层 (Hono on Node)；§4.1 框架选型 **决策** = React 19 + Vite 6 + Tailwind v4 + React Router 7（react-query/zustand 不引）；§4.2 桌面壳 **决策** = 纯 Web（localhost，Tauri 不做）；§4.3 组件划分：`src/ui/*` → `web/src/components/*`（4 页 + shared + lib + i18n）；§4.4 新模块 Web Server：`src/server.ts` (Hono) + `src/agent/turn.ts` (从 cli.ts 抽 REPL 主循环) + `src/prompts/loader.ts` 新增 `updateUserSettings()` 原子写。拆 5 sub-sprint (v0.8.1-v0.8.5)，8.5 天；3 REST + 1 SSE + 2 settings endpoints；CLI 不退役。详见 [v0.8-scope.md](./sprint/v0.8-scope.md) + [v0.8-design.md](./sprint/v0.8-design.md)。 |
