@@ -13,6 +13,9 @@ const EnvSchema = z.object({
   // (sliding window) when the estimated input exceeds this. Default 6000
   // per PRD §5.3; range 1..200_000. Per-session warn fires at 80%.
   LLM_CONTEXT_BUDGET_TOKENS: z.coerce.number().int().min(1).max(200000).default(6000),
+  // v0.8.1 — HTTP server listen port for src/server.ts. Default 3000.
+  // Range 1..65535. CLI ignores this (it doesn't bind a port).
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   APP_DATA_DIR: z.string().default('./data'),
   APP_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   RUN_LIVE_LLM: z.enum(['0', '1']).optional(),

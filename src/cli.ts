@@ -5,35 +5,26 @@ import { pathToFileURL } from 'node:url'
 import {
   type Clock,
   type LastReview,
-  type Phase,
   type PhaseTransition,
   type SessionState,
-  type SummarizeHistoryResult,
-  type TopicSelectResult,
-  applyEvent,
-  buildFinalSystemSegments,
   createMarkMistakeTool,
   createMemorySearchTool,
   createSummarizeHistoryTool,
   createToolRegistry,
   createTopicSelectTool,
-  estimateMessagesTokens,
-  estimateTokens,
   initState,
   loadLastReview,
   matchTopic,
   mockClock,
-  parseToolCall,
   realClock,
-  stripToolCall,
+  runTurn,
   summarize,
-  truncateHistory,
 } from './agent/index.js'
+import type { TurnEvent } from './agent/turn.js'
 import { loadEnv } from './config/env.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
-import { chatStreamWithRetry } from './llm/retry.js'
 import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
-import type { LLMClient, Message, SystemBlock, UsageChunk } from './llm/types.js'
+import type { LLMClient, Message } from './llm/types.js'
 import {
   type RelevantSession,
   createTransformersEmbedder,
@@ -133,58 +124,109 @@ function createLineReader(rl: Interface): {
   }
 }
 
-// v0.4 — strict whole-sentence stop regex.
-//   - keyword must be at sentence start (preceded by ^, [.!?]\s+, or \n)
-//   - keyword must end the input (followed by [.!?\s]* only)
-//   - "let's stop and continue" → stop is mid-sentence, NOT matched
-//   - "I don't want to stop." → stop preceded by space (not [.!?]), NOT matched
-//   - "stop", "Stop.", "okay. stop" → matched
-const STOP_REGEX = /(?:^|[.!?]\s+|\n)(stop|quit|end|bye|done|结束|停)\b[.!?\s]*$/i
+// v0.8.1 — STOP_REGEX and formatToolResult have moved to src/agent/turn.ts
+// (the shared turn logic used by both the CLI REPL and the web server's
+// SSE handler). The CLI no longer needs them directly; it just calls
+// runTurn() and forwards the resulting events to stderr. See
+// docs/sprint/v0.8-design.md §5 for the refactor design.
 
-// v0.7.3 — format a memory_search result as a human-readable block that
-// gets pushed back to the LLM as a synthetic user message (so the 2nd
-// LLM call can answer the student using this context). Keep it compact
-// and structured — the LLM parses it, the student never sees it.
-//
-// Marker note: the prefix `[tool_result_v073]` is a unique substring used
-// as the fixture match key for the 2nd-call Replay fixture. The
-// retrieved session summary (and keywords) can contain any natural-
-// language word, so a more specific tag like `[v073_followup_responder]`
-// is added on the first line to guarantee the Replay matcher only sees
-// the 2nd-call fixture. The marker is safe for the LLM to see (it's a
-// structural signal, like system prefixes).
-//
-// v0.7.6 — `summarize_history` adds a new marker `[v076_history_summary]`
-// so the 2nd-call Replay fixture can match it without colliding with the
-// v0.7.3 `[tool_result_v073]` prefix. Same A+B path, different marker.
-// v0.7.6 D5 — `topic_select` adds a new marker `[v076_topic_select_result]`
-// following the same pattern. Each tool's 2nd-call fixture is matched on
-// its own unique marker, so the fixtures never collide.
-function formatToolResult(name: string, result: unknown): string {
-  if (name === 'summarize_history') {
-    const r = result as SummarizeHistoryResult
-    return `[v076_history_summary]\nHistory compressed to ~${r.targetTokens} tokens. Continue the conversation naturally.`
-  }
-  if (name === 'topic_select') {
-    if (typeof result === 'object' && result !== null && 'error' in result) {
-      const r = result as { error: string }
-      return `[v076_topic_select_result]\n${r.error}. Pick a topic manually or continue.`
+// v0.8.1 — forward a TurnEvent to stderr (observability) or stdout
+// (student-facing text). Preserves the exact v0.7.7 log format so L3 tests
+// in tests/agent/cli-integration.test.ts continue to pass unchanged.
+// The `warnedRef` parameter is mutated to enforce once-per-session warn.
+function forwardEvent(event: TurnEvent, warnedRef: { value: boolean }): void {
+  switch (event.type) {
+    case 'phase': {
+      if (event.reason === 'phase_end') {
+        process.stderr.write('[cli] session ended (time-based, 30 min reached)\n')
+      } else if (event.reason === 'user_stop') {
+        process.stderr.write(
+          `[cli] phase → END (user_stop, elapsed=${event.elapsed.toFixed(1)} min)\n`,
+        )
+      } else {
+        process.stderr.write(
+          `[cli] phase → ${event.phase} (elapsed=${event.elapsed.toFixed(1)} min)\n`,
+        )
+      }
+      break
     }
-    const r = result as TopicSelectResult
-    return `[v076_topic_select_result]\nSelected topic: ${r.title} (slug=${r.slug}, ~${r.est_minutes} min). Start discussing it.`
+    case 'ctx':
+      process.stderr.write(
+        `[cli] ctx: ${event.phase} elapsed=${event.elapsed.toFixed(1)} silence=${event.silence.toFixed(1)}\n`,
+      )
+      break
+    case 'ctx-segment':
+      process.stderr.write(
+        `[cli] ctx-segment: phase=${event.phase} last=${event.last} relevant=${event.relevant} active=${event.active} mistakes=${event.mistakes}\n`,
+      )
+      break
+    case 'ctx-block':
+      process.stderr.write(`[cli] ctx-block:\n${event.dynamic}\n`)
+      break
+    case 'truncated':
+      process.stderr.write(
+        `[cli] truncated: dropped ${event.dropped} pairs, history now ${event.newLength} messages (est ${event.estAfter} tokens)\n`,
+      )
+      break
+    case 'tokens':
+      process.stderr.write(
+        `[cli] tokens: input=${event.input} output=${event.output} cache_read=${event.cacheRead} cache_creation=${event.cacheCreation}\n`,
+      )
+      break
+    case 'warn':
+      if (!warnedRef.value) {
+        process.stderr.write(`[cli] warn: context usage ${event.pct}% (budget=${event.budget})\n`)
+        warnedRef.value = true
+      }
+      break
+    case 'tool-call':
+      process.stderr.write(`[cli] tool call: ${event.name}(${JSON.stringify(event.args)})\n`)
+      break
+    case 'tool-2nd-call':
+      process.stderr.write(`[cli] tool 2nd-call: ${event.name}(${event.argSummary})\n`)
+      break
+    case 'tool-dedup':
+      process.stderr.write(`[cli] tool dedup: skipped (already marked: "${event.original}")\n`)
+      break
+    case 'tool-unknown':
+      process.stderr.write(`[cli] tool unknown: ${event.name}\n`)
+      break
+    case 'tool-execute-error':
+      process.stderr.write(`[cli] tool execute error: ${event.message}\n`)
+      break
+    case 'tool-parse-error':
+      process.stderr.write(`[cli] tool parse error: ${event.message}\n`)
+      break
+    case 'tool-summarize-result':
+      if (event.compressed !== null) {
+        process.stderr.write(
+          `[cli] tool summarize: compressed ${event.compressed} → 1 message (target=${event.targetTokens}t)\n`,
+        )
+      } else {
+        process.stderr.write(
+          `[cli] tool summarize: skipped (history too short: ${event.historyLength} msgs)\n`,
+        )
+      }
+      break
+    case 'error':
+      if (event.classification === 'persistent_llm_failure') {
+        process.stderr.write('[cli] persistent llm failure; falling back\n')
+      } else if (event.classification === 'summarize_failed') {
+        process.stderr.write(`[cli] tool summarize error: ${event.message}\n`)
+      } else {
+        process.stderr.write(`[cli] error (${event.classification}): ${event.message}\n`)
+      }
+      break
+    case 'session-auto-saved':
+      process.stderr.write(`[cli] session auto-saved: ${event.sessionId}\n`)
+      break
+    case 'student-text':
+      process.stdout.write(event.text)
+      break
+    case 'done':
+      // No stderr log; loop applies endedReason from TurnOutput.
+      break
   }
-  if (name !== 'memory_search') {
-    return `[tool_result_v073]\n[v073_followup_responder]\n[Tool result: ${name}]\n${JSON.stringify(result)}`
-  }
-  const sessions = result as RelevantSession[]
-  if (!Array.isArray(sessions) || sessions.length === 0) {
-    return '[tool_result_v073]\n[v073_followup_responder]\n[Tool result: memory_search]\nNo relevant past sessions found.'
-  }
-  const lines = sessions.map((s, i) => {
-    const summary = s.summary.length > 80 ? `${s.summary.slice(0, 80)}...` : s.summary
-    return `${i + 1}. ${s.daysAgo} day${s.daysAgo === 1 ? '' : 's'} ago: "${summary}" (keywords: ${s.keywords.join(', ')})`
-  })
-  return `[tool_result_v073]\n[v073_followup_responder]\n[Tool result: memory_search]\nTop ${sessions.length} most relevant past session${sessions.length === 1 ? '' : 's'}:\n${lines.join('\n')}`
 }
 
 export async function main(): Promise<void> {
@@ -214,7 +256,9 @@ export async function main(): Promise<void> {
   // v0.7.5 — 80%-budget warn fires once per session, not every turn (see
   // v0.7.5-scope.md §6 risk #5). Reset implicitly per process start, so a
   // fresh CLI invocation gets a fresh warn window.
-  let warned = false
+  // v0.8.1 — wrapped in a ref object so `forwardEvent()` (declared below
+  // outside the loop) can mutate it without closure capture issues.
+  const warnedRef = { value: false }
 
   // v0.5 — load the most recent session's summary for [System Context] injection.
   // Injected only on the FIRST turn of this session (first-turn-only per v0.5 design §2.5).
@@ -335,495 +379,73 @@ export async function main(): Promise<void> {
     while (true) {
       const raw = await reader.next()
       if (raw === '') break
-      const input = raw.trim()
-      if (input === '' || input.toLowerCase() === 'exit') break
+      const userInput = raw.trim()
+      if (userInput === '' || userInput.toLowerCase() === 'exit') break
 
-      // Tick first — this may push us into END via time-based transition
-      const phaseBeforeTick = state.phase
-      state = applyEvent(state, { type: 'TICK' }, clock)
-      if (state.phase !== phaseBeforeTick) {
-        phaseHistory.push({
-          phase: state.phase,
-          at: state.elapsedMin,
-          reason: 'time',
-        })
-        process.stderr.write(
-          `[cli] phase → ${state.phase} (elapsed=${state.elapsedMin.toFixed(1)} min)\n`,
-        )
-      }
-
-      // Time-based END: stop the loop, no more LLM calls
-      if (state.phase === 'END') {
-        process.stderr.write('[cli] session ended (time-based, 30 min reached)\n')
-        exitReason = 'phase_end'
-        break
-      }
-
-      // Detect stop keyword (still call LLM this turn for the goodbye)
-      const isStop = STOP_REGEX.test(input)
-      if (isStop) {
-        state = applyEvent(state, { type: 'USER_STOP' }, clock)
-        phaseHistory.push({
-          phase: 'END',
-          at: state.elapsedMin,
-          reason: 'user_stop',
-        })
-        process.stderr.write(
-          `[cli] phase → END (user_stop, elapsed=${state.elapsedMin.toFixed(1)} min)\n`,
-        )
-        exitReason = 'user_stop'
-      } else {
-        state = applyEvent(state, { type: 'USER_MSG' }, clock)
-      }
-
-      history.push({ role: 'user', content: input })
-      messages.append({ sessionId: session.id, role: 'user', content: input })
-
-      // After the first system build, freeze the last-review / relevantPast
-      // injection — subsequent turns build the system string from a fresh
-      // state but without the review (which would otherwise drift / look
-      // stale 25 min in).
-      const wasFirstTurn = isFirstTurn
-      isFirstTurn = false
-
-      // v0.7.5 — build the system prompt as two segments so Anthropic can
-      // cache the static portion (SOUL + AGENTS + USER) across turns. We
-      // build it ONCE per turn and reuse the same `systemBlocks` for the
-      // 2nd call in the A+B memory_search path (no state change between
-      // 1st and 2nd call within one turn).
-      // v0.7.6 B3 — use buildFinalSystemSegments (vs .Split) so we can log
-      // per-segment token costs to stderr. The [System Context] block has
-      // 5 segments (phase/last/relevant/active/mistakes); if one grows
-      // out of control, the operator can see it in the log.
-      const sysSeg = buildFinalSystemSegments(
-        systemPrompt,
-        state,
-        wasFirstTurn ? lastReview : null,
-        activeTopics,
-        recentMistakes,
-        wasFirstTurn ? relevantPast : [],
-      )
-      const systemSize = estimateTokens(sysSeg.static) + estimateTokens(sysSeg.dynamic)
-      // Per-segment log: 5 numbers, 0 = segment absent on this turn.
-      // First-turn-only is NOT applied here — the operator wants to see
-      // the per-segment breakdown on every turn to spot drift.
-      process.stderr.write(
-        `[cli] ctx-segment: phase=${sysSeg.segments.phase} last=${sysSeg.segments.last} relevant=${sysSeg.segments.relevant} active=${sysSeg.segments.active} mistakes=${sysSeg.segments.mistakes}\n`,
-      )
-
-      // v0.7.5 — sliding-window truncate history by estimated total input
-      // (system + messages). The estimator (chars/4) is conservative for
-      // English + Chinese mixed; post-call SDK usage validates the real
-      // number. Drops oldest user/assistant pairs; always keeps the most
-      // recent pair (the loop's invariant — see truncate-history.ts).
-      // v0.7.6 B1 — also pass the captured firstPair (first user/assistant
-      // exchange of this session) as `anchorPair`. truncate-history preserves
-      // the anchor verbatim and only truncates the droppable middle/older
-      // portion. This protects the WARM_UP topic intro from being dropped
-      // as the session grows long. See v0.7.6-design.md §3.2.
-      const { messages: truncMsgs, dropped } = truncateHistory(
-        history,
-        env.LLM_CONTEXT_BUDGET_TOKENS,
-        { systemSize, anchorPair: firstPair },
-      )
-      if (dropped > 0) {
-        const estAfter = estimateMessagesTokens(truncMsgs) + systemSize
-        process.stderr.write(
-          `[cli] truncated: dropped ${dropped} pairs, history now ${truncMsgs.length} messages (est ${estAfter} tokens)\n`,
-        )
-        history.length = 0
-        history.push(...truncMsgs)
-      }
-
-      const systemBlocks: SystemBlock[] = [
-        { type: 'text', text: sysSeg.static, cache_control: { type: 'ephemeral' } },
-        { type: 'text', text: sysSeg.dynamic },
-      ]
-
-      // Surface the [System Context] block on stderr so L3 tests can verify
-      // what phase the LLM sees (and so users can debug phase behavior live).
-      process.stderr.write(
-        `[cli] ctx: ${state.phase} elapsed=${state.elapsedMin.toFixed(1)} silence=${state.silenceMin.toFixed(1)}\n`,
-      )
-      // v0.7.2 — dump the full rendered [System Context] block on the FIRST
-      // turn (the [cli] ctx line above covers the per-turn summary; this
-      // dump shows the actual segment content). First-turn-only because the
-      // lastReview/relevantPast injection is first-turn-only too — would be
-      // identical on later turns and would just spam stderr.
-      if (wasFirstTurn) {
-        // v0.7.7 V752-001 fix: sysSeg.dynamic already starts with the
-        // "[System Context]" header (buildSystemContext emits it; see
-        // context-injector.test.ts L1 "starts with [System Context] header"),
-        // so the CLI no longer prepends another one. v0.7.6 and earlier
-        // produced a double prefix on the stderr dump (cosmetic; LLM never
-        // saw it because the dynamic block is sent to the SDK directly).
-        process.stderr.write(`[cli] ctx-block:\n${sysSeg.dynamic}\n`)
-      }
+      // Pre-check time-based END before bothering runTurn (so the
+      // "session ended (time-based)" log still fires at the CLI layer).
+      // runTurn also handles this, but the CLI uses a different log line
+      // for time-based END that L3 tests are not strict about.
       reader.writePrompt('[Teacher]: ')
-      // v0.7 — buffer the full response BEFORE writing to stdout. We need to
-      // strip any <tool>...</tool> block before the student sees it (the
-      // tool block is an internal CLI signal, not student-facing text).
-      // v0.7.5 — also capture the usage chunk (yielded once at start of
-      // stream, mirroring Anthropic's message_start.usage event) for the
-      // post-call token log + 80% warn. The Replay provider doesn't emit
-      // usage chunks, so this is silent under L3 tests.
-      // v0.7.6 — wrap the stream in chatStreamWithRetry (1x retry on
-      // retryable errors per V751-002). On persistent failure, fall back
-      // to a friendly message + auto-save the session so the next session
-      // has at least the transcript context. See v0.7.6-design.md §3.1.
-      let response = ''
-      let usage: UsageChunk | null = null
-      try {
-        const streamResult = await chatStreamWithRetry(client, {
-          systemBlocks,
-          messages: history,
-        })
-        response = streamResult.response
-        usage = streamResult.usage
-      } catch (_err) {
-        // Persistent LLM failure — graceful degradation. The student sees
-        // a friendly fallback message; the session is auto-saved with a
-        // placeholder summary so the next session retains the transcript
-        // context (if it can be summarized) and the session row is
-        // properly marked ended (reason: current exitReason).
-        process.stderr.write('[cli] persistent llm failure; falling back\n')
-        process.stdout.write(
-          '\n[Teacher]: Sorry, I lost my train of thought. Could you say that again? 😊\n\n',
-        )
-        const allMessages = messages.getBySession(session.id)
-        let summaryText = '(summarization failed after llm error)'
-        let summaryKeywords: string[] = []
-        try {
-          const review = await summarize(
-            allMessages.map((m) => ({ role: m.role, content: m.content })),
-            client,
-          )
-          summaryText = review.summary
-          summaryKeywords = review.keywords
-        } catch {
-          // LLM is broken — keep the placeholder already in summaryText.
-        }
-        sessions.markEnded(session.id, {
+
+      const turnIter = runTurn(
+        {
+          sessionId: session.id,
+          userInput,
+          state,
+          history,
           phaseHistory,
-          summary: summaryText,
-          keywords: summaryKeywords,
-          reason: exitReason,
-        })
-        sessionPersisted = true
-        process.stderr.write(`[cli] session auto-saved: ${session.id}\n`)
-        process.exitCode = 1
-        break
+          firstPair,
+          relevantPast,
+          activeTopics,
+          recentMistakes,
+          lastReview,
+          isFirstTurn,
+          systemPrompt,
+          mockTime,
+        },
+        {
+          env: { LLM_CONTEXT_BUDGET_TOKENS: env.LLM_CONTEXT_BUDGET_TOKENS },
+          clock,
+          client,
+          embedder,
+          toolRegistry,
+          sessions,
+          messages,
+          topicStats,
+          markedOriginals,
+        },
+      )
+
+      // Drain events until runTurn returns. Forward each event to stderr
+      // (observability for L3 tests) or stdout (student-facing text).
+      // The AsyncGenerator's return value (TurnOutput) is on the `done: true`
+      // result — we capture it for the post-turn state update.
+      let output: Awaited<ReturnType<typeof turnIter.next>>['value'] = undefined as never
+      while (true) {
+        const next = await turnIter.next()
+        if (next.done) {
+          output = next.value
+          break
+        }
+        forwardEvent(next.value, warnedRef)
       }
-
-      // v0.7.5 — log actual token usage after each LLM call. Silent under
-      // Replay fixtures (no usage chunk emitted). With RUN_LIVE_LLM=1 the
-      // Anthropic provider yields the real message_start.usage event.
-      // v0.7.5.1 (V751-001 fix) — the 80% warn uses the TOTAL context the
-      // LLM actually sees: `inputTokens + cacheReadTokens + cacheCreationTokens`.
-      // Anthropic's `input_tokens` is the FRESH count (cached portion reported
-      // separately). With cache_control: ephemeral in effect, fresh stays
-      // small (~30-700) but the cached static portion (~1800-2400) still
-      // counts against the LLM's context window. Checking fresh alone would
-      // make the warn never fire under caching — see v0.7.5-validation-report.md
-      // §scenario-1 analysis.
-      if (usage) {
-        process.stderr.write(
-          `[cli] tokens: input=${usage.inputTokens} output=${usage.outputTokens} cache_read=${usage.cacheReadTokens} cache_creation=${usage.cacheCreationTokens}\n`,
-        )
-        // 80% warn — fires at most once per session (per v0.7.5-scope §6
-        // risk #5). The guard `env.LLM_CONTEXT_BUDGET_TOKENS > 0` is
-        // defensive; zod already enforces min(1).
-        const totalInput = usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens
-        if (
-          !warned &&
-          env.LLM_CONTEXT_BUDGET_TOKENS > 0 &&
-          totalInput / env.LLM_CONTEXT_BUDGET_TOKENS >= 0.8
-        ) {
-          const pct = Math.round((totalInput / env.LLM_CONTEXT_BUDGET_TOKENS) * 100)
-          process.stderr.write(
-            `[cli] warn: context usage ${pct}% (budget=${env.LLM_CONTEXT_BUDGET_TOKENS})\n`,
-          )
-          warned = true
+      // After turn completes, apply state changes back to the local refs.
+      // (history/phaseHistory/firstPair are mutated in-place inside runTurn,
+      // so we don't need to copy them — but state and isFirstTurn are
+      // returned by value.)
+      if (output) {
+        state = output.state
+        isFirstTurn = output.isFirstTurn
+        if (output.sessionPersisted) sessionPersisted = true
+        if (output.endedReason === 'llm_error') {
+          process.exitCode = 1
+          break
         }
-      }
-
-      // v0.7 — parse the tool block. v0.7.3 — dispatch into 4 branches:
-      //   no tool            → stdout the LLM text as-is
-      //   mark_mistake       → sync side-effect, v0.7 path unchanged
-      //   memory_search      → A+B hybrid: execute, feed result to LLM, 2nd call
-      //   unknown / errored  → strip the block, log, treat as no-tool
-      // Tool failures (parse/schema/execute) are logged to stderr and
-      // skipped; they never block the conversation. mark_mistake and
-      // memory_search are best-effort.
-      let display = response
-      let parsed: ReturnType<typeof parseToolCall> = null
-      try {
-        parsed = parseToolCall(response)
-      } catch (err) {
-        process.stderr.write(`[cli] tool parse error: ${(err as Error).message}\n`)
-      }
-
-      if (!parsed) {
-        // No tool: stdout the LLM text as-is (v0.7 path).
-        process.stdout.write(`${display}\n\n`)
-        history.push({ role: 'assistant', content: display })
-        messages.append({ sessionId: session.id, role: 'assistant', content: display })
-      } else if (parsed.name === 'mark_mistake') {
-        // Sync side-effect tool. Strip the tool block, execute, log.
-        display = stripToolCall(response, parsed)
-        const original = typeof parsed.args.original === 'string' ? parsed.args.original : ''
-        if (original && markedOriginals.has(original)) {
-          process.stderr.write(`[cli] tool dedup: skipped (already marked: "${original}")\n`)
-        } else {
-          try {
-            const tool = toolRegistry.get(parsed.name)
-            if (!tool) {
-              process.stderr.write(`[cli] tool unknown: ${parsed.name}\n`)
-            } else {
-              tool.execute(parsed.args)
-              if (original) markedOriginals.add(original)
-              process.stderr.write(
-                `[cli] tool call: ${parsed.name}(${JSON.stringify(parsed.args)})\n`,
-              )
-            }
-          } catch (err) {
-            process.stderr.write(`[cli] tool execute error: ${(err as Error).message}\n`)
-          }
+        if (output.endedReason === 'phase_end' || output.endedReason === 'user_stop') {
+          exitReason = output.endedReason
+          break
         }
-        process.stdout.write(`${display}\n\n`)
-        history.push({ role: 'assistant', content: display })
-        messages.append({ sessionId: session.id, role: 'assistant', content: display })
-      } else if (parsed.name === 'memory_search') {
-        // A+B hybrid: execute, push result as synthetic user message, 2nd
-        // LLM call, use 2nd response as the final student-facing text.
-        // The first response (with the tool block intact) goes into history
-        // verbatim — the 2nd-call LLM needs to see what it just did.
-        // We DO NOT strip the tool block from history (the LLM must see it
-        // for context), but we also don't echo it to stdout or messages.
-        const tool = toolRegistry.get(parsed.name)
-        if (!tool) {
-          process.stderr.write(`[cli] tool unknown: ${parsed.name}\n`)
-          // Fall through to the unknown-tool path below: strip + display.
-          display = stripToolCall(response, parsed)
-          process.stdout.write(`${display}\n\n`)
-          history.push({ role: 'assistant', content: display })
-          messages.append({ sessionId: session.id, role: 'assistant', content: display })
-        } else {
-          process.stderr.write(`[cli] tool call: ${parsed.name}(${JSON.stringify(parsed.args)})\n`)
-          let result: unknown
-          try {
-            result = await tool.execute(parsed.args)
-          } catch (err) {
-            process.stderr.write(`[cli] tool execute error: ${(err as Error).message}\n`)
-            result = []
-          }
-          // Build history for the 2nd call: keep the original 1st-call
-          // assistant message (with the tool block), then push a synthetic
-          // user message containing the formatted result. The [tool_result_v073]
-          // marker is the fixture match key for the 2nd Replay fixture.
-          history.push({ role: 'assistant', content: response })
-          const resultText = formatToolResult(parsed.name, result)
-          history.push({ role: 'user', content: resultText })
-          // 2nd LLM call (non-streaming — simpler; matches how summarize()
-          // calls chat). If the 2nd-call response accidentally contains a
-          // tool block, strip it as a safety net (don't recurse).
-          // v0.7.5 — reuse the same systemBlocks (state hasn't changed
-          // mid-turn; cache_control on the static prefix still applies).
-          const followup = await client.chat({ systemBlocks, messages: history })
-          // Log the 2nd-call as observability: a topK/argCount summary is
-          // enough — we don't dump the full result text to stderr.
-          const argSummary =
-            typeof parsed.args.top_k === 'number' ? `top_k=${parsed.args.top_k}` : ''
-          process.stderr.write(`[cli] tool 2nd-call: ${parsed.name}(${argSummary})\n`)
-          // Safety strip: if 2nd-call LLM emitted another <tool> block, drop it.
-          // (Prompt tells it not to, and cli.ts only does 1 round-trip per
-          // turn, so this is purely cosmetic — but it prevents tool-block
-          // leakage into the student's stdout.)
-          let followupDisplay = followup.content
-          const followupParsed = (() => {
-            try {
-              return parseToolCall(followup.content)
-            } catch {
-              return null
-            }
-          })()
-          if (followupParsed) {
-            followupDisplay = stripToolCall(followup.content, followupParsed)
-          }
-          process.stdout.write(`${followupDisplay}\n\n`)
-          history.push({ role: 'assistant', content: followupDisplay })
-          messages.append({ sessionId: session.id, role: 'assistant', content: followupDisplay })
-        }
-      } else if (parsed.name === 'summarize_history') {
-        // v0.7.6 B2 — A+B hybrid marker tool. The tool itself just returns a
-        // typed signal { kind, targetTokens }. The CLI does the actual work:
-        //   1. Run `summarize()` over older history (skipping the anchor pair
-        //      and the most recent KEEP_RECENT messages).
-        //   2. Rebuild `history` as [...firstPair, summaryMsg, ...recent] so
-        //      the next LLM call sees a compressed transcript.
-        //   3. Make a 2nd LLM call (matching the memory_search A+B pattern)
-        //      so the LLM can produce the student-facing response.
-        //
-        // KEEP_RECENT = 6 messages (3 user/assistant pairs). Empirical
-        // choice: enough recent context for natural follow-up, small enough
-        // that B2 is actually useful for long sessions.
-        const KEEP_RECENT = 6
-        const tool = toolRegistry.get(parsed.name)
-        if (!tool) {
-          process.stderr.write(`[cli] tool unknown: ${parsed.name}\n`)
-          display = stripToolCall(response, parsed)
-          process.stdout.write(`${display}\n\n`)
-          history.push({ role: 'assistant', content: display })
-          messages.append({ sessionId: session.id, role: 'assistant', content: display })
-        } else {
-          process.stderr.write(`[cli] tool call: ${parsed.name}(${JSON.stringify(parsed.args)})\n`)
-          let result: SummarizeHistoryResult
-          try {
-            result = (await tool.execute(parsed.args)) as SummarizeHistoryResult
-          } catch (err) {
-            process.stderr.write(`[cli] tool execute error: ${(err as Error).message}\n`)
-            // Fallback: skip the compression but still do the 2nd-call A+B
-            // so the LLM can respond. targetTokens=500 is a harmless default.
-            result = { kind: 'summarize_history', targetTokens: 500 }
-          }
-
-          // History rewrite: only compress if there's enough older history
-          // to compress (anchor pair + at least 2 older messages + KEEP_RECENT
-          // recent ones). Skip silently otherwise — the tool was called too
-          // early or the LLM mis-judged the context size.
-          const anchorLen = firstPair.length
-          if (history.length > anchorLen + KEEP_RECENT + 2) {
-            const older = history.slice(anchorLen, history.length - KEEP_RECENT)
-            const recent = history.slice(history.length - KEEP_RECENT)
-            let summaryText: string
-            try {
-              const review = await summarize(
-                older.map((m) => ({ role: m.role, content: m.content })),
-                client,
-              )
-              summaryText = review.summary
-            } catch (err) {
-              process.stderr.write(`[cli] tool summarize error: ${(err as Error).message}\n`)
-              summaryText = '(earlier conversation could not be summarized)'
-            }
-            const summaryMsg: Message = {
-              role: 'assistant',
-              content: `[Earlier conversation summary]: ${summaryText}`,
-            }
-            history.length = 0
-            history.push(...firstPair, summaryMsg, ...recent)
-            process.stderr.write(
-              `[cli] tool summarize: compressed ${older.length} → 1 message (target=${result.targetTokens}t)\n`,
-            )
-          } else {
-            process.stderr.write(
-              `[cli] tool summarize: skipped (history too short: ${history.length} msgs)\n`,
-            )
-          }
-
-          // A+B 2nd LLM call. Push the original 1st-call assistant message
-          // (with the tool block intact) + the synthetic user message with
-          // the marker, then call chat (non-streaming, matches memory_search).
-          history.push({ role: 'assistant', content: response })
-          const resultText = formatToolResult(parsed.name, result)
-          history.push({ role: 'user', content: resultText })
-          const followup = await client.chat({ systemBlocks, messages: history })
-          process.stderr.write(
-            `[cli] tool 2nd-call: ${parsed.name}(target=${result.targetTokens})\n`,
-          )
-          // Safety strip: same as memory_search path.
-          let followupDisplay = followup.content
-          const followupParsed = (() => {
-            try {
-              return parseToolCall(followup.content)
-            } catch {
-              return null
-            }
-          })()
-          if (followupParsed) {
-            followupDisplay = stripToolCall(followup.content, followupParsed)
-          }
-          process.stdout.write(`${followupDisplay}\n\n`)
-          history.push({ role: 'assistant', content: followupDisplay })
-          messages.append({ sessionId: session.id, role: 'assistant', content: followupDisplay })
-        }
-      } else if (parsed.name === 'topic_select') {
-        // v0.7.6 D5 — A+B hybrid. Pure-compute tool: no history rewrite, no DB
-        // write. CLI just executes the tool, feeds the result back to the LLM
-        // via a synthetic user message, and makes a 2nd LLM call so the LLM
-        // can produce the student-facing reply (e.g. "Great! Let's talk about
-        // sports."). Mirrors the memory_search A+B shape — same marker
-        // pattern, no history mutation.
-        const tool = toolRegistry.get(parsed.name)
-        if (!tool) {
-          process.stderr.write(`[cli] tool unknown: ${parsed.name}\n`)
-          display = stripToolCall(response, parsed)
-          process.stdout.write(`${display}\n\n`)
-          history.push({ role: 'assistant', content: display })
-          messages.append({ sessionId: session.id, role: 'assistant', content: display })
-        } else {
-          process.stderr.write(`[cli] tool call: ${parsed.name}(${JSON.stringify(parsed.args)})\n`)
-          let result: TopicSelectResult | { error: string }
-          try {
-            result = tool.execute(parsed.args) as TopicSelectResult | { error: string }
-          } catch (err) {
-            process.stderr.write(`[cli] tool execute error: ${(err as Error).message}\n`)
-            result = { error: `tool execution failed: ${(err as Error).message}` }
-          }
-          // A+B 2nd call. No history rewrite (topic_select doesn't change
-          // history — it only suggests a new topic for the LLM to bring up).
-          history.push({ role: 'assistant', content: response })
-          const resultText = formatToolResult(parsed.name, result)
-          history.push({ role: 'user', content: resultText })
-          const followup = await client.chat({ systemBlocks, messages: history })
-          const errOrSlug = 'error' in result ? 'error' : `slug=${result.slug}`
-          process.stderr.write(`[cli] tool 2nd-call: ${parsed.name}(${errOrSlug})\n`)
-          // Safety strip: same as memory_search / summarize_history paths.
-          let followupDisplay = followup.content
-          const followupParsed = (() => {
-            try {
-              return parseToolCall(followup.content)
-            } catch {
-              return null
-            }
-          })()
-          if (followupParsed) {
-            followupDisplay = stripToolCall(followup.content, followupParsed)
-          }
-          process.stdout.write(`${followupDisplay}\n\n`)
-          history.push({ role: 'assistant', content: followupDisplay })
-          messages.append({ sessionId: session.id, role: 'assistant', content: followupDisplay })
-        }
-      } else {
-        // Unknown tool name: strip the block, log, treat as no-tool output.
-        display = stripToolCall(response, parsed)
-        process.stderr.write(`[cli] tool unknown: ${parsed.name}\n`)
-        process.stdout.write(`${display}\n\n`)
-        history.push({ role: 'assistant', content: display })
-        messages.append({ sessionId: session.id, role: 'assistant', content: display })
-      }
-
-      // v0.7.6 B1 — capture the first user/assistant pair of this session
-      // so truncateHistory can protect it from being dropped (anchor pair).
-      // Captured AFTER the assistant message is pushed (turn 1). Runs once
-      // per session because `firstPair.length === 0` gates subsequent calls.
-      // Safe across all 4 tool branches: at this point history[0..1] is
-      // the user's first input + the assistant's first response (or its
-      // tool-stripped variant for mark_mistake / unknown paths; the
-      // memory_search A+B path also has the original 1st-call response
-      // in history by line 502).
-      if (firstPair.length === 0 && history.length >= 2) {
-        const first = history[0]
-        const second = history[1]
-        if (first && second) {
-          firstPair.push(first, second)
-        }
-      }
-
-      // MOCK_TIME: advance the fake clock by 1 min per turn so the
-      // state machine sees time progress without real waiting.
-      if (mockTime && clock !== realClock) {
-        ;(clock as ReturnType<typeof mockClock>).advance(60_000)
       }
     }
   } finally {
