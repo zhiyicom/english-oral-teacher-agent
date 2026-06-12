@@ -46,3 +46,13 @@ pnpm-debug.log*
 # Coverage
 coverage/
 .nyc_output/
+
+# Web build artifacts (v0.8.2)
+web/dist/
+web/node_modules/
+web/.vite/
+
+# Playwright (v0.8.2)
+test-results/
+playwright-report/
+tests/e2e/.auth/

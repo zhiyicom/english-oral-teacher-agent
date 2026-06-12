@@ -7,13 +7,16 @@
   "scripts": {
     "dev": "tsx watch src/cli.ts",
     "serve": "tsx watch src/server.ts",
-    "build": "tsc",
+    "dev-web": "concurrently -k -n srv,web -c blue,magenta \"pnpm serve\" \"pnpm --dir web dev\"",
+    "build": "pnpm --dir web build && tsc",
+    "preview": "pnpm --dir web preview",
     "start": "node dist/cli.js",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p web/tsconfig.json",
     "lint": "biome check .",
     "format": "biome format --write .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "test:live": "RUN_LIVE_LLM=1 vitest run"
   },
   "dependencies": {
@@ -29,8 +32,10 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@playwright/test": "^1.49.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
+    "concurrently": "^9.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

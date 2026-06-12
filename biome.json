@@ -7,7 +7,16 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "ignore": ["dist", "node_modules", "data"]
+    "ignore": [
+      "dist",
+      "node_modules",
+      "data",
+      "web/dist",
+      "web/node_modules",
+      "web/.vite",
+      "test-results",
+      "playwright-report"
+    ]
   },
   "formatter": {
     "enabled": true,
