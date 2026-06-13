@@ -55,7 +55,7 @@ function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLM
       return createThrowingProvider(status, `LLM_TEST_FAIL=${status}`)
     }
   }
-  if (process.env.RUN_LIVE_LLM === '1') {
+  if (process.env.RUN_LIVE_LLM?.trim() === '1') {
     return createAnthropicProvider(env)
   }
   if (!existsSync(fixturesDir)) {
