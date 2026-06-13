@@ -9,6 +9,23 @@ export interface SessionApi {
   summary: string | null
   keywords: string[]
   topicMatch: string | null
+  messages?: SessionMessage[] // v0.8.4 — only in GET /api/sessions/:id
+}
+
+export interface SessionMessage {
+  id: number
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  ts: string
+}
+
+// v0.8.4 — settings shape from GET/PUT /api/settings
+export interface SettingsApi {
+  voice_enabled: boolean
+  voice_speed: number
+  voice_accent: string
+  font_size: number
+  show_debug: boolean
 }
 
 // v0.8.3 — SSE event types consumed by SessionPage.

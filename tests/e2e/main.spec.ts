@@ -40,16 +40,18 @@ test('clicking Start button navigates to session page', async ({ page }) => {
   await expect(page.getByTestId('input-box')).toBeVisible()
 })
 
-test('settings route renders placeholder', async ({ page }) => {
+test('settings route renders settings form', async ({ page }) => {
   await page.goto('/settings')
 
-  await expect(page.getByTestId('placeholder')).toBeVisible()
-  await expect(page.getByTestId('placeholder')).toContainText('设置')
+  // v0.8.4 — SettingsPage is now a real form
+  await expect(page.getByTestId('save-button')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId('voice-toggle')).toBeVisible()
+  await expect(page.getByTestId('debug-toggle')).toBeVisible()
 })
 
-test('history route renders placeholder for arbitrary id', async ({ page }) => {
+test('history route shows error for unknown id', async ({ page }) => {
   await page.goto('/history/test-id-123')
 
-  await expect(page.getByTestId('placeholder')).toBeVisible()
-  await expect(page.getByTestId('placeholder')).toContainText('test-id-123')
+  // v0.8.4 — HistoryPage fetches session detail, shows error for unknown ID
+  await expect(page.getByTestId('error-banner')).toBeVisible({ timeout: 10_000 })
 })

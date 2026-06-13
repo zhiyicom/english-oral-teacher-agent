@@ -38,7 +38,7 @@ import { createAnthropicProvider } from './llm/anthropic.js'
 import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
 import type { LLMClient, Message } from './llm/types.js'
 import { createTransformersEmbedder } from './memory/index.js'
-import { loadSystemPrompt } from './prompts/loader.js'
+import { loadSystemPrompt, loadUserFile, updateUserSettings } from './prompts/loader.js'
 import {
   applyMigrations,
   createMessagesDao,
@@ -132,7 +132,7 @@ function reconstructSessionState(
     try {
       const parsed = JSON.parse(session.phase_history) as PhaseTransition[]
       if (parsed.length > 0) {
-        phase = parsed[parsed.length - 1]?.phase
+        phase = parsed[parsed.length - 1]?.phase ?? 'WARM_UP'
         phaseHistory.push(...parsed)
       }
     } catch {
@@ -245,15 +245,16 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
   })
 
   // ---- 3. GET /api/sessions/:id ----
-  // Returns full session details. v0.8.1: no messages[] (added v0.8.4).
+  // v0.8.4: returns full session details + messages[].
   app.get('/api/sessions/:id', (c) => {
     const id = c.req.param('id')
     const row = sessions.get(id)
     if (!row) {
       return c.json({ error: 'session not found', id }, 404)
     }
-    return c.json(
-      toApiSession({
+    const msgs = messages.getBySession(id)
+    return c.json({
+      ...toApiSession({
         id: row.id,
         started_at: row.started_at,
         ended_at: row.ended_at,
@@ -262,7 +263,13 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
         summary: row.summary,
         keywords: row.keywords,
       }),
-    )
+      messages: msgs.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        ts: m.ts,
+      })),
+    })
   })
 
   // ---- 4. GET /api/sessions/:id/stream (v0.8.3 real turn loop) ----
@@ -384,6 +391,48 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
     }
 
     return c.json({ error: 'invalid action. Use action=init or action=turn' }, 400)
+  })
+
+  // ---- 5. GET /api/settings ----
+  // v0.8.4 — returns current settings from USER.md frontmatter + defaults.
+  app.get('/api/settings', (c) => {
+    const { data } = loadUserFile()
+    return c.json({
+      voice_enabled: data.voice_enabled ?? false,
+      voice_speed: data.voice_speed ?? 1.0,
+      voice_accent: data.voice_accent ?? 'en-US',
+      font_size: 14,
+      show_debug: false,
+    })
+  })
+
+  // ---- 6. PUT /api/settings ----
+  // v0.8.4 — persists voice_* fields to USER.md via atomic write.
+  app.put('/api/settings', async (c) => {
+    const body = await c.req.json()
+    const persisted: string[] = []
+    const updates: Record<string, unknown> = {}
+
+    if (typeof body.voice_enabled === 'boolean') {
+      updates.voice_enabled = body.voice_enabled
+      persisted.push('voice_enabled')
+    }
+    if (typeof body.voice_speed === 'number') {
+      updates.voice_speed = body.voice_speed
+      persisted.push('voice_speed')
+    }
+    if (typeof body.voice_accent === 'string') {
+      updates.voice_accent = body.voice_accent
+      persisted.push('voice_accent')
+    }
+
+    if (persisted.length > 0) {
+      await updateUserSettings(
+        updates as { voice_enabled?: boolean; voice_speed?: number; voice_accent?: string },
+      )
+    }
+
+    return c.json({ ok: true, persisted })
   })
 
   // ---- Health check (extra; not in PRD) ----

@@ -179,4 +179,48 @@ describe('createApp (v0.8.1 L1)', () => {
     const res = await harness.app.request(`/api/sessions/${id}/stream?action=turn`)
     expect(res.status).toBe(400)
   })
+
+  // ---- v0.8.4: messages[] + settings ----
+
+  it('GET /api/sessions/:id: includes messages[] array', async () => {
+    const create = await harness.app.request('/api/sessions', { method: 'POST' })
+    const { id } = (await create.json()) as { id: string }
+
+    const res = await harness.app.request(`/api/sessions/${id}`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { messages: unknown[] }
+    expect(Array.isArray(body.messages)).toBe(true)
+  })
+
+  it('GET /api/settings: returns default values', async () => {
+    const res = await harness.app.request('/api/settings')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      voice_enabled: boolean
+      voice_speed: number
+      voice_accent: string
+      font_size: number
+      show_debug: boolean
+    }
+    expect(typeof body.voice_enabled).toBe('boolean')
+    expect(typeof body.voice_speed).toBe('number')
+    expect(typeof body.font_size).toBe('number')
+  })
+
+  it('PUT /api/settings: persists voice_enabled and returns ok', async () => {
+    const res = await harness.app.request('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice_enabled: true }),
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { ok: boolean; persisted: string[] }
+    expect(body.ok).toBe(true)
+    expect(body.persisted).toContain('voice_enabled')
+
+    // Verify GET reflects the change
+    const get = await harness.app.request('/api/settings')
+    const settings = (await get.json()) as { voice_enabled: boolean }
+    expect(settings.voice_enabled).toBe(true)
+  })
 })

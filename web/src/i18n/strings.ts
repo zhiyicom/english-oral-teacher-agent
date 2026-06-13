@@ -19,8 +19,6 @@ export const STRINGS = {
   // Placeholder pages
   historyTitle: '历史记录',
   settingsTitle: '设置',
-  placeholderHistory: (id: string) => `Session #${id} — 历史详情将在 v0.8.4 实现`,
-  placeholderSettings: '设置面板将在 v0.8.4 实现',
 
   // v0.8.3 — SessionPage
   sessionTitle: '练习中',
@@ -35,4 +33,26 @@ export const STRINGS = {
   inputPlaceholder: '输入你的回答…',
   turnInProgress: '老师正在回复…',
   sessionLoadError: '加载会话失败',
+
+  // v0.8.4 — HistoryPage
+  historyDate: '日期',
+  historyDuration: '时长',
+  historySummary: '摘要',
+  historyKeywords: '关键词',
+  historyPhaseHistory: '阶段历程',
+  historyMessages: '对话记录',
+  historyNoMessages: '暂无对话记录',
+
+  // v0.8.4 — SettingsPage
+  settingsVoice: '语音',
+  settingsVoiceEnabled: '语音开关',
+  settingsVoiceSpeed: '语速',
+  settingsVoiceAccent: '口音',
+  settingsDisplay: '显示',
+  settingsFontSize: '字体大小',
+  settingsShowDebug: '显示调试信息',
+  settingsSave: '保存',
+  settingsSaved: '已保存',
+  settingsSaving: '保存中…',
+  settingsVoiceDisabled: 'v0.9+ 可用',
 } as const

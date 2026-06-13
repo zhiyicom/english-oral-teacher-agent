@@ -35,6 +35,26 @@ export async function getSession(id: string): Promise<SessionApi> {
   return (await res.json()) as SessionApi
 }
 
+// v0.8.4 — settings endpoints
+export async function getSettings(): Promise<import('./types').SettingsApi> {
+  const res = await checkOk(await fetch(`${BASE}/api/settings`), 'getSettings')
+  return (await res.json()) as import('./types').SettingsApi
+}
+
+export async function updateSettings(
+  updates: Partial<import('./types').SettingsApi>,
+): Promise<{ ok: boolean; persisted: string[] }> {
+  const res = await checkOk(
+    await fetch(`${BASE}/api/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }),
+    'updateSettings',
+  )
+  return (await res.json()) as { ok: boolean; persisted: string[] }
+}
+
 // v0.8.3 — build the SSE stream URL for a session turn.
 // Each turn opens a fresh EventSource connection with query params.
 export function getSessionStreamUrl(

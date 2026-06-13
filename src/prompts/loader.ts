@@ -1,7 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
+import { readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import matter from 'gray-matter'
+import lockfile from 'proper-lockfile'
 
 export interface UserProfile {
   name: string
@@ -29,7 +31,7 @@ function readIfExists(path: string): string | null {
   return existsSync(path) ? readFileSync(path, 'utf-8') : null
 }
 
-function loadUserFile(): { body: string; data: Record<string, unknown> } {
+export function loadUserFile(): { body: string; data: Record<string, unknown> } {
   const real = join(PROMPTS_DIR, 'USER.md')
   const example = join(PROMPTS_DIR, 'USER.md.example')
 
@@ -122,4 +124,37 @@ export function buildSystemString(sp: SystemPrompt): string {
     sections.push('', '# TOOLS', '', sp.tools)
   }
   return sections.join('\n')
+}
+
+// v0.8.4 — atomic USER.md write for settings persistence.
+// Uses proper-lockfile to prevent races between server and CLI processes.
+export async function updateUserSettings(
+  updates: Partial<{ voice_enabled: boolean; voice_speed: number; voice_accent: string }>,
+): Promise<void> {
+  const path = join(PROMPTS_DIR, 'USER.md')
+  const example = join(PROMPTS_DIR, 'USER.md.example')
+
+  // proper-lockfile requires the file to exist before locking.
+  // If USER.md doesn't exist yet, seed it from .example first.
+  try {
+    await readFile(path, 'utf8')
+  } catch {
+    if (existsSync(example)) {
+      const exampleRaw = await readFile(example, 'utf8')
+      await writeFile(path, exampleRaw, 'utf8')
+    }
+  }
+
+  const release = await lockfile.lock(path, { retries: 3 })
+  try {
+    const raw = await readFile(path, 'utf8')
+    const { data, content } = matter(raw)
+    const newData = { ...data, ...updates }
+    const newRaw = matter.stringify(content, newData)
+    const tmpPath = `${path}.tmp.${Date.now()}`
+    await writeFile(tmpPath, newRaw, 'utf8')
+    await rename(tmpPath, path)
+  } finally {
+    await release()
+  }
 }

@@ -160,4 +160,44 @@ describe('Server end-to-end (v0.8.1 L3 — spawn + curl)', () => {
     const res = await fetch(`${base}/api/sessions/no-such/stream?action=init`)
     expect(res.status).toBe(404)
   })
+
+  it('PUT /api/settings persists voice_enabled across server restart', async () => {
+    const base = `http://127.0.0.1:${server?.port}`
+
+    // Save original value first
+    const orig = await fetch(`${base}/api/settings`)
+    const origSettings = (await orig.json()) as { voice_enabled: boolean }
+    const originalValue = origSettings.voice_enabled
+
+    // Set voice_enabled to the opposite
+    const newValue = !originalValue
+    const put = await fetch(`${base}/api/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice_enabled: newValue }),
+    })
+    expect(put.status).toBe(200)
+
+    // Verify immediately
+    const get1 = await fetch(`${base}/api/settings`)
+    const s1 = (await get1.json()) as { voice_enabled: boolean }
+    expect(s1.voice_enabled).toBe(newValue)
+
+    // Restart server
+    await server?.kill()
+    server = await spawnServer()
+
+    // Verify persistence
+    const base2 = `http://127.0.0.1:${server?.port}`
+    const get2 = await fetch(`${base2}/api/settings`)
+    const s2 = (await get2.json()) as { voice_enabled: boolean }
+    expect(s2.voice_enabled).toBe(newValue)
+
+    // Restore original value
+    await fetch(`${base2}/api/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice_enabled: originalValue }),
+    })
+  })
 })
