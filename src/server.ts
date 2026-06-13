@@ -485,7 +485,6 @@ async function startServer(): Promise<void> {
     // v0.8.1 — minimal startup log. v0.8.5 polish may add a banner.
     console.log(`[server] listening on http://localhost:${info.port}`)
     console.log(`[server] data dir: ${dataDir}`)
-    console.log(`[server] RUN_LIVE_LLM=${JSON.stringify(process.env.RUN_LIVE_LLM)}`)
     console.log(`[server] LLM mode: ${process.env.RUN_LIVE_LLM?.trim() === '1' ? 'live' : 'replay'}`)
   })
 }

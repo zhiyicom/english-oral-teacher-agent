@@ -142,8 +142,9 @@ export default function SessionPage() {
       es.close()
       esRef.current = null
 
-      if (streamingRef.current) {
-        setMessages((prev) => [...prev, { role: 'assistant', content: streamingRef.current }])
+      const text = streamingRef.current
+      if (text) {
+        setMessages((prev) => [...prev, { role: 'assistant', content: text }])
       }
       streamingRef.current = ''
       setStreamingText(null)
