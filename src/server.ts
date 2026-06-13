@@ -170,7 +170,7 @@ function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLM
       return createThrowingProvider(status, `LLM_TEST_FAIL=${status}`)
     }
   }
-  if (process.env.RUN_LIVE_LLM === '1') {
+  if (env.RUN_LIVE_LLM === '1') {
     return createAnthropicProvider(env)
   }
   if (!existsSync(fixturesDir)) {
@@ -485,7 +485,7 @@ async function startServer(): Promise<void> {
     // v0.8.1 — minimal startup log. v0.8.5 polish may add a banner.
     console.log(`[server] listening on http://localhost:${info.port}`)
     console.log(`[server] data dir: ${dataDir}`)
-    console.log(`[server] LLM mode: ${process.env.RUN_LIVE_LLM === '1' ? 'live' : 'replay'}`)
+    console.log(`[server] LLM mode: ${env.RUN_LIVE_LLM === '1' ? 'live' : 'replay'}`)
   })
 }
 
