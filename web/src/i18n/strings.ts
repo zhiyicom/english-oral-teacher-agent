@@ -17,10 +17,22 @@ export const STRINGS = {
   navSettings: '设置',
 
   // Placeholder pages
-  sessionTitle: '练习中',
   historyTitle: '历史记录',
   settingsTitle: '设置',
-  placeholderSession: (id: string) => `Session #${id} — 对话窗口将在 v0.8.3 实现`,
   placeholderHistory: (id: string) => `Session #${id} — 历史详情将在 v0.8.4 实现`,
   placeholderSettings: '设置面板将在 v0.8.4 实现',
+
+  // v0.8.3 — SessionPage
+  sessionTitle: '练习中',
+  send: '发送',
+  endSession: '结束本次',
+  backToMain: '返回主界面',
+  phaseWarmUp: '热身',
+  phaseMainActivity: '主体练习',
+  phaseWrapUp: '总结',
+  phaseEnd: '已结束',
+  sessionEnded: '本次练习已结束',
+  inputPlaceholder: '输入你的回答…',
+  turnInProgress: '老师正在回复…',
+  sessionLoadError: '加载会话失败',
 } as const

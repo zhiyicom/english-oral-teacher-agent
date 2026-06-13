@@ -127,27 +127,37 @@ describe('Server end-to-end (v0.8.1 L3 — spawn + curl)', () => {
     expect(res.status).toBe(404)
   })
 
-  it('GET /api/sessions/:id/stream streams a single done event over the live process', async () => {
+  it('GET /api/sessions/:id/stream?action=turn&input=hi streams real TurnEvents', async () => {
     const base = `http://127.0.0.1:${server?.port}`
-    // Create a session first
     const create = await fetch(`${base}/api/sessions`, { method: 'POST' })
     const { id } = (await create.json()) as { id: string }
 
-    // Open the SSE stream
-    const res = await fetch(`${base}/api/sessions/${id}/stream`)
+    const res = await fetch(
+      `${base}/api/sessions/${id}/stream?action=turn&input=${encodeURIComponent('hi')}`,
+    )
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toMatch(/text\/event-stream/)
 
-    // Read the body — the v0.8.1 stub writes one `done` event.
     const text = await res.text()
+    expect(text).toMatch(/^event: ctx-segment/m)
+    expect(text).toMatch(/^event: ctx/m)
+    expect(text).toMatch(/^event: student-text/m)
     expect(text).toMatch(/^event: done/m)
-    expect(text).toMatch(new RegExp(`"sessionId":"${id}"`))
-    expect(text).toMatch(/endedReason":"stub"/)
+    expect(text).toMatch(/"endedReason":null/)
+  })
+
+  it('GET /api/sessions/:id/stream?action=turn returns 400 when input missing', async () => {
+    const base = `http://127.0.0.1:${server?.port}`
+    const create = await fetch(`${base}/api/sessions`, { method: 'POST' })
+    const { id } = (await create.json()) as { id: string }
+
+    const res = await fetch(`${base}/api/sessions/${id}/stream?action=turn`)
+    expect(res.status).toBe(400)
   })
 
   it('GET /api/sessions/:id/stream returns 404 for unknown id', async () => {
     const base = `http://127.0.0.1:${server?.port}`
-    const res = await fetch(`${base}/api/sessions/no-such/stream`)
+    const res = await fetch(`${base}/api/sessions/no-such/stream?action=init`)
     expect(res.status).toBe(404)
   })
 })

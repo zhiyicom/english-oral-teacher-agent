@@ -34,3 +34,15 @@ export async function getSession(id: string): Promise<SessionApi> {
   )
   return (await res.json()) as SessionApi
 }
+
+// v0.8.3 — build the SSE stream URL for a session turn.
+// Each turn opens a fresh EventSource connection with query params.
+export function getSessionStreamUrl(
+  sessionId: string,
+  action: 'init' | 'turn',
+  input?: string,
+): string {
+  const params = new URLSearchParams({ action })
+  if (input) params.set('input', input)
+  return `${BASE}/api/sessions/${encodeURIComponent(sessionId)}/stream?${params}`
+}

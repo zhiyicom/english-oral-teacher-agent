@@ -26,12 +26,17 @@ import {
   createSummarizeHistoryTool,
   createToolRegistry,
   createTopicSelectTool,
+  initState,
   loadLastReview,
+  realClock,
+  runTurn,
 } from './agent/index.js'
+import type { PhaseTransition, SessionState } from './agent/index.js'
+import type { TurnOutput } from './agent/turn.js'
 import { loadEnv } from './config/env.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
 import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
-import type { LLMClient } from './llm/types.js'
+import type { LLMClient, Message } from './llm/types.js'
 import { createTransformersEmbedder } from './memory/index.js'
 import { loadSystemPrompt } from './prompts/loader.js'
 import {
@@ -96,6 +101,66 @@ function toApiSession(row: {
   }
 }
 
+// ---------- Session runtime store (v0.8.3 in-memory) ----------
+// SessionState is not persisted to SQLite. Between turns within a session,
+// the server tracks the evolving state in this Map. On server restart,
+// in-progress sessions lose state — acceptable for a single-user localhost
+// tool with sessions typically lasting ≤30 min.
+
+interface SessionRuntime {
+  state: SessionState
+  phaseHistory: PhaseTransition[]
+  firstPair: Message[]
+  isFirstTurn: boolean
+  markedOriginals: Set<string>
+}
+
+function reconstructSessionState(
+  session: { id: string; started_at: string; phase_history: string | null },
+  store: Map<string, SessionRuntime>,
+): SessionRuntime {
+  const cached = store.get(session.id)
+  if (cached) return cached
+
+  const startedAt = new Date(session.started_at).getTime()
+  const now = realClock.now()
+  const elapsedMin = Math.max(0, (now - startedAt) / 60000)
+
+  let phase: SessionState['phase'] = 'WARM_UP'
+  const phaseHistory: PhaseTransition[] = []
+  if (session.phase_history) {
+    try {
+      const parsed = JSON.parse(session.phase_history) as PhaseTransition[]
+      if (parsed.length > 0) {
+        phase = parsed[parsed.length - 1]?.phase
+        phaseHistory.push(...parsed)
+      }
+    } catch {
+      // Malformed JSON stays at WARM_UP
+    }
+  }
+  if (phaseHistory.length === 0) {
+    phaseHistory.push({ phase: 'WARM_UP', at: 0, reason: 'time' })
+  }
+
+  const state: SessionState = {
+    phase,
+    startedAt,
+    lastUserMsgAt: now,
+    elapsedMin,
+    silenceMin: 0,
+    lastTransitionAt: 0,
+  }
+
+  return {
+    state,
+    phaseHistory,
+    firstPair: [],
+    isFirstTurn: phaseHistory.length <= 1,
+    markedOriginals: new Set(),
+  }
+}
+
 // ---------- LLM client selection (mirrors src/cli.ts selectClient) ----------
 function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLMClient {
   const testFail = process.env.LLM_TEST_FAIL
@@ -133,6 +198,7 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
   const client = selectClient(env, opts.fixturesDir)
   const embedder = createTransformersEmbedder()
   const lastReview = loadLastReview(db)
+  const sessionStore = new Map<string, SessionRuntime>()
 
   // Register tools so the v0.8.3 turn loop can dispatch. v0.8.1 doesn't
   // call them yet (the SSE endpoint is a stub), but the registry is here
@@ -199,32 +265,125 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
     )
   })
 
-  // ---- 4. GET /api/sessions/:id/stream (v0.8.1 stub) ----
-  // Per v0.8-scope §v0.8.1 item 5: establish connection, return SSE `done`.
-  // The full turn loop (text-chunk / phase / tool events) is v0.8.3.
-  // v0.8.3 will:
-  //   1. Validate session exists (404 if not).
-  //   2. Read `?action=turn&input=...` from query.
-  //   3. Build a TurnDeps with the singletons above + the session's history.
-  //   4. for-await over runTurn() events, writeSSE({ event, data }) for each.
-  app.get('/api/sessions/:id/stream', (c) => {
+  // ---- 4. GET /api/sessions/:id/stream (v0.8.3 real turn loop) ----
+  // Query params:
+  //   ?action=init — return current phase + done (for initial page load)
+  //   ?action=turn&input=... — run one turn, stream all TurnEvents as SSE
+  app.get('/api/sessions/:id/stream', async (c) => {
     const id = c.req.param('id')
-    if (!sessions.get(id)) {
-      return c.json({ error: 'session not found', id }, 404)
-    }
-    return streamSSE(c, async (stream) => {
-      // Stub: send one `done` event with endedReason='stub' so clients
-      // can verify the SSE plumbing works end-to-end. v0.8.3 will replace
-      // this with a real runTurn() subscription.
-      await stream.writeSSE({
-        event: 'done',
-        data: JSON.stringify({
-          sessionId: id,
-          endedReason: 'stub',
-          note: 'v0.8.1 SSE stub — full turn loop is v0.8.3',
-        }),
+    const action = c.req.query('action')
+    const input = c.req.query('input')
+
+    const row = sessions.get(id)
+    if (!row) return c.json({ error: 'session not found', id }, 404)
+
+    // -- action=init: return current phase --
+    if (action === 'init') {
+      return streamSSE(c, async (stream) => {
+        const rt = reconstructSessionState(
+          { id: row.id, started_at: row.started_at, phase_history: row.phase_history },
+          sessionStore,
+        )
+        await stream.writeSSE({
+          event: 'phase',
+          data: JSON.stringify({ phase: rt.state.phase, elapsed: rt.state.elapsedMin }),
+        })
+        await stream.writeSSE({
+          event: 'done',
+          data: JSON.stringify({ endedReason: 'init' }),
+        })
       })
-    })
+    }
+
+    // -- action=turn: run one turn --
+    if (action === 'turn') {
+      if (!input || input.trim() === '') {
+        return c.json({ error: 'input required for action=turn' }, 400)
+      }
+
+      const rt = reconstructSessionState(
+        { id: row.id, started_at: row.started_at, phase_history: row.phase_history },
+        sessionStore,
+      )
+
+      if (rt.state.phase === 'END') {
+        return streamSSE(c, async (stream) => {
+          await stream.writeSSE({
+            event: 'error',
+            data: JSON.stringify({
+              classification: 'session_ended',
+              message: 'Session already ended',
+            }),
+          })
+          await stream.writeSSE({
+            event: 'done',
+            data: JSON.stringify({ endedReason: 'session_ended' }),
+          })
+        })
+      }
+
+      const dbMessages = messages.getBySession(id)
+      const history: Message[] = dbMessages.map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      }))
+
+      const turnInput = {
+        sessionId: id,
+        userInput: input.trim(),
+        state: rt.state,
+        history,
+        phaseHistory: rt.phaseHistory,
+        firstPair: rt.firstPair,
+        relevantPast: [],
+        activeTopics: topicStats.all(),
+        recentMistakes: mistakesDao.getRecent(5),
+        lastReview,
+        isFirstTurn: rt.isFirstTurn,
+        systemPrompt,
+        mockTime: false,
+      }
+
+      const turnDeps = {
+        env: { LLM_CONTEXT_BUDGET_TOKENS: env.LLM_CONTEXT_BUDGET_TOKENS },
+        clock: realClock,
+        client,
+        embedder,
+        toolRegistry,
+        sessions,
+        messages,
+        topicStats,
+        markedOriginals: rt.markedOriginals,
+      }
+
+      return streamSSE(c, async (stream) => {
+        const gen = runTurn(turnInput, turnDeps)
+        while (true) {
+          const next = await gen.next()
+          if (next.done) {
+            const output = next.value as TurnOutput
+            sessionStore.set(id, {
+              state: output.state,
+              phaseHistory: output.phaseHistory,
+              firstPair: output.firstPair,
+              isFirstTurn: output.isFirstTurn,
+              markedOriginals: rt.markedOriginals,
+            })
+            await stream.writeSSE({
+              event: 'done',
+              data: JSON.stringify({ endedReason: output.endedReason }),
+            })
+            break
+          }
+          await stream.writeSSE({
+            event: next.value.type,
+            data: JSON.stringify(next.value),
+          })
+        }
+      })
+    }
+
+    return c.json({ error: 'invalid action. Use action=init or action=turn' }, 400)
   })
 
   // ---- Health check (extra; not in PRD) ----

@@ -126,27 +126,57 @@ describe('createApp (v0.8.1 L1)', () => {
     expect(body.sessions[2]?.id).toBe(ids[0])
   })
 
-  // ---- SSE stub ----
+  // ---- SSE (v0.8.3 real turn loop) ----
 
   it('GET /api/sessions/:id/stream: returns 404 for unknown id', async () => {
-    const res = await harness.app.request('/api/sessions/no-such/stream')
+    const res = await harness.app.request('/api/sessions/no-such/stream?action=init')
     expect(res.status).toBe(404)
   })
 
-  it('GET /api/sessions/:id/stream: emits Content-Type: text/event-stream + one done event', async () => {
-    // Create a session first
+  it('GET /api/sessions/:id/stream: returns 400 for missing action', async () => {
+    const create = await harness.app.request('/api/sessions', { method: 'POST' })
+    const { id } = (await create.json()) as { id: string }
+    const res = await harness.app.request(`/api/sessions/${id}/stream`)
+    expect(res.status).toBe(400)
+  })
+
+  it('GET /api/sessions/:id/stream?action=init: emits phase + done events', async () => {
     const create = await harness.app.request('/api/sessions', { method: 'POST' })
     const { id } = (await create.json()) as { id: string }
 
-    // Now open the stream
-    const res = await harness.app.request(`/api/sessions/${id}/stream`)
+    const res = await harness.app.request(`/api/sessions/${id}/stream?action=init`)
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toMatch(/text\/event-stream/)
 
-    // Read the SSE body. The stub writes one `done` event.
     const text = await res.text()
+    expect(text).toMatch(/^event: phase/m)
     expect(text).toMatch(/^event: done/m)
-    expect(text).toMatch(/data: \{"sessionId":"[a-f0-9-]+","endedReason":"stub"/)
-    expect(text).toMatch(/note.*v0\.8\.1.*SSE stub/s)
+    expect(text).toMatch(/"endedReason":"init"/)
+  })
+
+  it('GET /api/sessions/:id/stream?action=turn&input=hi: streams TurnEvents + done', async () => {
+    const create = await harness.app.request('/api/sessions', { method: 'POST' })
+    const { id } = (await create.json()) as { id: string }
+
+    const res = await harness.app.request(
+      `/api/sessions/${id}/stream?action=turn&input=${encodeURIComponent('hi')}`,
+    )
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toMatch(/text\/event-stream/)
+
+    const text = await res.text()
+    expect(text).toMatch(/^event: ctx-segment/m)
+    expect(text).toMatch(/^event: ctx/m)
+    expect(text).toMatch(/^event: student-text/m)
+    expect(text).toMatch(/^event: done/m)
+    expect(text).toMatch(/"endedReason":null/)
+  })
+
+  it('GET /api/sessions/:id/stream?action=turn: returns 400 when input missing', async () => {
+    const create = await harness.app.request('/api/sessions', { method: 'POST' })
+    const { id } = (await create.json()) as { id: string }
+
+    const res = await harness.app.request(`/api/sessions/${id}/stream?action=turn`)
+    expect(res.status).toBe(400)
   })
 })

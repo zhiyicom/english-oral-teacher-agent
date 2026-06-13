@@ -29,13 +29,15 @@ test('main page shows header + start button + session list', async ({ page }) =>
   }
 })
 
-test('clicking Start button navigates to session placeholder', async ({ page }) => {
+test('clicking Start button navigates to session page', async ({ page }) => {
   await page.goto('/')
 
   await page.getByTestId('start-button').click()
 
   await expect(page).toHaveURL(/\/session\/[a-f0-9-]+/, { timeout: 10_000 })
-  await expect(page.getByTestId('placeholder')).toBeVisible()
+  // v0.8.3 — SessionPage is now a real UI, not a placeholder
+  await expect(page.getByTestId('phase-tag')).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByTestId('input-box')).toBeVisible()
 })
 
 test('settings route renders placeholder', async ({ page }) => {
