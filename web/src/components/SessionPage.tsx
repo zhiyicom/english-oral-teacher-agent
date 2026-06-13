@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
-import { getSessionStreamUrl } from '../lib/api'
+import { getSession, getSessionStreamUrl } from '../lib/api'
 import LoadingSpinner from './shared/LoadingSpinner'
 import MessageBubble from './shared/MessageBubble'
 
@@ -56,6 +56,28 @@ export default function SessionPage() {
       esRef.current = null
     }
   }, [])
+
+  // Load existing messages when resuming a session (in addition to init SSE)
+  useEffect(() => {
+    if (!id) return
+    getSession(id)
+      .then((s) => {
+        if (s.messages && s.messages.length > 0) {
+          const msgs: ChatMessage[] = s.messages.map((m) => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+          }))
+          setMessages(msgs)
+        }
+        if (s.endedAt) {
+          setEnded(true)
+          setPhase('END')
+        }
+      })
+      .catch(() => {
+        // Silently ignore — init SSE will still set up the session
+      })
+  }, [id])
 
   // Init SSE connection on mount
   // biome-ignore lint/correctness/useExhaustiveDependencies: closeES is stable (useCallback with [])

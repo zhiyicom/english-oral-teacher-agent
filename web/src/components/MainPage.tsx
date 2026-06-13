@@ -82,11 +82,15 @@ export default function MainPage() {
                 key={s.id}
                 data-testid="session-row"
                 className="cursor-pointer rounded border border-slate-200 bg-white p-4 shadow-sm hover:shadow"
-                onClick={() => navigate(`/history/${s.id}`)}
+                onClick={() => {
+                  const target = s.endedAt ? `/history/${s.id}` : `/session/${s.id}`
+                  navigate(target)
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault()
-                    navigate(`/history/${s.id}`)
+                    const target = s.endedAt ? `/history/${s.id}` : `/session/${s.id}`
+                    navigate(target)
                   }
                 }}
               >
