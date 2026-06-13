@@ -51,7 +51,13 @@ describe('createTopicSelectTool', () => {
       interests: ['minecraft', 'castle'],
       rng: () => 0.5, // noise=0, makes the test deterministic
     })
-    const result = tool.execute({ phase: 'MAIN_ACTIVITY', exclude_recent_days: 30 })
+    const result = tool.execute({ phase: 'MAIN_ACTIVITY', exclude_recent_days: 30 }) as
+      | {
+          slug: string
+          title: string
+          est_minutes: number
+        }
+      | { error: string }
     expect(typeof result).toBe('object')
     if ('error' in result) throw new Error(`expected success, got error: ${result.error}`)
     expect(result.slug).toBeTruthy()

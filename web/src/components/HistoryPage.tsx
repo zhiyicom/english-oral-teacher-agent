@@ -3,6 +3,8 @@ import { Link, useParams } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
 import { getSession } from '../lib/api'
 import type { SessionMessage } from '../lib/types'
+import LoadingSpinner from './shared/LoadingSpinner'
+import MessageBubble from './shared/MessageBubble'
 
 const PHASE_LABELS: Record<string, string> = {
   WARM_UP: STRINGS.phaseWarmUp,
@@ -48,11 +50,7 @@ export default function HistoryPage() {
   }
 
   if (!session) {
-    return (
-      <div className="py-16 text-center text-slate-500" data-testid="loading">
-        {STRINGS.loading}
-      </div>
-    )
+    return <LoadingSpinner text={STRINGS.loading} />
   }
 
   const messages: SessionMessage[] = session.messages ?? []
@@ -118,23 +116,7 @@ export default function HistoryPage() {
       ) : (
         <div className="space-y-3">
           {messages.map((msg) => (
-            <div
-              key={msg.id}
-              data-testid={msg.role === 'assistant' ? 'assistant-message' : 'user-message'}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div
-                className={`max-w-[80%] whitespace-pre-wrap rounded-lg px-4 py-2 ${
-                  msg.role === 'user' ? 'bg-blue-100 text-blue-900' : 'bg-gray-100 text-gray-900'
-                }`}
-              >
-                <p className="mb-1 text-xs text-slate-400">
-                  {msg.role === 'user' ? 'Student' : 'Teacher'} ·{' '}
-                  {new Date(msg.ts).toLocaleTimeString()}
-                </p>
-                {msg.content}
-              </div>
-            </div>
+            <MessageBubble key={msg.id} role={msg.role} content={msg.content} timestamp={msg.ts} />
           ))}
         </div>
       )}

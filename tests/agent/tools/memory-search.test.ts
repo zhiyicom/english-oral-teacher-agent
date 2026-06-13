@@ -125,7 +125,11 @@ describe('memory_search tool (v0.7.3 L1)', () => {
       // an empty result for the cooking session because retrieveRelevant
       // has no similarity floor — that's the caller's job (or v0.7.2
       // startup-injection's job, which uses topK=2 and accepts the noise).
-      const result = await tool.execute({ query: 'minecraft', top_k: 2 })
+      const result = (await tool.execute({ query: 'minecraft', top_k: 2 })) as Array<{
+        sessionId: string
+        similarity: number
+        keywords: string[]
+      }>
       expect(result).toHaveLength(2)
       expect(result[0]?.sessionId).toBe(a.id)
       expect(result[0]?.similarity).toBeCloseTo(1, 5)

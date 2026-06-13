@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
 import { getSettings, updateSettings } from '../lib/api'
 import type { SettingsApi } from '../lib/types'
+import LoadingSpinner from './shared/LoadingSpinner'
 
 const LS_FONT_SIZE = 'settings:font_size'
 const LS_SHOW_DEBUG = 'settings:show_debug'
@@ -38,6 +39,7 @@ export default function SettingsPage() {
         voice_accent: settings.voice_accent,
       })
       localStorage.setItem(LS_FONT_SIZE, String(settings.font_size))
+      document.documentElement.style.setProperty('--font-size-base', `${settings.font_size}px`)
       if (settings.show_debug) {
         localStorage.setItem(LS_SHOW_DEBUG, 'true')
       } else {
@@ -70,11 +72,7 @@ export default function SettingsPage() {
   }
 
   if (!settings) {
-    return (
-      <div className="py-16 text-center text-slate-500" data-testid="loading">
-        {STRINGS.loading}
-      </div>
-    )
+    return <LoadingSpinner text={STRINGS.loading} />
   }
 
   return (

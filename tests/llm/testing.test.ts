@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createReplayProvider } from '../../src/llm/testing.js'
+import type { ChatChunk } from '../../src/llm/types.js'
 
 const FIXTURES = resolve('tests/fixtures/replay')
 
@@ -16,7 +17,7 @@ describe('ReplayProvider', () => {
 
   it('streams chunks in order, with text and thinking separated', async () => {
     const client = createReplayProvider(FIXTURES)
-    const chunks: Array<{ type: string; delta: string }> = []
+    const chunks: ChatChunk[] = []
     for await (const c of client.chatStream({
       system: 's',
       messages: [{ role: 'user', content: 'hi' }],
@@ -25,7 +26,7 @@ describe('ReplayProvider', () => {
     }
     const text = chunks
       .filter((c) => c.type === 'text')
-      .map((c) => c.delta)
+      .map((c) => (c as { type: 'text'; delta: string }).delta)
       .join('')
     expect(text.length).toBeGreaterThan(0)
   })

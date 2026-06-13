@@ -18,7 +18,7 @@
  */
 
 import { classifyLLMError } from './errors.js'
-import type { ChatOpts, LLMClient, UsageChunk } from './types.js'
+import type { ChatChunk, ChatOpts, LLMClient, UsageChunk } from './types.js'
 
 export interface StreamResult {
   response: string
@@ -28,12 +28,13 @@ export interface StreamResult {
 const DEFAULT_MAX_ATTEMPTS = 2
 const RETRY_DELAY_MS = 1000
 
-export async function chatStreamWithRetry(
+// v0.8.5 — streaming variant that yields ChatChunks as they arrive.
+// runTurn() uses this for true text-chunk streaming to the browser.
+export async function* chatStreamWithRetryGen(
   client: LLMClient,
   opts: ChatOpts,
   maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
-  onAttempt?: (attempt: number, err: unknown) => void,
-): Promise<StreamResult> {
+): AsyncGenerator<ChatChunk, void, void> {
   if (maxAttempts < 1) {
     throw new Error(`chatStreamWithRetry: maxAttempts must be >= 1, got ${maxAttempts}`)
   }
@@ -41,23 +42,16 @@ export async function chatStreamWithRetry(
   let lastErr: unknown = null
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      let response = ''
-      let usage: UsageChunk | null = null
       for await (const chunk of client.chatStream(opts)) {
-        if (chunk.type === 'text') {
-          response += chunk.delta
-        } else if (chunk.type === 'usage') {
-          usage = chunk
-        }
+        yield chunk
       }
-      return { response, usage }
+      return
     } catch (err) {
       lastErr = err
       const classified = classifyLLMError(err)
       process.stderr.write(
         `[cli] llm error: ${classified.classification} (${(err as Error).message})\n`,
       )
-      if (onAttempt) onAttempt(attempt, err)
       if (!classified.retryable) break
       if (attempt < maxAttempts) {
         process.stderr.write(
@@ -68,4 +62,29 @@ export async function chatStreamWithRetry(
     }
   }
   throw lastErr
+}
+
+// v0.7.6 — buffered variant kept for backward compatibility (used by summarize
+// and other non-streaming callers). Internally wraps chatStreamWithRetryGen.
+export async function chatStreamWithRetry(
+  client: LLMClient,
+  opts: ChatOpts,
+  maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
+  onAttempt?: (attempt: number, err: unknown) => void,
+): Promise<StreamResult> {
+  let response = ''
+  let usage: UsageChunk | null = null
+  try {
+    for await (const chunk of chatStreamWithRetryGen(client, opts, maxAttempts)) {
+      if (chunk.type === 'text') {
+        response += chunk.delta
+      } else if (chunk.type === 'usage') {
+        usage = chunk
+      }
+    }
+  } catch (err) {
+    if (onAttempt) onAttempt(maxAttempts, err)
+    throw err
+  }
+  return { response, usage }
 }

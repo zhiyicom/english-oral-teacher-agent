@@ -456,7 +456,7 @@ describe('buildSystemContext (v0.7.6 B3 — per-segment token counts)', () => {
   it('all 5 segments populated → all counts > 0 and roughly correlate with their text length', () => {
     const r = buildSystemContext(
       {
-        phase: 'TOPIC',
+        phase: 'WARM_UP',
         startedAt: 0,
         lastUserMsgAt: 0,
         elapsedMin: 5.0,

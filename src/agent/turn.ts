@@ -20,8 +20,8 @@
 // (this file is a 1:1 extraction with stderr.write() calls replaced by
 // event yields; behavior is identical under CLI regression tests).
 
-import { chatStreamWithRetry } from '../llm/retry.js'
-import type { LLMClient, Message, SystemBlock, UsageChunk } from '../llm/types.js'
+import { chatStreamWithRetry, chatStreamWithRetryGen } from '../llm/retry.js'
+import type { ChatChunk, LLMClient, Message, SystemBlock, UsageChunk } from '../llm/types.js'
 import type { RelevantSession } from '../memory/index.js'
 import type { Embedder } from '../memory/index.js'
 import type { SystemPrompt as LoaderSystemPrompt } from '../prompts/loader.js'
@@ -109,6 +109,7 @@ export type TurnEvent =
     }
   | { type: 'error'; classification: string; message: string } // V751-002 catch-all
   | { type: 'session-auto-saved'; sessionId: string } // V751-002 catch-all
+  | { type: 'text-chunk'; delta: string } // v0.8.5 — per-token delta (real streaming)
   | { type: 'student-text'; text: string } // student-facing final text (CLI → stdout, server → SSE)
   | {
       type: 'done'
@@ -325,15 +326,19 @@ export async function* runTurn(
   }
 
   // ---------- 3. LLM call with retry + catch-all ----------
+  // v0.8.5 — uses chatStreamWithRetryGen for true text-chunk streaming.
   let response = ''
   let usage: UsageChunk | null = null
   try {
-    const streamResult = await chatStreamWithRetry(deps.client, {
-      systemBlocks,
-      messages: history,
-    })
-    response = streamResult.response
-    usage = streamResult.usage
+    const stream = chatStreamWithRetryGen(deps.client, { systemBlocks, messages: history })
+    for await (const chunk of stream) {
+      if (chunk.type === 'text') {
+        response += chunk.delta
+        yield { type: 'text-chunk', delta: chunk.delta }
+      } else if (chunk.type === 'usage') {
+        usage = chunk
+      }
+    }
   } catch (err) {
     // V751-002 — persistent LLM failure. Yield fallback text + auto-save.
     yield {

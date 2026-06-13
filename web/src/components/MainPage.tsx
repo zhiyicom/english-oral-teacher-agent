@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
 import { createSession, listSessions } from '../lib/api.ts'
 import type { SessionApi } from '../lib/types.ts'
+import LoadingSpinner from './shared/LoadingSpinner'
 
 export default function MainPage() {
   const navigate = useNavigate()
@@ -53,11 +54,7 @@ export default function MainPage() {
   }
 
   if (sessions === null) {
-    return (
-      <p className="text-slate-500" data-testid="loading">
-        {STRINGS.loading}
-      </p>
-    )
+    return <LoadingSpinner text={STRINGS.loading} />
   }
 
   return (

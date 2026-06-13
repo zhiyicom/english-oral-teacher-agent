@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   type Phase,
   type PhaseTransition,
-  type RelevantSession,
   type SessionState,
   buildFinalSystemSegments,
   initState,
@@ -16,6 +15,7 @@ import { createToolRegistry } from '../../src/agent/tool-registry.js'
 import type { TurnEvent, TurnOutput } from '../../src/agent/turn.js'
 import { createReplayProvider } from '../../src/llm/testing.js'
 import type { LLMClient } from '../../src/llm/types.js'
+import type { RelevantSession } from '../../src/memory/index.js'
 import { type SystemPrompt, loadSystemPrompt } from '../../src/prompts/loader.js'
 import { applyMigrations, openDb } from '../../src/storage/db.js'
 import { createMessagesDao } from '../../src/storage/messages.js'

@@ -13,6 +13,8 @@ function makeEnv(): Env {
     LLM_MAX_TOKENS: 100,
     APP_DATA_DIR: './data',
     APP_LOG_LEVEL: 'info',
+    LLM_CONTEXT_BUDGET_TOKENS: 6000,
+    PORT: 3000,
   }
 }
 

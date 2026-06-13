@@ -220,6 +220,10 @@ function forwardEvent(event: TurnEvent, warnedRef: { value: boolean }): void {
     case 'session-auto-saved':
       process.stderr.write(`[cli] session auto-saved: ${event.sessionId}\n`)
       break
+    case 'text-chunk':
+      // v0.8.5 — real-time per-token output to stdout
+      process.stdout.write(event.delta)
+      break
     case 'student-text':
       process.stdout.write(event.text)
       break

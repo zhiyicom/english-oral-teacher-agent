@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
 import { getSessionStreamUrl } from '../lib/api'
+import LoadingSpinner from './shared/LoadingSpinner'
+import MessageBubble from './shared/MessageBubble'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -17,6 +19,7 @@ const PHASE_LABELS: Record<string, string> = {
 
 export default function SessionPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
 
   const [phase, setPhase] = useState<string>('WARM_UP')
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -25,6 +28,8 @@ export default function SessionPage() {
   const [error, setError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
   const [elapsedMin, setElapsedMin] = useState(0)
+  const [streamingText, setStreamingText] = useState<string | null>(null)
+  const streamingRef = useRef('')
   const startedAtRef = useRef<number>(Date.now())
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -103,7 +108,7 @@ export default function SessionPage() {
     const es = new EventSource(url)
     esRef.current = es
 
-    let assistantText = ''
+    streamingRef.current = ''
 
     es.addEventListener('phase', (e) => {
       const data = JSON.parse((e as MessageEvent).data) as { phase: string }
@@ -118,18 +123,30 @@ export default function SessionPage() {
       }
     })
 
+    es.addEventListener('text-chunk', (e) => {
+      const data = JSON.parse((e as MessageEvent).data) as { delta: string }
+      streamingRef.current += data.delta
+      setStreamingText(streamingRef.current)
+    })
+
     es.addEventListener('student-text', (e) => {
       const data = JSON.parse((e as MessageEvent).data) as { text: string }
-      assistantText += data.text
+      // Backward compat: if no text-chunk arrived, use student-text as fallback
+      if (!streamingRef.current) {
+        streamingRef.current = data.text
+        setStreamingText(data.text)
+      }
     })
 
     es.addEventListener('done', (e) => {
       es.close()
       esRef.current = null
 
-      if (assistantText) {
-        setMessages((prev) => [...prev, { role: 'assistant', content: assistantText }])
+      if (streamingRef.current) {
+        setMessages((prev) => [...prev, { role: 'assistant', content: streamingRef.current }])
       }
+      streamingRef.current = ''
+      setStreamingText(null)
 
       const data = JSON.parse((e as MessageEvent).data) as { endedReason: string | null }
       if (data.endedReason && data.endedReason !== 'init') {
@@ -179,13 +196,20 @@ export default function SessionPage() {
     .toString()
     .padStart(2, '0')}`
 
+  // Esc key — confirm then navigate home
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !isTurning) {
+        navigate('/')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navigate, isTurning])
+
   // ---- Loading ----
   if (!ready && !error) {
-    return (
-      <div className="py-16 text-center text-slate-500" data-testid="loading">
-        {STRINGS.loading}
-      </div>
-    )
+    return <LoadingSpinner text={STRINGS.loading} />
   }
 
   // ---- Error on init ----
@@ -239,22 +263,18 @@ export default function SessionPage() {
       {/* Message list */}
       <div className="flex-1 space-y-3 overflow-y-auto pb-4">
         {messages.map((msg, i) => (
-          <div
-            // biome-ignore lint/suspicious/noArrayIndexKey: messages append-only
-            key={i}
-            data-testid={msg.role === 'assistant' ? 'assistant-message' : 'user-message'}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-[80%] whitespace-pre-wrap rounded-lg px-4 py-2 ${
-                msg.role === 'user' ? 'bg-blue-100 text-blue-900' : 'bg-gray-100 text-gray-900'
-              }`}
-            >
-              {msg.content}
+          // biome-ignore lint/suspicious/noArrayIndexKey: messages append-only
+          <MessageBubble key={i} role={msg.role} content={msg.content} />
+        ))}
+        {isTurning && streamingText && (
+          <div className="flex justify-start">
+            <div className="max-w-[80%] whitespace-pre-wrap rounded-lg bg-gray-100 px-4 py-2 text-gray-900">
+              {streamingText}
+              <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-blue-500 align-text-bottom" />
             </div>
           </div>
-        ))}
-        {isTurning && (
+        )}
+        {isTurning && !streamingText && (
           <div className="flex justify-start">
             <div className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-400">
               {STRINGS.turnInProgress}

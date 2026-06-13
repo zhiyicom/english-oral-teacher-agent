@@ -14,7 +14,7 @@
 //   - v0.8.3 — full SSE turn loop (text-chunk / phase / tool events)
 //   - v0.8.4 — GET/PUT /api/settings (USER.md atomic write)
 
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { serve } from '@hono/node-server'
@@ -441,6 +441,34 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
   app.get('/api/health', (c) => {
     return c.json({ ok: true, sessions: sessions.list().length })
   })
+
+  // ---- Production SPA fallback (v0.8.5) ----
+  // When web/dist exists (pnpm build has been run), serve the built SPA for
+  // any non-API route. Vite outputs index.html + assets/ under web/dist/.
+  const distIndex = resolve('web/dist/index.html')
+  if (existsSync(distIndex)) {
+    const distDir = resolve('web/dist')
+    app.get('/assets/*', (c) => {
+      const filePath = resolve(distDir, c.req.path.slice(1))
+      if (!existsSync(filePath) || !filePath.startsWith(distDir)) return c.notFound()
+      const ext = filePath.split('.').pop()
+      const mime: Record<string, string> = {
+        js: 'text/javascript',
+        css: 'text/css',
+        svg: 'image/svg+xml',
+        png: 'image/png',
+        ico: 'image/x-icon',
+        woff2: 'font/woff2',
+      }
+      return c.body(readFileSync(filePath), 200, {
+        'Content-Type': mime[ext ?? ''] ?? 'application/octet-stream',
+      })
+    })
+    app.get('/*', (c) => {
+      if (c.req.path.startsWith('/api')) return c.notFound()
+      return c.html(readFileSync(distIndex, 'utf-8'))
+    })
+  }
 
   return app
 }

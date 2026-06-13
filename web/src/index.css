@@ -1,1 +1,6 @@
 @import "tailwindcss";
+
+/* v0.8.5 — base font size controlled by CSS variable, defaults to 14px */
+html {
+  font-size: var(--font-size-base, 14px);
+}
