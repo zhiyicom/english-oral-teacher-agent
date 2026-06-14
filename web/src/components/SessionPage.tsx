@@ -266,16 +266,48 @@ export default function SessionPage() {
     .toString()
     .padStart(2, '0')}`
 
-  // Esc key — confirm then navigate home
+  // Global keyboard shortcuts for the session page
   useEffect(() => {
+    function matchHotkey(e: KeyboardEvent, raw: string | null): boolean {
+      if (!raw) return false
+      let h: { ctrl: boolean; shift: boolean; alt: boolean; key: string } | null = null
+      try { h = JSON.parse(raw) } catch { return false }
+      if (!h?.key) return false
+      return (
+        e.key.toLowerCase() === h.key.toLowerCase() &&
+        e.ctrlKey === h.ctrl &&
+        e.shiftKey === h.shift &&
+        e.altKey === h.alt
+      )
+    }
+
     function onKey(e: KeyboardEvent) {
+      // Esc — navigate home
       if (e.key === 'Escape' && !isTurning) {
         navigate('/')
+        return
+      }
+      // Skip if ended, turning, or focused on another input
+      if (ended || isTurning) return
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+      // Custom send hotkey (default: none — only textarea Enter works)
+      const raw = localStorage.getItem('settings:send_hotkey')
+      if (raw && matchHotkey(e, raw)) {
+        e.preventDefault()
+        handleSend()
+        return
+      }
+      // Default: Enter sends when no custom hotkey set
+      if (!raw && e.key === 'Enter') {
+        e.preventDefault()
+        handleSend()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [navigate, isTurning])
+  }, [navigate, isTurning, ended])
 
   // ---- Loading ----
   if (!ready && !error) {
