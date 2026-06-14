@@ -174,7 +174,13 @@ export function loadPhaseInstructions(): PhaseInstructions {
 // v0.8.4 — atomic USER.md write for settings persistence.
 // Uses proper-lockfile to prevent races between server and CLI processes.
 export async function updateUserSettings(
-  updates: Partial<{ voice_enabled: boolean; voice_speed: number; voice_accent: string }>,
+  updates: Partial<{
+    voice_enabled: boolean
+    voice_speed: number
+    voice_accent: string
+    interests: string[]
+    bodyAppend: string
+  }>,
 ): Promise<void> {
   const path = join(PROMPTS_DIR, 'USER.md')
   const example = join(PROMPTS_DIR, 'USER.md.example')
@@ -194,8 +200,27 @@ export async function updateUserSettings(
   try {
     const raw = await readFile(path, 'utf8')
     const { data, content } = matter(raw)
-    const newData = { ...data, ...updates }
-    const newRaw = matter.stringify(content, newData)
+
+    // Merge top-level fields
+    const newData: Record<string, unknown> = { ...data }
+    if (updates.voice_enabled !== undefined) newData.voice_enabled = updates.voice_enabled
+    if (updates.voice_speed !== undefined) newData.voice_speed = updates.voice_speed
+    if (updates.voice_accent !== undefined) newData.voice_accent = updates.voice_accent
+
+    // Merge interests: append new ones, deduplicate
+    if (updates.interests && updates.interests.length > 0) {
+      const existing = Array.isArray(data.interests) ? data.interests : []
+      newData.interests = [...new Set([...existing, ...updates.interests])]
+    }
+
+    // Append body update
+    let newContent = content
+    if (updates.bodyAppend) {
+      const trimmed = content.trim()
+      newContent = trimmed ? `${trimmed}\n\n${updates.bodyAppend.trim()}` : updates.bodyAppend.trim()
+    }
+
+    const newRaw = matter.stringify(newContent, newData)
     const tmpPath = `${path}.tmp.${Date.now()}`
     await writeFile(tmpPath, newRaw, 'utf8')
     await rename(tmpPath, path)

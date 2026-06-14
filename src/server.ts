@@ -42,6 +42,7 @@ import type { LLMClient, Message } from './llm/types.js'
 import { createTransformersEmbedder } from './memory/index.js'
 import { loadSystemPrompt, loadUserFile, updateUserSettings } from './prompts/loader.js'
 import { logSummarize } from './llm/debug-log.js'
+import { extractStudentDiscoveries } from './agent/profile-extractor.js'
 import {
   applyMigrations,
   createMessagesDao,
@@ -398,6 +399,24 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
               try {
                 const review = await summarize(msgObjs, client)
                 logSummarize(id, msgObjs.length, review)
+
+                // Auto-extract student profile updates from the summary
+                try {
+                  const discoveries = await extractStudentDiscoveries(
+                    review.summary,
+                    systemPrompt.userProfile.interests,
+                    client,
+                  )
+                  if (discoveries.newInterests.length > 0 || discoveries.bodyUpdate) {
+                    await updateUserSettings({
+                      interests: discoveries.newInterests,
+                      bodyAppend: discoveries.bodyUpdate ?? undefined,
+                    })
+                  }
+                } catch {
+                  // Best-effort — don't block session end on profile extraction
+                }
+
                 sessions.markEnded(id, {
                   phaseHistory: output.phaseHistory,
                   summary: review.summary,
