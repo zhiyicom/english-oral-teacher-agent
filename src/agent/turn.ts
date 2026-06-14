@@ -208,6 +208,21 @@ export async function* runTurn(
   let sessionPersisted = false
 
   // ---------- 1. Pre-input processing (TICK + STOP detect) ----------
+  // If the session is already in END phase (LLM said goodbye), any further
+  // student message ends the session immediately — no more LLM calls.
+  if (state.phase === 'END') {
+    yield { type: 'done', endedReason: 'phase_end' }
+    return {
+      state,
+      history,
+      phaseHistory,
+      firstPair,
+      isFirstTurn,
+      endedReason: 'phase_end',
+      sessionPersisted,
+    }
+  }
+
   const phaseBeforeTick = state.phase
   const newStateAfterTick = applyEvent(state, { type: 'TICK' }, deps.clock)
   let nextState: SessionState = newStateAfterTick
