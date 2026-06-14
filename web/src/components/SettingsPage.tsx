@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
 import { getSettings, updateSettings } from '../lib/api'
 import type { SettingsApi } from '../lib/types'
@@ -76,11 +75,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-lg">
-      <Link to="/" className="text-sm text-slate-500 hover:text-slate-700">
-        &larr; {STRINGS.navHome}
-      </Link>
-
+    <div className="mx-auto max-w-lg px-6 py-4">
       {/* Voice section (disabled — v0.9+) */}
       <div className="mt-4 rounded border bg-white p-4 opacity-60 shadow-sm">
         <h3 className="text-sm font-medium text-slate-400">

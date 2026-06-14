@@ -1,23 +1,30 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import HistoryPage from './components/HistoryPage.tsx'
-import MainPage from './components/MainPage.tsx'
 import SessionPage from './components/SessionPage.tsx'
 import SettingsPage from './components/SettingsPage.tsx'
-import Header from './components/shared/Header.tsx'
+import SessionSidebar from './components/SessionSidebar.tsx'
+
+function WelcomePage() {
+  return (
+    <div className="flex h-full items-center justify-center text-slate-400">
+      <p>选择左侧会话或点击「开始新练习」</p>
+    </div>
+  )
+}
 
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-slate-50">
-        <Header />
-        <main className="mx-auto max-w-4xl px-4 py-8">
+      <div className="flex h-screen bg-white">
+        <SessionSidebar />
+        <div className="flex-1 overflow-y-auto">
           <Routes>
-            <Route path="/" element={<MainPage />} />
+            <Route path="/" element={<WelcomePage />} />
             <Route path="/session/:id" element={<SessionPage />} />
             <Route path="/history/:id" element={<HistoryPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
-        </main>
+        </div>
       </div>
     </BrowserRouter>
   )

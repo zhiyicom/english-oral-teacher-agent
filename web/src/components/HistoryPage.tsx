@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
 import { getSession } from '../lib/api'
 import type { SessionMessage } from '../lib/types'
@@ -57,10 +57,7 @@ export default function HistoryPage() {
   const phaseLabels = session.phaseHistory.map((p) => PHASE_LABELS[p] || p).join(' → ')
 
   return (
-    <div>
-      <Link to="/" className="text-sm text-slate-500 hover:text-slate-700">
-        &larr; {STRINGS.navHome}
-      </Link>
+    <div className="px-6 py-4">
 
       {/* Metadata card */}
       <div className="mt-4 rounded border bg-white p-4 shadow-sm">

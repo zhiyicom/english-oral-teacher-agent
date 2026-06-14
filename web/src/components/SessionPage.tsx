@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
 import { getSession, getSessionStreamUrl } from '../lib/api'
 import LoadingSpinner from './shared/LoadingSpinner'
@@ -255,13 +255,10 @@ export default function SessionPage() {
 
   // ---- Active / Ended ----
   return (
-    <div className="flex flex-col h-[calc(100vh-6rem)]">
+    <div className="flex h-full flex-col">
       {/* Header bar */}
-      <div className="mb-3 flex items-center justify-between border-b pb-3">
+      <div className="flex items-center justify-between border-b px-4 py-3">
         <div className="flex items-center gap-3">
-          <Link to="/" className="text-sm text-slate-500 hover:text-slate-700">
-            &larr; {STRINGS.navHome}
-          </Link>
           <span
             data-testid="phase-tag"
             className="rounded-full bg-blue-100 px-3 py-0.5 text-xs font-medium text-blue-700"
@@ -328,13 +325,14 @@ export default function SessionPage() {
       {ended && (
         <div className="border-t pt-3 text-center" data-testid="session-ended">
           <p className="mb-2 text-slate-500">{STRINGS.sessionEnded}</p>
-          <Link
-            to="/"
+          <button
+            type="button"
+            onClick={() => navigate('/')}
             data-testid="back-to-main"
             className="inline-block rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
           >
             {STRINGS.backToMain}
-          </Link>
+          </button>
         </div>
       )}
 
