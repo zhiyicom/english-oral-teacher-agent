@@ -41,7 +41,11 @@ export function matchTopic(
   for (const t of topics) {
     const shared = t.keywords.filter((k) => normSession.includes(k.toLowerCase()))
     if (shared.length === 0) continue
-    const score = Math.max(jaccard(normSession, t.keywords), shared.length / t.keywords.length)
+    // Two scoring axes: Jaccard similarity + simple keyword count.
+    // A single shared keyword is often meaningful (e.g. "football" → sports).
+    const jScore = jaccard(normSession, t.keywords)
+    const countScore = shared.length / Math.max(sessionKeywords.length, 1)
+    const score = Math.max(jScore, countScore)
     if (score < threshold) continue
     if (best === null || score > best.jaccard || (score === best.jaccard && t.name < best.topic)) {
       best = { topic: t.name, jaccard: score, shared }

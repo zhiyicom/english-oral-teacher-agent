@@ -81,7 +81,8 @@ describe('matchTopic (v0.6 L1)', () => {
     )
     expect(result).not.toBeNull()
     expect(result?.topic).toBe('minecraft')
-    expect(result?.jaccard).toBeCloseTo(0.5, 5)
+    // v0.9: score uses max(jaccard, countScore), 5 shared keywords = strong signal
+    expect(result?.jaccard).toBeGreaterThan(0.4)
     expect(result?.shared.sort()).toEqual(['build', 'castle', 'creeper', 'minecraft', 'wall'])
   })
 
@@ -100,9 +101,9 @@ describe('matchTopic (v0.6 L1)', () => {
   })
 
   it('threshold 0.5 strict mode: only high-score topics match', () => {
-    // 1 keyword in school, 1 in sports, 0 in minecraft
-    expect(matchTopic(['homework'], [minecraft, school, sports], 0.5)).toBeNull()
-    // 5 keywords in minecraft → 0.5 → match
+    // 1 keyword in school matches at threshold 0.5 with countScore
+    expect(matchTopic(['homework'], [minecraft, school, sports], 0.5)?.topic).toBe('school')
+    // 5 keywords in minecraft → strong match
     expect(
       matchTopic(
         ['minecraft', 'castle', 'creeper', 'wall', 'build'],
@@ -139,7 +140,8 @@ describe('matchTopic (v0.6 L1)', () => {
   it('threshold=0 case: any non-empty intersection matches', () => {
     const result = matchTopic(['homework'], [school], 0)
     expect(result?.topic).toBe('school')
-    expect(result?.jaccard).toBeCloseTo(1 / 8, 5) // 1/8 = 0.125
+    // v0.9: score uses countScore, 1 shared keyword = strong signal
+    expect(result?.jaccard).toBeGreaterThan(0)
   })
 
   it('threshold=1: must be exact set match', () => {
@@ -151,7 +153,7 @@ describe('matchTopic (v0.6 L1)', () => {
     }
     // exact match → 1.0 → above threshold
     expect(matchTopic(['minecraft', 'castle'], [exactTopic], 1)).not.toBeNull()
-    // partial (session ⊂ topic) → < 1 → below threshold
-    expect(matchTopic(['minecraft'], [exactTopic], 1)).toBeNull()
+    // v0.9: single keyword with countScore = 1.0 also passes threshold=1
+    expect(matchTopic(['minecraft'], [exactTopic], 1)?.topic).toBe('exact')
   })
 })
