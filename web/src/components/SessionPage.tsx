@@ -43,10 +43,12 @@ export default function SessionPage() {
 
   function speakAssistant(text: string) {
     if (!voiceRef.current) return
+    const clean = text.replace(/<tool>[\s\S]*?<\/tool>\n?/g, '').trim()
+    if (!clean) return
     const voiceSpeed = Number(localStorage.getItem('settings:voice_speed')) || 1.0
     const voiceAccent = localStorage.getItem('settings:voice_accent') || 'en-US'
     speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(text)
+    const u = new SpeechSynthesisUtterance(clean)
     u.rate = voiceSpeed
     u.lang = voiceAccent
     const voices = speechSynthesis.getVoices()
@@ -170,7 +172,8 @@ export default function SessionPage() {
     es.addEventListener('text-chunk', (e) => {
       const data = JSON.parse((e as MessageEvent).data) as { delta: string }
       streamingRef.current += data.delta
-      setStreamingText(streamingRef.current)
+      // Strip <tool>...</tool> blocks from display (internal signal, not student-facing)
+      setStreamingText(streamingRef.current.replace(/<tool>[\s\S]*?<\/tool>\n?/g, ''))
     })
 
     es.addEventListener('student-text', (e) => {
@@ -186,7 +189,9 @@ export default function SessionPage() {
       es.close()
       esRef.current = null
 
-      const text = streamingRef.current
+      const raw = streamingRef.current
+      // Strip tool blocks before displaying
+      const text = raw.replace(/<tool>[\s\S]*?<\/tool>\n?/g, '').trim()
       if (text) {
         setMessages((prev) => [...prev, { role: 'assistant', content: text }])
         speakAssistant(text)
