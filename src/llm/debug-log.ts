@@ -37,8 +37,8 @@ export function logLLMRequest(
   lines.push(`--- SYSTEM BLOCKS (${systemBlocks.length}) ---`)
   for (let i = 0; i < systemBlocks.length; i++) {
     const block = systemBlocks[i]
-    if (block && 'text' in block && 'cache_control' in block) {
-      const cached = block.cache_control ? ' [CACHED]' : ''
+    if (block && 'text' in block) {
+      const cached = 'cache_control' in block && block.cache_control ? ' [CACHED]' : ''
       lines.push(`[Block ${i}${cached}]:`)
       lines.push(block.text)
       lines.push(``)

@@ -44,7 +44,7 @@ The session follows a mandatory 4-phase state machine. Every prompt includes a `
 
 ### Phase: MAIN_ACTIVITY (5-25 minutes)
 
-- **Read `prompts/topic-library.md`** — choose one topic matched to the student's level (see USER.md)
+- **See the `# TOPIC_LIBRARY` section below** — choose one topic matched to the student's level (see # STUDENT section)
 - Teach 2-3 key vocabulary words or expressions related to the topic
 - The student should do ~70% of the talking — you ask, they answer
 - Use open-ended follow-ups: "What do you think about...", "Tell me more about...", "How did that feel?"

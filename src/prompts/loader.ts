@@ -21,6 +21,7 @@ export interface SystemPrompt {
   user: string
   userProfile: UserProfile
   tools: string | null
+  topicLibrary: string | null
 }
 
 const __filename = fileURLToPath(import.meta.url)
@@ -86,6 +87,7 @@ export function loadSystemPrompt(): SystemPrompt {
   const soul = readIfExists(join(PROMPTS_DIR, 'SOUL.md'))
   const agents = readIfExists(join(PROMPTS_DIR, 'AGENTS.md'))
   const tools = readIfExists(join(PROMPTS_DIR, 'tools.md'))
+  const topicLibrary = readIfExists(join(PROMPTS_DIR, 'topic-library.md'))
 
   if (!soul) {
     throw new Error(`Missing prompts/SOUL.md (looked in ${PROMPTS_DIR})`)
@@ -103,6 +105,7 @@ export function loadSystemPrompt(): SystemPrompt {
     user: userBody.trim(),
     userProfile,
     tools: tools ? tools.trim() : null,
+    topicLibrary: topicLibrary ? topicLibrary.trim() : null,
   }
 }
 
@@ -122,6 +125,9 @@ export function buildSystemString(sp: SystemPrompt): string {
   ]
   if (sp.tools) {
     sections.push('', '# TOOLS', '', sp.tools)
+  }
+  if (sp.topicLibrary) {
+    sections.push('', '# TOPIC_LIBRARY', '', sp.topicLibrary)
   }
   return sections.join('\n')
 }
