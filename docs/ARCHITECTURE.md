@@ -15,11 +15,15 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  UI Layer (v0.8 — React 19 + Vite 6)                             │
-│  ┌──────────┐  ┌──────────────┐  ┌────────────┐  ┌──────────┐  │
-│  │  Main    │  │  Session     │  │  History   │  │ Settings │  │
-│  │  Page    │  │  Window      │  │  Detail    │  │  Panel   │  │
-│  └──────────┘  └──────────────┘  └────────────┘  └──────────┘  │
+│  UI Layer (v0.8+) — React 19 + Vite 6, sidebar layout            │
+│  ┌──────────────────┐ ┌─────────────────────────────────────────┐ │
+│  │ SessionSidebar   │ │ Main Content (Routes)                   │ │
+│  │ · Title          │ │ ┌──────────────────────────────────────┐ │ │
+│  │ · New Session    │ │ │ SessionPage / HistoryPage / Settings │ │ │
+│  │ · Session List   │ │ │ / WelcomePage / TopicLibraryPage     │ │ │
+│  │ · Settings Link  │ │ └──────────────────────────────────────┘ │ │
+│  │ · Topic Lib Link │ │                                          │ │
+│  └──────────────────┘ └─────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────┘
                               │ HTTP REST + SSE
                               ▼
@@ -70,8 +74,8 @@
                               ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │  Prompt Sources                                                  │
-│  - prompts/SOUL.md, AGENTS.md, USER.md                          │
-│  - prompts/topics/**/*.md                                        │
+│  - prompts/SOUL.md, AGENTS.md, USER.md (gitignored)              │
+│  - prompts/topic-library.md, phases.md, tools.md, summarizer     │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -475,32 +479,38 @@ src/memory/
 - 单进程部署：server (Hono) 既 serve API 又 serve `web/dist/` static + SPA fallback
 - 未来 Tauri 评估：v0.8.5+ 看用户反馈；包装 v0.8 已有的 server 即可
 
-### 4.3 组件划分（v0.8 实际布局）
+### 4.3 组件划分（v1.0.1 实际布局）
 
-| 组件 | 路径 | 状态 | Sub-sprint |
+| 组件 | 路径 | 说明 | Sprint |
 |---|---|---|---|
-| Main Page（会话列表） | `web/src/components/MainPage.tsx` | PRD §11.2 | v0.8.2 |
-| Session Window | `web/src/components/SessionPage.tsx` | PRD §11.3 | v0.8.3 |
-| History Detail（只读） | `web/src/components/HistoryPage.tsx` | PRD §11.2 | v0.8.4 |
-| Settings Panel | `web/src/components/SettingsPage.tsx` | PRD §9 | v0.8.4 |
-| Shared (Header / Bubble / PhaseTag / Spinner) | `web/src/components/shared/` | — | v0.8.2-v0.8.5 |
-| API client + SSE consumer | `web/src/lib/{api,sse,settings}.ts` | — | v0.8.2-v0.8.4 |
-| i18n (zh + en stub) | `web/src/i18n/` | REQUIREMENTS §4 "中英双语"| v0.8.5 |
+| SessionSidebar | `web/src/components/SessionSidebar.tsx` | 左侧会话列表 + 新建 + 删除 | v1.0.1 |
+| Session Window | `web/src/components/SessionPage.tsx` | 对话窗口 + TTS + voice input | v0.8.3 |
+| History Detail | `web/src/components/HistoryPage.tsx` | 只读 transcript | v0.8.4 |
+| Settings Panel | `web/src/components/SettingsPage.tsx` | 语音/字体/快捷键设置 | v0.8.4 |
+| Topic Library Editor | `web/src/components/TopicLibraryPage.tsx` | 话题库关键词编辑 | v1.0.1 |
+| VoiceInput | `web/src/components/VoiceInput.tsx` | STT 麦克风按钮 | v0.9 |
+| HotkeyInput | `web/src/components/HotkeyInput.tsx` | 快捷键捕获输入 | v0.9 |
+| Shared (Bubble / Spinner) | `web/src/components/shared/` | 消息气泡、Loading | v0.8.5 |
+| API client | `web/src/lib/api.ts` | REST + SSE 封装 | v0.8.2 |
+| i18n (zh + en stub) | `web/src/i18n/` | 中文字符串 | v0.8.5 |
 
 ### 4.4 Web Server（v0.8 新模块）
 
 | 路径 | 用途 |
 |---|---|
-| `src/server.ts` | Hono HTTP + SSE 入口；启动时 listen `env.PORT`（默认 3000）|
-| `src/agent/turn.ts` | [v0.8.1 新] REPL 主循环抽出 → `runTurn(input): AsyncGenerator<TurnEvent, TurnOutput>`；CLI 和 server 共用 |
-| `src/prompts/loader.ts` | [v0.8.4 加 `updateUserSettings()` API] 原子写 USER.md frontmatter（proper-lockfile）|
+| `src/server.ts` | Hono HTTP + SSE 入口；启动时 listen `env.PORT`（默认 3000）；SPA fallback（检测 web/dist/ 自动 serve 静态文件）|
+| `src/agent/turn.ts` | REPL 主循环 → `runTurn(input): AsyncGenerator<TurnEvent, TurnOutput>`；CLI 和 server 共用；v1.0.1 支持 text-chunk 流式 + phase 强制前缀 + END 立即结束 |
+| `src/prompts/loader.ts` | `updateUserSettings()` 原子写 USER.md（proper-lockfile）；`loadPhaseInstructions()` 读取 phases.md；topic-library 注入 |
+| `src/agent/profile-extractor.ts` | [v1.0.1] 从会话摘要自动提取学生信息更新 USER.md |
 
-API contract（详见 [v0.8-design.md §3](./sprint/v0.8-design.md#3-server-api-contract)）：
-- `GET /api/sessions` / `POST /api/sessions` / `GET /api/sessions/:id`
+API contract（v1.0.1 当前状态）：
+- `GET /api/sessions` / `POST /api/sessions` / `GET /api/sessions/:id` / `DELETE /api/sessions/:id`
 - `GET /api/sessions/:id/stream?action=turn&input=...` (SSE)
 - `GET /api/settings` / `PUT /api/settings`
+- `GET /api/topics` / `PUT /api/topics`
+- `GET /api/health`
 
-SSE events: `phase / text-chunk / tool-call / tool-result / usage / segment / error / done`（v0.7.6 已有的 5 段 per-segment logging 自然对应 `segment` event）。
+SSE events: `phase / text-chunk / ctx / ctx-segment / ctx-block / student-text / tokens / tool-call / warn / error / done`。text-chunk 通过 `chatStreamWithRetryGen` 实现真正的逐字流式。
 
 ---
 
