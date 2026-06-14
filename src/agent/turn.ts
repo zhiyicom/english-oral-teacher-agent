@@ -22,6 +22,9 @@
 
 import { logLLMRequest } from '../llm/debug-log.js'
 import { chatStreamWithRetry, chatStreamWithRetryGen } from '../llm/retry.js'
+import { loadPhaseInstructions } from '../prompts/loader.js'
+
+const PHASE_REMINDERS = loadPhaseInstructions().reminder
 import type { ChatChunk, LLMClient, Message, SystemBlock, UsageChunk } from '../llm/types.js'
 import type { RelevantSession } from '../memory/index.js'
 import type { Embedder } from '../memory/index.js'
@@ -345,13 +348,10 @@ export async function* runTurn(
   // Prepend a short phase reminder to the last user message for chat models
   // that tend to ignore system blocks. We pass a modified copy of messages to
   // the LLM so the original history is never altered (UI sees clean text).
-  const PHASE_REMINDERS: Record<string, string> = {
-    WARM_UP: '[Phase: WARM_UP — greet warmly, light questions only] ',
-    MAIN_ACTIVITY: '[Phase: MAIN_ACTIVITY — pick topic from library, teach vocab, student talks 70%] ',
-    WRAP_UP: '[Phase: WRAP_UP — summarize, compliment, suggest practice, move toward close. NO new topics!] ',
-    END: '[Phase: END — say goodbye now. NO questions. Final message.] ',
-  }
-  const reminder = PHASE_REMINDERS[nextState.phase] ?? ''
+  // Reminders are loaded from prompts/phases.md at module load time.
+  const reminder = PHASE_REMINDERS[nextState.phase]
+    ? `[Phase: ${nextState.phase} — ${PHASE_REMINDERS[nextState.phase]}] `
+    : ''
   const lastMsg = history[history.length - 1]
   let callMessages = history
   if (reminder && lastMsg && lastMsg.role === 'user') {

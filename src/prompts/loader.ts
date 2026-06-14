@@ -132,6 +132,45 @@ export function buildSystemString(sp: SystemPrompt): string {
   return sections.join('\n')
 }
 
+// v0.8.5 — load phase instructions from editable prompts/phases.md.
+export interface PhaseInstructions {
+  context: Record<string, string>
+  reminder: Record<string, string>
+}
+
+export function loadPhaseInstructions(): PhaseInstructions {
+  const path = join(PROMPTS_DIR, 'phases.md')
+  const raw = readIfExists(path)
+  if (!raw) throw new Error(`Missing prompts/phases.md (looked in ${PROMPTS_DIR})`)
+
+  const context: Record<string, string> = {}
+  const reminder: Record<string, string> = {}
+
+  // Normalize line endings, then split on phase headers.
+  const text = raw.replace(/\r\n/g, '\n')
+  const phases = text.split(/\n(?=# (?:WARM_UP|MAIN_ACTIVITY|WRAP_UP|END)\b)/)
+  for (const block of phases) {
+    const headerMatch = block.match(/^# (WARM_UP|MAIN_ACTIVITY|WRAP_UP|END)\s*$/m)
+    const phase = headerMatch?.[1]
+    if (!phase) continue
+
+    const contextMatch = /## Context[^\n]*\n([\s\S]*?)(?=\n## Reminder|$)/.exec(block)
+    if (contextMatch?.[1]) {
+      context[phase] = contextMatch[1].trim()
+    }
+
+    const reminderMatch = /## Reminder[^\n]*\n([\s\S]*)$/.exec(block)
+    if (reminderMatch?.[1]) {
+      reminder[phase] = reminderMatch[1].trim()
+    }
+  }
+
+  if (Object.keys(context).length === 0) {
+    throw new Error('phases.md: no phase entries found')
+  }
+  return { context, reminder }
+}
+
 // v0.8.4 — atomic USER.md write for settings persistence.
 // Uses proper-lockfile to prevent races between server and CLI processes.
 export async function updateUserSettings(

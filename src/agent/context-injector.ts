@@ -1,9 +1,12 @@
 import type { RelevantSession } from '../memory/retrieve-relevant.js'
+import { loadPhaseInstructions } from '../prompts/loader.js'
 import type { Mistake } from '../storage/mistakes.js'
 import type { TopicStat } from '../storage/topics.js'
 import type { LastReview } from './retrieval.js'
 import type { SessionState } from './state-machine.js'
 import { estimateTokens } from './truncate-history.js'
+
+const PHASE_CONTEXT = loadPhaseInstructions().context
 
 /**
  * Result of building the [System Context] block. v0.7.6 B3 splits the
@@ -71,43 +74,8 @@ export function buildSystemContext(
 ): SystemContextResult {
   const lastTransitionAgo = Math.max(0, state.elapsedMin - state.lastTransitionAt)
 
-  // v0.8.5 — inject phase-specific behavior instructions directly into the
-  // system context so the LLM doesn't need to remember SOUL.md from 4000+
-  // tokens earlier. Each phase gets a clear, actionable directive.
-  const PHASE_INSTRUCTIONS: Record<string, string> = {
-    WARM_UP: [
-      '## You are in WARM_UP phase (0-5 min). Your task:',
-      '- Greet warmly, ask 1-2 simple open-ended questions (day, week, interests)',
-      '- Keep it light — NO heavy topics, NO grammar corrections',
-      '- Goal: make the student comfortable speaking English',
-    ].join('\n'),
-    MAIN_ACTIVITY: [
-      '## You are in MAIN_ACTIVITY phase (5-25 min). Your task:',
-      '- Pick a topic from # TOPIC_LIBRARY (match the student\'s level in # STUDENT)',
-      '- Student does ~70% of the talking — use open-ended follow-ups',
-      '- Teach 2-3 new words/expressions naturally within the conversation',
-      '- Gently correct errors by rephrasing correctly',
-      '- If topic runs dry or 3+ short answers → switch topic from library',
-      '- Under 25 min: NEVER end the session; at ~23 min: signal wrap-up coming',
-    ].join('\n'),
-    WRAP_UP: [
-      '## You are in WRAP_UP phase (25-30 min). CRITICAL — follow these steps NOW:',
-      '- DO NOT introduce new topics or ask open-ended questions',
-      '- Summarize 1-2 things practiced or improved today',
-      '- Point out 1 thing the student did well',
-      '- Mention 1 thing to work on next time',
-      '- Suggest a mini practice task',
-      '- Move the conversation toward a natural close',
-    ].join('\n'),
-    END: [
-      '## You are in END phase. This is your FINAL message:',
-      '- Say goodbye warmly in 1-2 sentences',
-      '- Thank the student',
-      '- DO NOT ask any questions or introduce anything new',
-    ].join('\n'),
-  }
-
-  const instruction = PHASE_INSTRUCTIONS[state.phase] ?? ''
+  // v0.8.5 — phase behavior instructions loaded from prompts/phases.md
+  const instruction = PHASE_CONTEXT[state.phase] ?? ''
   const phaseSeg = [
     instruction,
     '',
