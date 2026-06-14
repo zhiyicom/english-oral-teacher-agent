@@ -70,12 +70,48 @@ export function buildSystemContext(
   now: Date = new Date(),
 ): SystemContextResult {
   const lastTransitionAgo = Math.max(0, state.elapsedMin - state.lastTransitionAt)
+
+  // v0.8.5 — inject phase-specific behavior instructions directly into the
+  // system context so the LLM doesn't need to remember SOUL.md from 4000+
+  // tokens earlier. Each phase gets a clear, actionable directive.
+  const PHASE_INSTRUCTIONS: Record<string, string> = {
+    WARM_UP: [
+      '## You are in WARM_UP phase (0-5 min). Your task:',
+      '- Greet warmly, ask 1-2 simple open-ended questions (day, week, interests)',
+      '- Keep it light — NO heavy topics, NO grammar corrections',
+      '- Goal: make the student comfortable speaking English',
+    ].join('\n'),
+    MAIN_ACTIVITY: [
+      '## You are in MAIN_ACTIVITY phase (5-25 min). Your task:',
+      '- Pick a topic from # TOPIC_LIBRARY (match the student\'s level in # STUDENT)',
+      '- Student does ~70% of the talking — use open-ended follow-ups',
+      '- Teach 2-3 new words/expressions naturally within the conversation',
+      '- Gently correct errors by rephrasing correctly',
+      '- If topic runs dry or 3+ short answers → switch topic from library',
+      '- Under 25 min: NEVER end the session; at ~23 min: signal wrap-up coming',
+    ].join('\n'),
+    WRAP_UP: [
+      '## You are in WRAP_UP phase (25-30 min). CRITICAL — follow these steps NOW:',
+      '- DO NOT introduce new topics or ask open-ended questions',
+      '- Summarize 1-2 things practiced or improved today',
+      '- Point out 1 thing the student did well',
+      '- Mention 1 thing to work on next time',
+      '- Suggest a mini practice task',
+      '- Move the conversation toward a natural close',
+    ].join('\n'),
+    END: [
+      '## You are in END phase. This is your FINAL message:',
+      '- Say goodbye warmly in 1-2 sentences',
+      '- Thank the student',
+      '- DO NOT ask any questions or introduce anything new',
+    ].join('\n'),
+  }
+
+  const instruction = PHASE_INSTRUCTIONS[state.phase] ?? ''
   const phaseSeg = [
-    '[System Context]',
-    `- Phase: ${state.phase}`,
-    `- Elapsed: ${state.elapsedMin.toFixed(1)} min`,
-    `- Silence: ${state.silenceMin.toFixed(1)} min`,
-    `- Last transition: ${lastTransitionAgo.toFixed(1)} min ago (entered ${state.phase})`,
+    instruction,
+    '',
+    `[System Context] Phase: ${state.phase} | Elapsed: ${state.elapsedMin.toFixed(1)} min | Silence: ${state.silenceMin.toFixed(1)} min | Entered ${state.phase} ${lastTransitionAgo.toFixed(1)} min ago`,
   ].join('\n')
   const lines: string[] = [phaseSeg]
 

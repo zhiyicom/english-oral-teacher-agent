@@ -44,12 +44,12 @@ describe('buildSystemContext (v0.4 base)', () => {
     expect(out).toContain('Phase: WARM_UP')
     expect(out).toContain('Elapsed: 2.3 min')
     expect(out).toContain('Silence: 0.5 min')
-    expect(out).toContain('Last transition: 2.3 min ago (entered WARM_UP)')
+    expect(out).toContain('Entered WARM_UP 2.3 min ago')
   })
 
-  it('starts with [System Context] header', () => {
+  it('starts with phase instruction header', () => {
     const out = ctx(makeState())
-    expect(out.startsWith('[System Context]\n')).toBe(true)
+    expect(out.startsWith('## You are in WARM_UP phase')).toBe(true)
   })
 
   it('shows Silence: 0.0 even when silence is zero (hint is always visible)', () => {
@@ -105,7 +105,7 @@ describe('buildSystemContext (v0.5 last review)', () => {
   it('keeps all v0.4 fields visible alongside the last review segment', () => {
     const out = ctx(makeState(), makeLastReview())
     expect(out).toContain('Phase: WARM_UP')
-    expect(out).toContain('Last transition:')
+    expect(out).toContain('Entered WARM_UP')
     expect(out).toContain('Last session (')
   })
 
@@ -191,7 +191,7 @@ describe('buildSystemContext (v0.6 active topics)', () => {
   it('keeps all v0.4 fields and v0.5 lastReview segment visible alongside active topics', () => {
     const out = ctx(makeState(), makeLastReview(), [makeTopicStat()], [], [], NOW)
     expect(out).toContain('Phase: WARM_UP')
-    expect(out).toContain('Last transition:')
+    expect(out).toContain('Entered WARM_UP')
     expect(out).toContain('Last session (')
     expect(out).toContain('Active topics:')
   })
@@ -507,9 +507,9 @@ describe('buildSystemContext (v0.7.6 B3 — per-segment token counts)', () => {
     expect(r.segments.relevant).toBeGreaterThan(0)
     expect(r.segments.active).toBeGreaterThan(0)
     expect(r.segments.mistakes).toBeGreaterThan(0)
-    // phase block is the smallest (5 short lines); mistakes/last/relevant
-    // are bigger because each contains a quoted user fragment.
-    expect(r.segments.last).toBeGreaterThan(r.segments.phase / 2)
+    // v0.8.5 — phase segment now includes behavior instructions, so it's
+    // the largest segment. Just verify it's non-zero.
+    expect(r.segments.phase).toBeGreaterThan(0)
   })
 
   it('text and segments stay in sync: enabling a segment makes its count grow and others stay equal', () => {
