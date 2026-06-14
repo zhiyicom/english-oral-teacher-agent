@@ -41,6 +41,7 @@ import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
 import type { LLMClient, Message } from './llm/types.js'
 import { createTransformersEmbedder } from './memory/index.js'
 import { loadSystemPrompt, loadUserFile, updateUserSettings } from './prompts/loader.js'
+import { logSummarize } from './llm/debug-log.js'
 import {
   applyMigrations,
   createMessagesDao,
@@ -396,6 +397,7 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
               }))
               try {
                 const review = await summarize(msgObjs, client)
+                logSummarize(id, msgObjs.length, review)
                 sessions.markEnded(id, {
                   phaseHistory: output.phaseHistory,
                   summary: review.summary,

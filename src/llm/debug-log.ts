@@ -64,3 +64,32 @@ export function logLLMRequest(
     // Best-effort — don't crash the turn on logging failure
   }
 }
+
+export function logSummarize(
+  sessionId: string,
+  messageCount: number,
+  result: { summary: string; keywords: string[] },
+): void {
+  if (process.env.DEBUG_LOG_LLM !== '1') return
+  ensureDir()
+  const now = new Date().toISOString().replace(/[:.]/g, '-')
+  const file = join(DEBUG_DIR, `${now}_${sessionId.slice(0, 8)}_summarize.txt`)
+
+  const lines = [
+    `=== Summarize Result ===`,
+    `Time: ${new Date().toISOString()}`,
+    `Session: ${sessionId}`,
+    `Messages summarized: ${messageCount}`,
+    ``,
+    `Summary: ${result.summary}`,
+    ``,
+    `Keywords: ${result.keywords.join(', ')}`,
+    ``,
+    `=== END ===`,
+  ]
+  try {
+    appendFileSync(file, lines.join('\n'), 'utf-8')
+  } catch {
+    // Best-effort
+  }
+}

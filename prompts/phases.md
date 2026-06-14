@@ -33,7 +33,7 @@ greet warmly, light questions only
 
 ## Reminder (prepended to user message)
 
-pick topic from library, teach vocab, student talks 70%
+SWITCH TOPIC NOW — pick from # TOPIC_LIBRARY, teach 2-3 new words, student talks 70%, NEVER end before 25 min
 
 ---
 
