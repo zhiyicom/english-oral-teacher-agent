@@ -62,6 +62,28 @@ export async function deleteSession(id: string): Promise<void> {
   if (!res.ok) throw new Error(`deleteSession: HTTP ${res.status}`)
 }
 
+export interface TopicApi {
+  name: string
+  keywords: string[]
+  description: string
+}
+
+export async function getTopics(): Promise<TopicApi[]> {
+  const res = await checkOk(await fetch(`${BASE}/api/topics`), 'getTopics')
+  return (await res.json()) as TopicApi[]
+}
+
+export async function updateTopics(topics: TopicApi[]): Promise<void> {
+  await checkOk(
+    await fetch(`${BASE}/api/topics`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(topics),
+    }),
+    'updateTopics',
+  )
+}
+
 // v0.8.3 — build the SSE stream URL for a session turn.
 // Each turn opens a fresh EventSource connection with query params.
 export function getSessionStreamUrl(

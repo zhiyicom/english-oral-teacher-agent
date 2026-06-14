@@ -14,7 +14,7 @@
 //   - v0.8.3 — full SSE turn loop (text-chunk / phase / tool events)
 //   - v0.8.4 — GET/PUT /api/settings (USER.md atomic write)
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { serve } from '@hono/node-server'
@@ -185,6 +185,47 @@ function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLM
     )
   }
   return createReplayProvider(fixturesDir)
+}
+
+function regenerateTopicLibrary(topicList: Array<{ name: string; keywords: string[]; description: string | null }>): void {
+  const lines: string[] = [
+    '# Topic Library — 英语口语话题库',
+    '',
+    'MAIN_ACTIVITY 阶段参考此文件选题。按学生级别分类。',
+    '',
+    '---',
+    '',
+    '### 选题策略',
+    '',
+    '1. **检查 Active topics** — 优先选讨论次数最少的，次数相同时选最近没聊过的。这是硬性约束。',
+    '2. **首选题匹配学生水平的话题**',
+    '3. **已聊过的话题可以深入** — 追问新角度、新进展、新观点',
+    '4. **话题枯竭立即换题** — 学生 3 次短回答 = 信号',
+    '5. **一次只引入一个话题** — 不要跳跃',
+    '6. **结合学生兴趣** — 参考 USER.md 中的 interests 字段',
+    '',
+    '---',
+    '',
+    '## 话题列表',
+    '',
+  ]
+  for (const t of topicList) {
+    lines.push(`### ${t.description}`)
+    lines.push('')
+    if (t.keywords.length > 0) {
+      lines.push(`关键词: ${t.keywords.slice(0, 12).join(', ')}${t.keywords.length > 12 ? '...' : ''}`)
+      lines.push('')
+      lines.push('讨论角度:')
+      for (const kw of t.keywords.slice(0, 8)) {
+        lines.push(`- ${kw}`)
+      }
+      lines.push('')
+    }
+    lines.push('---')
+    lines.push('')
+  }
+  const path = resolve('prompts/topic-library.md')
+  writeFileSync(path, lines.join('\n'), 'utf-8')
 }
 
 // ---------- App factory ----------
@@ -486,6 +527,42 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
     if (!row) return c.json({ error: 'session not found', id }, 404)
     sessions.delete(id)
     sessionStore.delete(id)
+    return c.json({ ok: true })
+  })
+
+  // ---- 8. GET /api/topics ----
+  app.get('/api/topics', (c) => {
+    const all = topics.list()
+    return c.json(
+      all.map((t) => ({
+        name: t.name,
+        keywords: t.keywords,
+        description: t.description,
+      })),
+    )
+  })
+
+  // ---- 9. PUT /api/topics ----
+  app.put('/api/topics', async (c) => {
+    const body = (await c.req.json()) as Array<{ name: string; keywords: string[]; description: string }>
+    if (!Array.isArray(body)) return c.json({ error: 'expected array of topics' }, 400)
+
+    // Replace all topics in a transaction
+    const updateTopic = db.raw.prepare(
+      'INSERT INTO topics (name, keywords_json, description, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET keywords_json = excluded.keywords_json, description = excluded.description',
+    )
+    const now = new Date().toISOString()
+    for (const t of body) {
+      updateTopic.run(t.name, JSON.stringify(t.keywords), t.description, now)
+    }
+    // Remove topics not in the update list
+    const names = body.map((t) => t.name)
+    const placeholders = names.map(() => '?').join(',')
+    db.raw.prepare(`DELETE FROM topics WHERE name NOT IN (${placeholders})`).run(...names)
+
+    // Also regenerate prompts/topic-library.md
+    regenerateTopicLibrary(topics.list())
+
     return c.json({ ok: true })
   })
 

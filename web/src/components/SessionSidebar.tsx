@@ -150,8 +150,17 @@ export default function SessionSidebar() {
         ))}
       </div>
 
-      {/* Settings link */}
-      <div className="border-t border-slate-200 p-3">
+      {/* Settings + Topics */}
+      <div className="border-t border-slate-200 p-3 space-y-1">
+        <button
+          type="button"
+          onClick={() => navigate('/topics')}
+          className={`w-full rounded px-3 py-2 text-left text-sm transition-colors hover:bg-slate-200 ${
+            location.pathname === '/topics' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-600'
+          }`}
+        >
+          话题库
+        </button>
         <button
           type="button"
           onClick={() => navigate('/settings')}

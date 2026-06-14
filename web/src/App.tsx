@@ -3,6 +3,7 @@ import HistoryPage from './components/HistoryPage.tsx'
 import SessionPage from './components/SessionPage.tsx'
 import SettingsPage from './components/SettingsPage.tsx'
 import SessionSidebar from './components/SessionSidebar.tsx'
+import TopicLibraryPage from './components/TopicLibraryPage.tsx'
 
 function WelcomePage() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="/session/:id" element={<SessionPage />} />
             <Route path="/history/:id" element={<HistoryPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/topics" element={<TopicLibraryPage />} />
           </Routes>
         </div>
       </div>
