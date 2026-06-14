@@ -23,14 +23,19 @@
 
 | 浏览器 | 最低版本 | 语音输入 (STT) | 语音输出 (TTS) |
 |---|---|---|---|
-| Chrome | ≥ 120 | 全支持 | 全支持 |
+| Chrome | ≥ 120 | 支持（中国区可能受限）| 全支持 |
 | Edge | ≥ 120 | 全支持 | 全支持 |
 | Firefox | ≥ 120 | 不支持 | 全支持 |
 | Safari | ≥ 17 | 部分支持 | 全支持 |
 
 - 语音输入依赖浏览器 `SpeechRecognition` API（Chrome/Edge 完全支持，Firefox 不支持）
 - 语音输出依赖 `SpeechSynthesis` API（所有现代浏览器支持）
-- 推荐使用 Chrome 以体验完整功能
+- **推荐使用 Edge 浏览器**以体验完整语音功能
+- **重要**：`SpeechRecognition` API 的后端服务由浏览器厂商提供，不同浏览器走不同云端：
+  - **Chrome** → Google Cloud Speech（中国区可能无法访问）
+  - **Edge** → Microsoft Azure Speech（中国区可访问）
+  - **Safari** → Apple Siri 引擎
+  - 代码不绑定任何后端——浏览器自己决定调用哪个服务。如果你在中国，建议使用 Edge 来获得稳定的语音识别
 
 ### 1.3 安装步骤
 
