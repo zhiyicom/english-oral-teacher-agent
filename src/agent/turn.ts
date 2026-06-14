@@ -20,6 +20,7 @@
 // (this file is a 1:1 extraction with stderr.write() calls replaced by
 // event yields; behavior is identical under CLI regression tests).
 
+import { logLLMRequest } from '../llm/debug-log.js'
 import { chatStreamWithRetry, chatStreamWithRetryGen } from '../llm/retry.js'
 import type { ChatChunk, LLMClient, Message, SystemBlock, UsageChunk } from '../llm/types.js'
 import type { RelevantSession } from '../memory/index.js'
@@ -320,6 +321,8 @@ export async function* runTurn(
 
   // ---------- 3. LLM call with retry + catch-all ----------
   // v0.8.5 — uses chatStreamWithRetryGen for true text-chunk streaming.
+  logLLMRequest(sessionId, phaseHistory.length, systemBlocks, history)
+
   let response = ''
   let usage: UsageChunk | null = null
   try {

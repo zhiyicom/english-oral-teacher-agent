@@ -19,6 +19,7 @@ const EnvSchema = z.object({
   APP_DATA_DIR: z.string().default('./data'),
   APP_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   RUN_LIVE_LLM: z.enum(['0', '1']).optional(),
+  DEBUG_LOG_LLM: z.enum(['0', '1']).optional(),
 })
 
 export type Env = z.infer<typeof EnvSchema>
