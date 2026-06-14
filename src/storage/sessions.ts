@@ -46,6 +46,7 @@ export interface SessionsDao {
   list(): Session[]
   markEnded(id: string, opts?: MarkEndedInput): Session
   setEmbedding(id: string, vec: Float32Array): void
+  delete(id: string): void
   listWithEmbeddings(): SessionWithEmbedding[]
 }
 
@@ -63,6 +64,7 @@ export function createSessionsDao(handle: DbHandle): SessionsDao {
   )
   const selectAfterUpdate = raw.prepare(`SELECT ${SELECT_COLS} FROM sessions WHERE id = ?`)
   const updateEmbedding = raw.prepare('UPDATE sessions SET embedding = ? WHERE id = ?')
+  const deleteOne = raw.prepare('DELETE FROM sessions WHERE id = ?')
   const selectWithEmbeddings = raw.prepare(
     `SELECT id, started_at, summary, keywords, embedding
      FROM sessions
@@ -131,6 +133,10 @@ export function createSessionsDao(handle: DbHandle): SessionsDao {
     },
     setEmbedding(id: string, vec: Float32Array): void {
       updateEmbedding.run(f32ToBuffer(vec), id)
+    },
+    delete(id: string): void {
+      // ON DELETE CASCADE cleans up messages + mistakes
+      deleteOne.run(id)
     },
     listWithEmbeddings(): SessionWithEmbedding[] {
       const rows = selectWithEmbeddings.all() as Array<{

@@ -231,4 +231,22 @@ describe('createApp (v0.8.1 L1)', () => {
     const settings = (await get.json()) as { voice_enabled: boolean }
     expect(settings.voice_enabled).toBe(true)
   })
+
+  it('DELETE /api/sessions/:id: removes session and returns ok', async () => {
+    const create = await harness.app.request('/api/sessions', { method: 'POST' })
+    const { id } = (await create.json()) as { id: string }
+
+    const del = await harness.app.request(`/api/sessions/${id}`, { method: 'DELETE' })
+    expect(del.status).toBe(200)
+    expect(((await del.json()) as { ok: boolean }).ok).toBe(true)
+
+    // Verify it's gone
+    const get = await harness.app.request(`/api/sessions/${id}`)
+    expect(get.status).toBe(404)
+  })
+
+  it('DELETE /api/sessions/:id: returns 404 for unknown id', async () => {
+    const res = await harness.app.request('/api/sessions/no-such', { method: 'DELETE' })
+    expect(res.status).toBe(404)
+  })
 })

@@ -55,6 +55,13 @@ export async function updateSettings(
   return (await res.json()) as { ok: boolean; persisted: string[] }
 }
 
+export async function deleteSession(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/api/sessions/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error(`deleteSession: HTTP ${res.status}`)
+}
+
 // v0.8.3 — build the SSE stream URL for a session turn.
 // Each turn opens a fresh EventSource connection with query params.
 export function getSessionStreamUrl(

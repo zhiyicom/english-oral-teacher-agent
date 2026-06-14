@@ -479,6 +479,16 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
     })
   })
 
+  // ---- 7. DELETE /api/sessions/:id ----
+  app.delete('/api/sessions/:id', (c) => {
+    const id = c.req.param('id')
+    const row = sessions.get(id)
+    if (!row) return c.json({ error: 'session not found', id }, 404)
+    sessions.delete(id)
+    sessionStore.delete(id)
+    return c.json({ ok: true })
+  })
+
   // ---- 6. PUT /api/settings ----
   // v0.8.4 — persists voice_* fields to USER.md via atomic write.
   app.put('/api/settings', async (c) => {

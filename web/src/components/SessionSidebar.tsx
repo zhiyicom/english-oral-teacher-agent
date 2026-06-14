@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { createSession, listSessions } from '../lib/api'
+import { createSession, deleteSession, listSessions } from '../lib/api'
 import type { SessionApi } from '../lib/types'
 import { STRINGS } from '../i18n/strings'
 
@@ -49,6 +49,17 @@ export default function SessionSidebar() {
   useEffect(() => {
     if (location.pathname === '/') refresh()
   }, [location.pathname, refresh])
+
+  async function handleDelete(e: { stopPropagation: () => void }, id: string) {
+    e.stopPropagation()
+    if (!window.confirm('确定删除此会话？所有对话记录将被永久删除。')) return
+    try {
+      await deleteSession(id)
+      refresh()
+    } catch {
+      // keep list on error
+    }
+  }
 
   async function handleNew() {
     setCreating(true)
@@ -104,11 +115,11 @@ export default function SessionSidebar() {
                     const target = s.endedAt ? `/history/${s.id}` : `/session/${s.id}`
                     navigate(target)
                   }}
-                  className={`w-full px-3 py-2 text-left text-sm transition-colors hover:bg-slate-200 ${
+                  className={`group relative w-full px-3 py-2 text-left text-sm transition-colors hover:bg-slate-200 ${
                     isActive ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700'
                   }`}
                 >
-                  <div className="truncate">
+                  <div className="truncate pr-5">
                     {s.summary
                       ? s.summary.length > 35
                         ? `${s.summary.slice(0, 35)}…`
@@ -120,6 +131,18 @@ export default function SessionSidebar() {
                       {s.durationMin}{STRINGS.minutesShort}
                     </div>
                   )}
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    data-testid="delete-session"
+                    onClick={(e) => handleDelete(e, s.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleDelete(e, s.id)
+                    }}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 hidden rounded px-1.5 py-0.5 text-xs text-red-400 hover:bg-red-50 hover:text-red-600 group-hover:inline-block"
+                  >
+                    &times;
+                  </span>
                 </button>
               )
             })}
