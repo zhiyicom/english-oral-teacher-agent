@@ -201,7 +201,7 @@ export default function SessionPage() {
   function handleEnd() {
     if (!id || isTurning || ended) return
     if (inputRef.current) {
-      inputRef.current.value = 'exit'
+      inputRef.current.value = 'stop'
       handleSend()
     }
   }
