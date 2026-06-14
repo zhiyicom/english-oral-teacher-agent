@@ -5,7 +5,7 @@ export type Phase = 'WARM_UP' | 'MAIN_ACTIVITY' | 'WRAP_UP' | 'END'
 export interface PhaseTransition {
   phase: Phase
   at: number
-  reason?: 'time' | 'user_stop'
+  reason?: 'time' | 'user_stop' | 'phase_end'
 }
 
 export interface SessionState {

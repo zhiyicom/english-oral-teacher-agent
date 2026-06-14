@@ -218,38 +218,31 @@ export async function* runTurn(
     }
   }
 
-  // Time-based END: stop the loop, no more LLM calls
-  if (nextState.phase === 'END') {
-    yield {
-      type: 'phase',
-      phase: 'END',
-      elapsed: nextState.elapsedMin,
-      silence: nextState.silenceMin,
-      reason: 'phase_end',
-    }
-    yield { type: 'done', endedReason: 'phase_end' }
-    return {
-      state: nextState,
-      history,
-      phaseHistory,
-      firstPair,
-      isFirstTurn,
-      endedReason: 'phase_end',
-      sessionPersisted,
-    }
-  }
-
-  // Detect stop keyword (still call LLM this turn for the goodbye)
+  // Detect stop keyword or time-based END.
+  // Both go through the LLM so the student gets a proper goodbye message.
   const isStop = STOP_REGEX.test(userInput)
-  if (isStop) {
+  const isTimeEnd = nextState.phase === 'END'
+
+  if (isStop || isTimeEnd) {
+    const reason = isTimeEnd ? 'phase_end' : 'user_stop'
+    if (isTimeEnd && !isStop) {
+      // Time-based END: yield the phase transition first
+      yield {
+        type: 'phase',
+        phase: 'END',
+        elapsed: nextState.elapsedMin,
+        silence: nextState.silenceMin,
+        reason,
+      }
+    }
     nextState = applyEvent(nextState, { type: 'USER_STOP' }, deps.clock)
-    phaseHistory.push({ phase: 'END', at: nextState.elapsedMin, reason: 'user_stop' })
+    phaseHistory.push({ phase: 'END', at: nextState.elapsedMin, reason })
     yield {
       type: 'phase',
       phase: 'END',
       elapsed: nextState.elapsedMin,
       silence: nextState.silenceMin,
-      reason: 'user_stop',
+      reason,
     }
   } else {
     nextState = applyEvent(nextState, { type: 'USER_MSG' }, deps.clock)
@@ -363,7 +356,7 @@ export async function* runTurn(
     } catch {
       // keep placeholder
     }
-    const endedReason = isStop ? 'user_stop' : 'llm_error'
+    const endedReason = isTimeEnd ? 'phase_end' : isStop ? 'user_stop' : 'llm_error'
     deps.sessions.markEnded(sessionId, {
       phaseHistory,
       summary: summaryText,
@@ -413,7 +406,8 @@ export async function* runTurn(
 
   let displayText = ''
   let endedReason: 'user_exit' | 'user_stop' | 'phase_end' | 'llm_error' | null = null
-  if (endedReason === null && isStop) endedReason = 'user_stop'
+  if (isTimeEnd) endedReason = 'phase_end'
+  else if (isStop) endedReason = 'user_stop'
 
   if (!parsed) {
     // No tool: stdout the LLM text as-is.
