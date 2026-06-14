@@ -219,6 +219,26 @@ export async function* runTurn(
     }
   }
 
+  // v0.8.5 — catch-up WRAP_UP: if long silence caused us to jump from
+  // WARM_UP/MAIN_ACTIVITY straight to END (skipping WRAP_UP entirely),
+  // give the LLM one WRAP_UP round to summarize before the final goodbye.
+  // The next turn will naturally reach END.
+  if (
+    nextState.phase === 'END' &&
+    (phaseBeforeTick === 'WARM_UP' || phaseBeforeTick === 'MAIN_ACTIVITY') &&
+    nextState.silenceMin >= 10
+  ) {
+    nextState = { ...nextState, phase: 'WRAP_UP' as const }
+    phaseHistory.push({ phase: 'WRAP_UP', at: nextState.elapsedMin, reason: 'time' })
+    yield {
+      type: 'phase',
+      phase: 'WRAP_UP',
+      elapsed: nextState.elapsedMin,
+      silence: nextState.silenceMin,
+      reason: 'time',
+    }
+  }
+
   // Detect stop keyword or time-based END.
   // Both go through the LLM so the student gets a proper goodbye message.
   const isStop = STOP_REGEX.test(userInput)
