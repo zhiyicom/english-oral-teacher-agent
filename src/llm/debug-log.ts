@@ -3,10 +3,9 @@ import { join } from 'node:path'
 import type { Message, SystemBlock } from './types.js'
 
 const DEBUG_DIR = join(process.cwd(), 'data', 'llm-debug')
-const DEBUG_ENABLED = process.env.DEBUG_LOG_LLM === '1'
 
 function ensureDir(): void {
-  if (!DEBUG_ENABLED) return
+  if (process.env.DEBUG_LOG_LLM !== '1') return
   try {
     mkdirSync(DEBUG_DIR, { recursive: true })
   } catch {
@@ -20,7 +19,7 @@ export function logLLMRequest(
   systemBlocks: SystemBlock[],
   messages: Message[],
 ): void {
-  if (!DEBUG_ENABLED) return
+  if (process.env.DEBUG_LOG_LLM !== '1') return
   ensureDir()
 
   const now = new Date().toISOString().replace(/[:.]/g, '-')
