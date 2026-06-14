@@ -33,7 +33,7 @@ export function jaccard(a: string[], b: string[]): number {
 export function matchTopic(
   sessionKeywords: string[],
   topics: Topic[],
-  threshold = 0.3,
+  threshold = 0.1,
 ): TopicMatch | null {
   if (sessionKeywords.length === 0) return null
   const normSession = sessionKeywords.map((s) => s.toLowerCase())
@@ -41,7 +41,7 @@ export function matchTopic(
   for (const t of topics) {
     const shared = t.keywords.filter((k) => normSession.includes(k.toLowerCase()))
     if (shared.length === 0) continue
-    const score = jaccard(normSession, t.keywords)
+    const score = Math.max(jaccard(normSession, t.keywords), shared.length / t.keywords.length)
     if (score < threshold) continue
     if (best === null || score > best.jaccard || (score === best.jaccard && t.name < best.topic)) {
       best = { topic: t.name, jaccard: score, shared }
