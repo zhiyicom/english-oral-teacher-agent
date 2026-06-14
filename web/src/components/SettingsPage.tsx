@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { STRINGS } from '../i18n/strings'
 import { getSettings, updateSettings } from '../lib/api'
 import type { SettingsApi } from '../lib/types'
+import HotkeyInput, { type Hotkey, parseHotkey } from './HotkeyInput'
 import LoadingSpinner from './shared/LoadingSpinner'
 
 const LS_FONT_SIZE = 'settings:font_size'
@@ -9,12 +10,16 @@ const LS_SHOW_DEBUG = 'settings:show_debug'
 const LS_VOICE_ENABLED = 'settings:voice_enabled'
 const LS_VOICE_SPEED = 'settings:voice_speed'
 const LS_VOICE_ACCENT = 'settings:voice_accent'
+const LS_MIC_HOTKEY = 'settings:mic_hotkey'
+const LS_SEND_HOTKEY = 'settings:send_hotkey'
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsApi | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [micHotkey, setMicHotkey] = useState<Hotkey | null>(null)
+  const [sendHotkey, setSendHotkey] = useState<Hotkey | null>(null)
 
   useEffect(() => {
     getSettings()
@@ -32,6 +37,8 @@ export default function SettingsPage() {
           voice_speed: voiceSpeed,
           voice_accent: voiceAccent,
         })
+      setMicHotkey(parseHotkey(localStorage.getItem(LS_MIC_HOTKEY)))
+      setSendHotkey(parseHotkey(localStorage.getItem(LS_SEND_HOTKEY)))
       })
       .catch((e: Error) => setError(e.message))
   }, [])
@@ -55,6 +62,8 @@ export default function SettingsPage() {
       localStorage.setItem(LS_VOICE_ENABLED, String(settings.voice_enabled))
       localStorage.setItem(LS_VOICE_SPEED, String(settings.voice_speed))
       localStorage.setItem(LS_VOICE_ACCENT, settings.voice_accent)
+      if (micHotkey) localStorage.setItem(LS_MIC_HOTKEY, JSON.stringify(micHotkey))
+      if (sendHotkey) localStorage.setItem(LS_SEND_HOTKEY, JSON.stringify(sendHotkey))
       if (settings.show_debug) {
         localStorage.setItem(LS_SHOW_DEBUG, 'true')
       } else {
@@ -182,6 +191,33 @@ export default function SettingsPage() {
           >
             {settings.show_debug ? 'ON' : 'OFF'}
           </button>
+        </div>
+      </div>
+
+      {/* Hotkeys */}
+      <div className="mt-4 rounded border bg-white p-4 shadow-sm">
+        <h3 className="text-sm font-medium text-slate-700">快捷键</h3>
+        <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <label className="text-slate-500">麦克风</label>
+            <div className="mt-1">
+              <HotkeyInput
+                value={micHotkey}
+                onChange={setMicHotkey}
+                placeholder="Ctrl+Shift+M"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-slate-500">发送消息</label>
+            <div className="mt-1">
+              <HotkeyInput
+                value={sendHotkey}
+                onChange={setSendHotkey}
+                placeholder="Enter"
+              />
+            </div>
+          </div>
         </div>
       </div>
 

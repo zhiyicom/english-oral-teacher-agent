@@ -84,10 +84,20 @@ export default function VoiceInput({
     setState('listening')
   }, [lang, disabled, stop, onResult, onInterim])
 
-  // Global hotkey: Ctrl+Shift+M toggles the microphone
+  // Global hotkey from Settings — toggles the microphone
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.ctrlKey && e.shiftKey && e.key === 'M') {
+      const raw = localStorage.getItem('settings:mic_hotkey')
+      if (!raw) return
+      let h: { ctrl: boolean; shift: boolean; alt: boolean; key: string } | null = null
+      try { h = JSON.parse(raw) } catch { return }
+      if (!h?.key) return
+      if (
+        e.key.toLowerCase() === h.key.toLowerCase() &&
+        e.ctrlKey === h.ctrl &&
+        e.shiftKey === h.shift &&
+        e.altKey === h.alt
+      ) {
         e.preventDefault()
         start()
       }

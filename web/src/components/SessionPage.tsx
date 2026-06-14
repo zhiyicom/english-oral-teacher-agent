@@ -230,9 +230,33 @@ export default function SessionPage() {
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
+    // Configurable send hotkey from Settings (default: Enter)
+    const raw = localStorage.getItem('settings:send_hotkey')
+    let h: { ctrl: boolean; shift: boolean; alt: boolean; key: string } | null = null
+    try { h = raw ? JSON.parse(raw) : null } catch { /* ignore */ }
+
+    if (h?.key) {
+      if (
+        e.key.toLowerCase() === h.key.toLowerCase() &&
+        e.ctrlKey === h.ctrl &&
+        e.shiftKey === h.shift &&
+        e.altKey === h.alt
+      ) {
+        e.preventDefault()
+        handleSend()
+        return
+      }
+      // If custom hotkey set, Enter alone no longer sends (Shift+Enter always newline)
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        // Enter alone = newline when custom send hotkey is set
+        return
+      }
+    } else {
+      // Default: Enter sends, Shift+Enter newline
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        handleSend()
+      }
     }
   }
 
