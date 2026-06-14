@@ -28,8 +28,10 @@ import {
   createTopicSelectTool,
   initState,
   loadLastReview,
+  matchTopic,
   realClock,
   runTurn,
+  summarize,
 } from './agent/index.js'
 import type { PhaseTransition, SessionState } from './agent/index.js'
 import type { TurnOutput } from './agent/turn.js'
@@ -382,6 +384,51 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
               event: 'done',
               data: JSON.stringify({ endedReason: output.endedReason }),
             })
+
+            // v0.8.5 — when a session ends, summarize and mark it as complete.
+            // This mirrors the CLI's finally block (src/cli.ts). Without this,
+            // lastReview / relevantPast are never populated for web sessions.
+            if (output.endedReason) {
+              const allMsgs = messages.getBySession(id)
+              const msgObjs = allMsgs.map((m) => ({
+                role: m.role as 'user' | 'assistant',
+                content: m.content,
+              }))
+              try {
+                const review = await summarize(msgObjs, client)
+                sessions.markEnded(id, {
+                  phaseHistory: output.phaseHistory,
+                  summary: review.summary,
+                  keywords: review.keywords,
+                  reason: output.endedReason,
+                })
+                // Update topic stats from summary keywords
+                try {
+                  const matched = matchTopic(review.keywords, topics.list())
+                  if (matched) {
+                    topicStats.incrementAndUpdate(matched.topic, new Date())
+                  }
+                } catch {
+                  // topic matching is best-effort
+                }
+                // Generate embedding for cross-session retrieval
+                try {
+                  const vec = await embedder.embed(review.summary)
+                  sessions.setEmbedding(id, vec)
+                } catch {
+                  // embedding is best-effort
+                }
+              } catch {
+                // If summarization fails, still mark as ended with a placeholder
+                sessions.markEnded(id, {
+                  phaseHistory: output.phaseHistory,
+                  summary: '(summarization failed)',
+                  keywords: [],
+                  reason: output.endedReason,
+                })
+              }
+            }
+
             break
           }
           await stream.writeSSE({
