@@ -321,12 +321,30 @@ export async function* runTurn(
 
   // ---------- 3. LLM call with retry + catch-all ----------
   // v0.8.5 — uses chatStreamWithRetryGen for true text-chunk streaming.
-  logLLMRequest(sessionId, phaseHistory.length, systemBlocks, history)
+
+  // Prepend a short phase reminder to the last user message for chat models
+  // that tend to ignore system blocks. We pass a modified copy of messages to
+  // the LLM so the original history is never altered (UI sees clean text).
+  const PHASE_REMINDERS: Record<string, string> = {
+    WARM_UP: '[Phase: WARM_UP — greet warmly, light questions only] ',
+    MAIN_ACTIVITY: '[Phase: MAIN_ACTIVITY — pick topic from library, teach vocab, student talks 70%] ',
+    WRAP_UP: '[Phase: WRAP_UP — summarize, compliment, suggest practice, move toward close. NO new topics!] ',
+    END: '[Phase: END — say goodbye now. NO questions. Final message.] ',
+  }
+  const reminder = PHASE_REMINDERS[nextState.phase] ?? ''
+  const lastMsg = history[history.length - 1]
+  let callMessages = history
+  if (reminder && lastMsg && lastMsg.role === 'user') {
+    const modified = { ...lastMsg, content: `${reminder}${lastMsg.content}` }
+    callMessages = [...history.slice(0, -1), modified]
+  }
+
+  logLLMRequest(sessionId, phaseHistory.length, systemBlocks, callMessages)
 
   let response = ''
   let usage: UsageChunk | null = null
   try {
-    const stream = chatStreamWithRetryGen(deps.client, { systemBlocks, messages: history })
+    const stream = chatStreamWithRetryGen(deps.client, { systemBlocks, messages: callMessages })
     for await (const chunk of stream) {
       if (chunk.type === 'text') {
         response += chunk.delta
