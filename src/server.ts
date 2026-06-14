@@ -203,7 +203,6 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
   const systemPrompt = loadSystemPrompt()
   const client = selectClient(env, opts.fixturesDir)
   const embedder = createTransformersEmbedder()
-  const lastReview = loadLastReview(db)
   const sessionStore = new Map<string, SessionRuntime>()
 
   // Register tools so the v0.8.3 turn loop can dispatch. v0.8.1 doesn't
@@ -340,6 +339,10 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
         role: m.role as 'user' | 'assistant',
         content: m.content,
       }))
+
+      // Load last review dynamically — new summaries may have been added
+      // since the server started. Not cached at module level.
+      const lastReview = rt.isFirstTurn ? loadLastReview(db) : null
 
       const turnInput = {
         sessionId: id,
