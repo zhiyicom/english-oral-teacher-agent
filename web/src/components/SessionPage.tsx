@@ -345,7 +345,7 @@ export default function SessionPage() {
             disabled={isTurning}
             placeholder={isTurning ? STRINGS.turnInProgress : STRINGS.inputPlaceholder}
             onKeyDown={handleKeyDown}
-            rows={2}
+            rows={3}
             className="flex-1 resize-none rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
           />
           <button
