@@ -55,10 +55,10 @@ function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLM
       return createThrowingProvider(status, `LLM_TEST_FAIL=${status}`)
     }
   }
+  if (process.env.RUN_LIVE_LLM?.trim() === '1') {
+    return createAnthropicProvider(env)
+  }
   if (!existsSync(fixturesDir)) {
-    if (process.env.RUN_LIVE_LLM?.trim() === '1') {
-      return createAnthropicProvider(env)
-    }
     throw new Error(
       `Replay mode (default) needs fixtures at ${fixturesDir}. Either create fixtures, or set RUN_LIVE_LLM=1 to use the live API.`,
     )

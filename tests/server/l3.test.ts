@@ -43,7 +43,7 @@ async function spawnServer(): Promise<ServerHandle> {
       MINIMAX_API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       PORT: String(port),
-      // LLM stays in Replay mode (default) so no network call.
+      RUN_LIVE_LLM: '0', // force replay mode in tests
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   })

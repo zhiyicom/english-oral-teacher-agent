@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../../src/server.js'
 import { resolveMigrationsDirForTesting } from '../storage/helpers.js'
 
@@ -32,6 +32,14 @@ function makeHarness(): Harness {
 
 describe('createApp (v0.8.1 L1)', () => {
   let harness: Harness
+
+  // Force replay mode in tests regardless of .env settings.
+  const savedLiveLlm = process.env.RUN_LIVE_LLM
+  delete process.env.RUN_LIVE_LLM
+
+  afterAll(() => {
+    if (savedLiveLlm) process.env.RUN_LIVE_LLM = savedLiveLlm
+  })
 
   beforeEach(() => {
     harness = makeHarness()

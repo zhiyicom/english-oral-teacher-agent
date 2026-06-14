@@ -170,14 +170,12 @@ function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLM
       return createThrowingProvider(status, `LLM_TEST_FAIL=${status}`)
     }
   }
-  // Only use live LLM if the fixtures directory doesn't exist AND RUN_LIVE_LLM is
-  // set to '1'. When fixtures exist (the common case), always use replay mode.
-  // This also prevents tests from accidentally using the live LLM when the user's
-  // .env file has RUN_LIVE_LLM=1.
+  // RUN_LIVE_LLM=1 takes priority — user explicitly wants the live API.
+  if (process.env.RUN_LIVE_LLM?.trim() === '1') {
+    return createAnthropicProvider(env)
+  }
+  // Default: replay mode. Requires fixtures to exist.
   if (!existsSync(fixturesDir)) {
-    if (process.env.RUN_LIVE_LLM?.trim() === '1') {
-      return createAnthropicProvider(env)
-    }
     throw new Error(
       `Replay mode (default) needs fixtures at ${fixturesDir}. Either create fixtures, or set RUN_LIVE_LLM=1 to use the live API.`,
     )
