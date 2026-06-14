@@ -4,6 +4,7 @@ import { STRINGS } from '../i18n/strings'
 import { getSession, getSessionStreamUrl } from '../lib/api'
 import LoadingSpinner from './shared/LoadingSpinner'
 import MessageBubble from './shared/MessageBubble'
+import VoiceInput from './VoiceInput'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -34,6 +35,25 @@ export default function SessionPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const esRef = useRef<EventSource | null>(null)
+
+  // TTS — speak assistant text when voice is enabled
+  const voiceEnabled = localStorage.getItem('settings:voice_enabled') === 'true'
+  const voiceRef = useRef(voiceEnabled)
+  voiceRef.current = voiceEnabled
+
+  function speakAssistant(text: string) {
+    if (!voiceRef.current) return
+    const voiceSpeed = Number(localStorage.getItem('settings:voice_speed')) || 1.0
+    const voiceAccent = localStorage.getItem('settings:voice_accent') || 'en-US'
+    speechSynthesis.cancel()
+    const u = new SpeechSynthesisUtterance(text)
+    u.rate = voiceSpeed
+    u.lang = voiceAccent
+    const voices = speechSynthesis.getVoices()
+    const voice = voices.find((v) => v.lang.startsWith(voiceAccent))
+    if (voice) u.voice = voice
+    speechSynthesis.speak(u)
+  }
 
   // Auto-scroll to bottom when messages change
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on message change
@@ -118,6 +138,8 @@ export default function SessionPage() {
     const input = inputRef.current?.value.trim()
     if (!input) return
 
+    speechSynthesis.cancel()
+
     const userMsg: ChatMessage = { role: 'user', content: input }
     setMessages((prev) => [...prev, userMsg])
     setIsTurning(true)
@@ -167,6 +189,7 @@ export default function SessionPage() {
       const text = streamingRef.current
       if (text) {
         setMessages((prev) => [...prev, { role: 'assistant', content: text }])
+        speakAssistant(text)
       }
       streamingRef.current = ''
       setStreamingText(null)
@@ -339,6 +362,16 @@ export default function SessionPage() {
       {/* Input area */}
       {!ended && (
         <div className="flex gap-2 border-t pt-3">
+          <VoiceInput
+            onResult={(t) => {
+              if (inputRef.current) {
+                inputRef.current.value = (inputRef.current.value + ' ' + t).trim()
+              }
+            }}
+            onInterim={() => {
+              // Interim results shown in input via VoiceInput component
+            }}
+          />
           <textarea
             ref={inputRef}
             data-testid="input-box"

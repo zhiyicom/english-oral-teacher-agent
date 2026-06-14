@@ -33,6 +33,9 @@ export const STRINGS = {
   inputPlaceholder: '输入你的回答…',
   turnInProgress: '老师正在回复…',
   sessionLoadError: '加载会话失败',
+  voiceListening: '点击停止录音',
+  voiceNotSupported: '浏览器不支持语音',
+  voiceStart: '点击开始说话',
 
   // v0.8.4 — HistoryPage
   historyDate: '日期',

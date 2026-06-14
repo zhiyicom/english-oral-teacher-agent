@@ -6,6 +6,9 @@ import LoadingSpinner from './shared/LoadingSpinner'
 
 const LS_FONT_SIZE = 'settings:font_size'
 const LS_SHOW_DEBUG = 'settings:show_debug'
+const LS_VOICE_ENABLED = 'settings:voice_enabled'
+const LS_VOICE_SPEED = 'settings:voice_speed'
+const LS_VOICE_ACCENT = 'settings:voice_accent'
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsApi | null>(null)
@@ -18,7 +21,17 @@ export default function SettingsPage() {
       .then((srv) => {
         const fontSize = Number(localStorage.getItem(LS_FONT_SIZE)) || srv.font_size
         const showDebug = localStorage.getItem(LS_SHOW_DEBUG) === 'true' || srv.show_debug
-        setSettings({ ...srv, font_size: fontSize, show_debug: showDebug })
+        const voiceEnabled = localStorage.getItem(LS_VOICE_ENABLED) === 'true' || srv.voice_enabled
+        const voiceSpeed = Number(localStorage.getItem(LS_VOICE_SPEED)) || srv.voice_speed
+        const voiceAccent = localStorage.getItem(LS_VOICE_ACCENT) || srv.voice_accent
+        setSettings({
+          ...srv,
+          font_size: fontSize,
+          show_debug: showDebug,
+          voice_enabled: voiceEnabled,
+          voice_speed: voiceSpeed,
+          voice_accent: voiceAccent,
+        })
       })
       .catch((e: Error) => setError(e.message))
   }, [])
@@ -39,6 +52,9 @@ export default function SettingsPage() {
       })
       localStorage.setItem(LS_FONT_SIZE, String(settings.font_size))
       document.documentElement.style.setProperty('--font-size-base', `${settings.font_size}px`)
+      localStorage.setItem(LS_VOICE_ENABLED, String(settings.voice_enabled))
+      localStorage.setItem(LS_VOICE_SPEED, String(settings.voice_speed))
+      localStorage.setItem(LS_VOICE_ACCENT, settings.voice_accent)
       if (settings.show_debug) {
         localStorage.setItem(LS_SHOW_DEBUG, 'true')
       } else {
@@ -76,11 +92,10 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-lg px-6 py-4">
-      {/* Voice section (disabled — v0.9+) */}
-      <div className="mt-4 rounded border bg-white p-4 opacity-60 shadow-sm">
-        <h3 className="text-sm font-medium text-slate-400">
-          {STRINGS.settingsVoice}{' '}
-          <span className="text-xs text-slate-300">({STRINGS.settingsVoiceDisabled})</span>
+      {/* Voice section */}
+      <div className="mt-4 rounded border bg-white p-4 shadow-sm">
+        <h3 className="text-sm font-medium text-slate-700">
+          {STRINGS.settingsVoice}
         </h3>
 
         <div className="mt-3 flex items-center justify-between">
@@ -91,7 +106,6 @@ export default function SettingsPage() {
             id="voice-enabled"
             type="button"
             data-testid="voice-toggle"
-            disabled
             className={`rounded-full px-3 py-1 text-xs ${
               settings.voice_enabled ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'
             }`}
@@ -108,7 +122,6 @@ export default function SettingsPage() {
           <input
             id="voice-speed"
             type="range"
-            disabled
             min="0.5"
             max="2.0"
             step="0.1"
@@ -124,7 +137,6 @@ export default function SettingsPage() {
           </label>
           <select
             id="voice-accent"
-            disabled
             value={settings.voice_accent}
             onChange={(e) => updateField('voice_accent', e.target.value)}
             className="mt-1 block w-full rounded border border-slate-300 px-3 py-1 text-sm disabled:bg-slate-50"
