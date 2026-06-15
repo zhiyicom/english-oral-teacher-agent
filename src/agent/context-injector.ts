@@ -85,7 +85,6 @@ export function buildSystemContext(
 
   let lastSeg = ''
   if (lastReview) {
-    process.stderr.write(`[ctx] lastReview: daysAgo=${lastReview.daysAgo} summaryLen=${lastReview.summary.length} kwCount=${lastReview.keywords.length}\n`)
     const dayWord = lastReview.daysAgo === 1 ? 'day' : 'days'
     const durStr = lastReview.durationMin != null ? `${lastReview.durationMin} min` : 'unknown'
     lastSeg = [
@@ -93,7 +92,6 @@ export function buildSystemContext(
       `- Last session keywords: ${lastReview.keywords.join(', ')}`,
     ].join('\n')
     lines.push(lastSeg)
-    process.stderr.write(`[ctx] lastSeg added: "${lastSeg.slice(0, 120)}"\n`)
   }
 
   let relevantSeg = ''
