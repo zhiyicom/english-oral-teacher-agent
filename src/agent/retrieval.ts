@@ -33,7 +33,7 @@ export function loadLastReview(handle: DbHandle, now: Date = new Date()): LastRe
     .prepare(
       `SELECT id, started_at, ended_at, duration_min, summary, keywords
        FROM sessions
-       WHERE summary IS NOT NULL
+       WHERE summary IS NOT NULL AND length(summary) > 30
        ORDER BY started_at DESC
        LIMIT 1`,
     )
