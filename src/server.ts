@@ -401,6 +401,7 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
       // Load last review dynamically — new summaries may have been added
       // since the server started. Not cached at module level.
       const lastReview = rt.isFirstTurn ? loadLastReview(db) : null
+      process.stderr.write(`[server] turn first=${rt.isFirstTurn} lastReview=${lastReview ? lastReview.sessionId.slice(0,8) : 'null'}\n`)
 
       const turnInput = {
         sessionId: id,
