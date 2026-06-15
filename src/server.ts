@@ -244,6 +244,23 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
   const systemPrompt = loadSystemPrompt()
   const client = selectClient(env, opts.fixturesDir)
   const embedder = createTransformersEmbedder()
+  // v1.0.1 — UI preferences stored in a JSON file (localStorage is not
+  // reliable across browser restarts). Voice settings stay in USER.md.
+  const prefsPath = resolve(opts.dataDir, 'preferences.json')
+  function loadPrefs(): Record<string, unknown> {
+    try {
+      if (existsSync(prefsPath)) {
+        return JSON.parse(readFileSync(prefsPath, 'utf-8'))
+      }
+    } catch { /* ignore */ }
+    return {}
+  }
+  function savePrefs(updates: Record<string, unknown>): void {
+    const current = loadPrefs()
+    const merged = { ...current, ...updates }
+    writeFileSync(prefsPath, JSON.stringify(merged), 'utf-8')
+  }
+
   const sessionStore = new Map<string, SessionRuntime>()
 
   // Register tools so the v0.8.3 turn loop can dispatch. v0.8.1 doesn't
@@ -508,15 +525,18 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
   })
 
   // ---- 5. GET /api/settings ----
-  // v0.8.4 — returns current settings from USER.md frontmatter + defaults.
+  // v0.8.4 — returns current settings from USER.md frontmatter + prefs file + defaults.
   app.get('/api/settings', (c) => {
     const { data } = loadUserFile()
+    const prefs = loadPrefs()
     return c.json({
       voice_enabled: data.voice_enabled ?? false,
       voice_speed: data.voice_speed ?? 1.0,
       voice_accent: data.voice_accent ?? 'en-US',
-      font_size: 14,
-      show_debug: false,
+      font_size: prefs.font_size ?? 14,
+      show_debug: prefs.show_debug ?? false,
+      mic_hotkey: prefs.mic_hotkey ?? null,
+      send_hotkey: prefs.send_hotkey ?? null,
     })
   })
 
@@ -590,6 +610,28 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
       await updateUserSettings(
         updates as { voice_enabled?: boolean; voice_speed?: number; voice_accent?: string },
       )
+    }
+
+    // v1.0.1 — persist UI preferences to prefs file (localStorage unreliable)
+    const prefsUpdates: Record<string, unknown> = {}
+    if (typeof body.font_size === 'number') {
+      prefsUpdates.font_size = body.font_size
+      persisted.push('font_size')
+    }
+    if (typeof body.show_debug === 'boolean') {
+      prefsUpdates.show_debug = body.show_debug
+      persisted.push('show_debug')
+    }
+    if (body.mic_hotkey && typeof body.mic_hotkey === 'object') {
+      prefsUpdates.mic_hotkey = body.mic_hotkey
+      persisted.push('mic_hotkey')
+    }
+    if (body.send_hotkey && typeof body.send_hotkey === 'object') {
+      prefsUpdates.send_hotkey = body.send_hotkey
+      persisted.push('send_hotkey')
+    }
+    if (Object.keys(prefsUpdates).length > 0) {
+      savePrefs(prefsUpdates)
     }
 
     return c.json({ ok: true, persisted })

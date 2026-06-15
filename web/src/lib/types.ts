@@ -26,6 +26,8 @@ export interface SettingsApi {
   voice_accent: string
   font_size: number
   show_debug: boolean
+  mic_hotkey: Record<string, unknown> | null
+  send_hotkey: Record<string, unknown> | null
 }
 
 // v0.8.3 — SSE event types consumed by SessionPage.

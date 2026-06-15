@@ -41,12 +41,14 @@ export default function SettingsPage() {
           voice_speed: voiceSpeed,
           voice_accent: voiceAccent,
         })
+
+        // Hotkeys: localStorage first, server fallback
+        const micFromLocal = parseHotkey(localStorage.getItem(LS_MIC_HOTKEY))
+        const sendFromLocal = parseHotkey(localStorage.getItem(LS_SEND_HOTKEY))
+        setMicHotkey(micFromLocal ?? (srv.mic_hotkey as Hotkey | null))
+        setSendHotkey(sendFromLocal ?? (srv.send_hotkey as Hotkey | null))
       })
       .catch((e: Error) => setError(e.message))
-
-    // Hotkeys are loaded immediately from localStorage (no server dependency)
-    setMicHotkey(parseHotkey(localStorage.getItem(LS_MIC_HOTKEY)))
-    setSendHotkey(parseHotkey(localStorage.getItem(LS_SEND_HOTKEY)))
   }, [])
 
   // Save hotkeys to localStorage immediately whenever they change
@@ -71,6 +73,10 @@ export default function SettingsPage() {
         voice_enabled: settings.voice_enabled,
         voice_speed: settings.voice_speed,
         voice_accent: settings.voice_accent,
+        font_size: settings.font_size,
+        show_debug: settings.show_debug,
+        mic_hotkey: micHotkey as unknown as Record<string, unknown>,
+        send_hotkey: sendHotkey as unknown as Record<string, unknown>,
       })
       localStorage.setItem(LS_FONT_SIZE, String(settings.font_size))
       document.documentElement.style.setProperty('--font-size-base', `${settings.font_size}px`)
