@@ -370,13 +370,51 @@ export async function* runTurn(
   let callMessages = history
   if (lastMsg && lastMsg.role === 'user') {
     if (phaseJustChanged && phaseContext) {
-      // Phase change: insert a standalone instruction message
-      const instruction = phaseContext.replace(/## /g, '')
-      callMessages = [
-        ...history.slice(0, -1),
-        { role: 'user' as const, content: `[PHASE TRANSITION — ${instruction}]` },
-        lastMsg,
-      ]
+      // Phase change to MAIN_ACTIVITY: auto-select a topic from the library.
+      // The topic_select tool returns a topic slug + title; we synthesize a
+      // user message that forces the LLM to discuss that topic.
+      // Text instructions are consistently ignored by chat models — tool
+      // results embedded as messages are not.
+      if (nextState.phase === 'MAIN_ACTIVITY') {
+        try {
+          const topicTool = deps.toolRegistry.get('topic_select')
+          if (topicTool) {
+            const topicResult = await topicTool.execute({ phase: 'MAIN_ACTIVITY', exclude_recent_days: 30 }) as { slug?: string; title?: string; error?: string }
+            if (topicResult.slug && !topicResult.error) {
+              const topicMsg = `[TOPIC: ${topicResult.slug}] We are now in the main activity phase. Introduce the topic "${topicResult.title ?? topicResult.slug}" to the student. Teach 2-3 relevant vocabulary words. Ask open-ended questions — the student should talk 70% of the time.`
+              callMessages = [
+                ...history.slice(0, -1),
+                { role: 'user' as const, content: topicMsg },
+                lastMsg,
+              ]
+            } else {
+              // Fallback: use phase context text
+              const instruction = phaseContext.replace(/## /g, '')
+              callMessages = [
+                ...history.slice(0, -1),
+                { role: 'user' as const, content: `[PHASE TRANSITION — ${instruction}]` },
+                lastMsg,
+              ]
+            }
+          }
+        } catch {
+          // Tool failed — fallback to text instruction
+          const instruction = phaseContext.replace(/## /g, '')
+          callMessages = [
+            ...history.slice(0, -1),
+            { role: 'user' as const, content: `[PHASE TRANSITION — ${instruction}]` },
+            lastMsg,
+          ]
+        }
+      } else {
+        // Other phase transitions: use standalone text instruction
+        const instruction = phaseContext.replace(/## /g, '')
+        callMessages = [
+          ...history.slice(0, -1),
+          { role: 'user' as const, content: `[PHASE TRANSITION — ${instruction}]` },
+          lastMsg,
+        ]
+      }
     } else {
       // Same phase: prepend a short reminder or first-turn warmup hint.
       // First-turn warmup uses a standalone message (not prefix) for maximum
