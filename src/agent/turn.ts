@@ -381,10 +381,15 @@ export async function* runTurn(
       // Same phase: prepend a short reminder or first-turn warmup hint.
       // First-turn warmup uses a standalone message (not prefix) for maximum
       // impact — same strategy as phase transitions.
-      if (wasFirstTurn && input.lastReview?.keywords?.length) {
-        const lastKws = input.lastReview.keywords.slice(0, 4).join(', ')
-        const hint = `[WARM_UP — last session was about: ${lastKws}. Ask about something completely different. Check # STUDENT interests for ideas.]`
-        process.stderr.write(`[turn] WARM_UP hint as standalone message: ${hint}\n`)
+      if (wasFirstTurn && input.lastReview?.summary) {
+        const summary = input.lastReview.summary
+        const kws = (input.lastReview.keywords ?? []).slice(0, 4).join(', ')
+        const hint = [
+          `Last session (${input.lastReview.daysAgo} days ago): ${summary}`,
+          `Keywords: ${kws}`,
+          `Greet the student first, then make a natural connection to something from last session before moving to a new topic.`,
+        ].join('\n')
+        process.stderr.write(`[turn] WARM_UP hint as standalone message\n`)
         callMessages = [
           ...history.slice(0, -1),
           { role: 'user' as const, content: hint },

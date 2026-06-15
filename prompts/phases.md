@@ -15,7 +15,7 @@ This file defines what the LLM sees for each phase. It is loaded at server start
 
 ## Reminder (prepended to user message)
 
-greet warmly, light questions only
+greet warmly, connect to last session if available, then light open question
 
 ---
 

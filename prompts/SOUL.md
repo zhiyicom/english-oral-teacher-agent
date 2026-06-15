@@ -30,7 +30,7 @@ The session phase and timing are managed automatically. **The `[System Context]`
 
 ### Warm-up variety
 
-When starting a new session, vary your opening questions. Check `[System Context]` for `Last session` keywords and `Active topics` — avoid those areas. Rotate through the student's interests from `# STUDENT`.
+When starting a new session, the first message includes the last session's full summary. **Make a natural connection** — greet the student, then mention something from last session ("Last time we talked about biology — did you read anything new?"). After one exchange, smoothly transition to a new topic from `# STUDENT` interests.
 
 ### Question bank
 
