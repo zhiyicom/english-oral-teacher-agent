@@ -378,17 +378,20 @@ export async function* runTurn(
         lastMsg,
       ]
     } else {
-      // Same phase: prepend a short reminder or first-turn warmup hint
-      let prefix = ''
+      // Same phase: prepend a short reminder or first-turn warmup hint.
+      // First-turn warmup uses a standalone message (not prefix) for maximum
+      // impact — same strategy as phase transitions.
       if (wasFirstTurn && input.lastReview?.keywords?.length) {
         const lastKws = input.lastReview.keywords.slice(0, 4).join(', ')
-        prefix = `[WARM_UP — last session was about: ${lastKws}. Ask about something different from # STUDENT interests.] `
-        process.stderr.write(`[turn] WARM_UP hint: ${prefix.trim()}\n`)
+        const hint = `[WARM_UP — last session was about: ${lastKws}. Ask about something completely different. Check # STUDENT interests for ideas.]`
+        process.stderr.write(`[turn] WARM_UP hint as standalone message: ${hint}\n`)
+        callMessages = [
+          ...history.slice(0, -1),
+          { role: 'user' as const, content: hint },
+          lastMsg,
+        ]
       } else if (phaseReminder) {
-        prefix = `[Phase: ${nextState.phase} — ${phaseReminder}] `
-      }
-      if (prefix) {
-        const modified = { ...lastMsg, content: `${prefix}${lastMsg.content}` }
+        const modified = { ...lastMsg, content: `[Phase: ${nextState.phase} — ${phaseReminder}] ${lastMsg.content}` }
         callMessages = [...history.slice(0, -1), modified]
       }
     }
