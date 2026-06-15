@@ -380,9 +380,10 @@ export async function* runTurn(
     } else {
       // Same phase: prepend a short reminder or first-turn warmup hint
       let prefix = ''
-      if (wasFirstTurn && input.lastReview) {
+      if (wasFirstTurn && input.lastReview?.keywords?.length) {
         const lastKws = input.lastReview.keywords.slice(0, 4).join(', ')
         prefix = `[WARM_UP — last session was about: ${lastKws}. Ask about something different from # STUDENT interests.] `
+        process.stderr.write(`[turn] WARM_UP hint: ${prefix.trim()}\n`)
       } else if (phaseReminder) {
         prefix = `[Phase: ${nextState.phase} — ${phaseReminder}] `
       }
