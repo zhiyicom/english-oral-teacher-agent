@@ -93,6 +93,7 @@ export function buildSystemContext(
       `- Last session keywords: ${lastReview.keywords.join(', ')}`,
     ].join('\n')
     lines.push(lastSeg)
+    process.stderr.write(`[ctx] lastSeg added: "${lastSeg.slice(0, 120)}"\n`)
   }
 
   let relevantSeg = ''
