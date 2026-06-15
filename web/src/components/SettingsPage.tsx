@@ -37,11 +37,22 @@ export default function SettingsPage() {
           voice_speed: voiceSpeed,
           voice_accent: voiceAccent,
         })
-      setMicHotkey(parseHotkey(localStorage.getItem(LS_MIC_HOTKEY)))
-      setSendHotkey(parseHotkey(localStorage.getItem(LS_SEND_HOTKEY)))
       })
       .catch((e: Error) => setError(e.message))
+
+    // Hotkeys are loaded immediately from localStorage (no server dependency)
+    setMicHotkey(parseHotkey(localStorage.getItem(LS_MIC_HOTKEY)))
+    setSendHotkey(parseHotkey(localStorage.getItem(LS_SEND_HOTKEY)))
   }, [])
+
+  // Save hotkeys to localStorage immediately whenever they change
+  useEffect(() => {
+    if (micHotkey) localStorage.setItem(LS_MIC_HOTKEY, JSON.stringify(micHotkey))
+  }, [micHotkey])
+
+  useEffect(() => {
+    if (sendHotkey) localStorage.setItem(LS_SEND_HOTKEY, JSON.stringify(sendHotkey))
+  }, [sendHotkey])
 
   const updateField = useCallback(<K extends keyof SettingsApi>(key: K, value: SettingsApi[K]) => {
     setSettings((prev) => (prev ? { ...prev, [key]: value } : prev))
@@ -62,8 +73,6 @@ export default function SettingsPage() {
       localStorage.setItem(LS_VOICE_ENABLED, String(settings.voice_enabled))
       localStorage.setItem(LS_VOICE_SPEED, String(settings.voice_speed))
       localStorage.setItem(LS_VOICE_ACCENT, settings.voice_accent)
-      if (micHotkey) localStorage.setItem(LS_MIC_HOTKEY, JSON.stringify(micHotkey))
-      if (sendHotkey) localStorage.setItem(LS_SEND_HOTKEY, JSON.stringify(sendHotkey))
       if (settings.show_debug) {
         localStorage.setItem(LS_SHOW_DEBUG, 'true')
       } else {
