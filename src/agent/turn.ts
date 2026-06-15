@@ -362,28 +362,34 @@ export async function* runTurn(
   // ---------- 3. LLM call with retry + catch-all ----------
   // v0.8.5 — uses chatStreamWithRetryGen for true text-chunk streaming.
 
-  // Phase change: insert a standalone instruction message BEFORE the user's
-  // message. A prefix on the same message gets ignored by chat models —
-  // they follow the conversation, not the metadata. A separate message forces
-  // the LLM to process the phase change as its own turn.
-  // Subsequent turns within the same phase: prepend a short reminder.
+  // Phase change / first turn / normal turn: inject behavioral hints into
+  // the user message. Chat models ignore system context, so these go inline.
   const phaseReminder = PHASES.reminder[nextState.phase] ?? ''
   const phaseContext = PHASES.context[nextState.phase] ?? ''
   const lastMsg = history[history.length - 1]
   let callMessages = history
   if (lastMsg && lastMsg.role === 'user') {
     if (phaseJustChanged && phaseContext) {
-      // Insert a synthetic instruction message before the user's actual text.
-      // This creates a clear break that chat models cannot ignore.
+      // Phase change: insert a standalone instruction message
       const instruction = phaseContext.replace(/## /g, '')
       callMessages = [
         ...history.slice(0, -1),
         { role: 'user' as const, content: `[PHASE TRANSITION — ${instruction}]` },
         lastMsg,
       ]
-    } else if (phaseReminder) {
-      const modified = { ...lastMsg, content: `[Phase: ${nextState.phase} — ${phaseReminder}] ${lastMsg.content}` }
-      callMessages = [...history.slice(0, -1), modified]
+    } else {
+      // Same phase: prepend a short reminder or first-turn warmup hint
+      let prefix = ''
+      if (wasFirstTurn && input.lastReview) {
+        const lastKws = input.lastReview.keywords.slice(0, 4).join(', ')
+        prefix = `[WARM_UP — last session was about: ${lastKws}. Ask about something different from # STUDENT interests.] `
+      } else if (phaseReminder) {
+        prefix = `[Phase: ${nextState.phase} — ${phaseReminder}] `
+      }
+      if (prefix) {
+        const modified = { ...lastMsg, content: `${prefix}${lastMsg.content}` }
+        callMessages = [...history.slice(0, -1), modified]
+      }
     }
   }
 
