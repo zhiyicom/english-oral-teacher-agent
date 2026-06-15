@@ -212,7 +212,10 @@ export default function SettingsPage() {
             <div className="mt-1">
               <HotkeyInput
                 value={micHotkey}
-                onChange={setMicHotkey}
+                onChange={(h) => {
+                  setMicHotkey(h)
+                  localStorage.setItem(LS_MIC_HOTKEY, JSON.stringify(h))
+                }}
                 placeholder="Ctrl+Shift+M"
               />
             </div>
@@ -222,7 +225,10 @@ export default function SettingsPage() {
             <div className="mt-1">
               <HotkeyInput
                 value={sendHotkey}
-                onChange={setSendHotkey}
+                onChange={(h) => {
+                  setSendHotkey(h)
+                  localStorage.setItem(LS_SEND_HOTKEY, JSON.stringify(h))
+                }}
                 placeholder="Enter"
               />
             </div>
