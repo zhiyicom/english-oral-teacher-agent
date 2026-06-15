@@ -18,8 +18,12 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [micHotkey, setMicHotkey] = useState<Hotkey | null>(null)
-  const [sendHotkey, setSendHotkey] = useState<Hotkey | null>(null)
+  const [micHotkey, setMicHotkey] = useState<Hotkey | null>(
+    () => parseHotkey(localStorage.getItem(LS_MIC_HOTKEY)),
+  )
+  const [sendHotkey, setSendHotkey] = useState<Hotkey | null>(
+    () => parseHotkey(localStorage.getItem(LS_SEND_HOTKEY)),
+  )
 
   useEffect(() => {
     getSettings()
