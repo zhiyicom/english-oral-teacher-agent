@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { createSession, deleteSession, listSessions } from '../lib/api'
 import type { SessionApi } from '../lib/types'
 import { STRINGS } from '../i18n/strings'
+import { VERSION } from '../version'
 
 function groupByDate(sessions: SessionApi[]): { label: string; items: SessionApi[] }[] {
   const now = Date.now()
@@ -170,6 +171,11 @@ export default function SessionSidebar() {
         >
           {STRINGS.navSettings}
         </button>
+      </div>
+
+      {/* Version tag */}
+      <div className="border-t border-slate-200 px-3 py-1.5 text-xs text-slate-400">
+        {VERSION}
       </div>
     </aside>
   )
