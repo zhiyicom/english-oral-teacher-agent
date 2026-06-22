@@ -107,7 +107,7 @@ describe('CLI persistence (5 turns → DB readable from parent)', () => {
     ]
 
     const result = await runCli(`${inputs.join('\n')}\n`, {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       RUN_LIVE_LLM: '0',
       APP_DATA_DIR: dataDir,
     })

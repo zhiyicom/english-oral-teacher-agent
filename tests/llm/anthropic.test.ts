@@ -5,7 +5,7 @@ import { createAnthropicProvider } from '../../src/llm/anthropic.js'
 function makeEnv(): Env {
   return {
     LLM_PROVIDER: 'minimax',
-    MINIMAX_API_KEY: 'sk-test',
+    API_KEY: 'sk-test',
     ANTHROPIC_BASE_URL: 'http://test.local',
     LLM_MODEL_MAIN: 'MiniMax-M3',
     LLM_MODEL_SUMMARIZER: 'MiniMax-M3',

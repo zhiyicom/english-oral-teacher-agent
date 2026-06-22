@@ -53,7 +53,7 @@ function runCli(input: string, env: Record<string, string> = {}): Promise<RunRes
 
 describe('CLI REPL (Replay mode)', () => {
   it('responds to "hi" with a greeting from the persona', async () => {
-    const result = await runCli('hi\n', { MINIMAX_API_KEY: 'sk-test' })
+    const result = await runCli('hi\n', { API_KEY: 'sk-test' })
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toMatch(/English Oral Teacher Agent/)
     expect(result.stdout).toMatch(/Hi there/)
@@ -61,7 +61,7 @@ describe('CLI REPL (Replay mode)', () => {
 
   it('replies twice in a 2-turn session', async () => {
     const result = await runCli('hi\nfine thanks\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
     })
     expect(result.exitCode).toBe(0)
     const teacherCount = (result.stdout.match(/\[Teacher\]/g) ?? []).length

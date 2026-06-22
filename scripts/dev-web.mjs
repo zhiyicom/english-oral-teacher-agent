@@ -10,7 +10,7 @@
 // Fix: invoke `pnpm` through `node child_process.spawn` with `shell: true`
 // so Windows resolves `pnpm.cmd` from `C:\Program Files\nodejs\`.
 //
-// We pass through MINIMAX_API_KEY (the server requires it on boot via
+// We pass through API_KEY (the server requires it on boot via
 // src/config/env.ts Zod schema). Playwright forwards the parent env to
 // the webServer child, so we just inherit it here.
 

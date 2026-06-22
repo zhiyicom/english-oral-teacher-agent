@@ -20,7 +20,7 @@
 //     verify "happy path" still works (regression check for v0.7.3 flow)
 //
 // Requires:
-//   - MINIMAX_API_KEY in env OR in .env (auto-loaded below via dotenv;
+//   - API_KEY in env OR in .env (auto-loaded below via dotenv;
 //     shell env wins if both are set, matching dotenv's standard priority)
 //   - node_modules installed (tsx is a dev dep)
 //   - Network access to ANTHROPIC_BASE_URL + HF_ENDPOINT (default mirror)
@@ -38,10 +38,10 @@ const ROOT = resolve(__filename, '..', '..')
 
 // ---------- Pre-flight ----------
 
-if (!process.env.MINIMAX_API_KEY) {
-  console.error('[live-validate] MINIMAX_API_KEY is not set.')
+if (!process.env.API_KEY) {
+  console.error('[live-validate] API_KEY is not set.')
   console.error('  Either fill it in .env, or run as:')
-  console.error('    MINIMAX_API_KEY=sk-... node scripts/live-validate-v0.7.5.mjs')
+  console.error('    API_KEY=sk-... node scripts/live-validate-v0.7.5.mjs')
   process.exit(1)
 }
 if (!existsSync(resolve(ROOT, 'node_modules', 'tsx'))) {

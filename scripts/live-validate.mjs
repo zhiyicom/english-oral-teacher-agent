@@ -8,7 +8,7 @@
 // transcripts and written to docs/sprint/v0.7.4-validation-report.md.
 //
 // Requires:
-//   - MINIMAX_API_KEY in env (NOT read from .env — operator provides)
+//   - API_KEY in env (NOT read from .env — operator provides)
 //   - node_modules installed (tsx is a dev dep)
 //   - Network access to ANTHROPIC_BASE_URL + HF_ENDPOINT (default mirror)
 //
@@ -24,9 +24,9 @@ const ROOT = resolve(__filename, '..', '..')
 
 // ---------- Pre-flight ----------
 
-if (!process.env.MINIMAX_API_KEY) {
-  console.error('[live-validate] MINIMAX_API_KEY is not set.')
-  console.error('  Run as:  MINIMAX_API_KEY=sk-... node scripts/live-validate.mjs')
+if (!process.env.API_KEY) {
+  console.error('[live-validate] API_KEY is not set.')
+  console.error('  Run as:  API_KEY=sk-... node scripts/live-validate.mjs')
   process.exit(1)
 }
 if (!existsSync(resolve(ROOT, 'node_modules', 'tsx'))) {

@@ -58,8 +58,8 @@ pnpm --dir web install
 复制 `.env.example` 为 `.env`，填入配置：
 
 ```env
-# 必填：MiniMax API 密钥（replay 模式可用 sk-test 占位）
-MINIMAX_API_KEY=你的API密钥
+# 必填：LLM 厂商 API 密钥（replay 模式可用 sk-test 占位）
+API_KEY=你的API密钥
 
 # 可选：设为 1 使用真实 LLM（不设默认 replay 模式，无需 API 调用）
 RUN_LIVE_LLM=1
@@ -282,7 +282,7 @@ DEBUG_LOG_LLM=1
 
 ```env
 RUN_LIVE_LLM=1
-MINIMAX_API_KEY=你的API密钥
+API_KEY=你的API密钥
 ```
 
 默认使用 replay 模式（无须 API key，用于测试）。Live 模式调用真实 LLM。

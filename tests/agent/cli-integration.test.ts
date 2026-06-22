@@ -95,7 +95,7 @@ describe('CLI v0.4 state-machine integration', () => {
 
   it('1 turn: stderr shows ctx: WARM_UP', async () => {
     const result = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -108,7 +108,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // Use only inputs that have matching replay fixtures (hi, fine, castle, creeper, played).
     const inputs = ['hi', 'fine', 'castle', 'creeper', 'played', 'hi']
     const result = await runCli(`${inputs.join('\n')}\n`, {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       MOCK_TIME: '1',
       MOCK_NOW: '2026-01-01T00:00:00Z',
       APP_DATA_DIR: dataDir,
@@ -124,7 +124,7 @@ describe('CLI v0.4 state-machine integration', () => {
   it('5 turns: DB has phase_history (>= 1 transition recorded)', async () => {
     const inputs = ['hi', 'fine', 'castle', 'creeper', 'played']
     const result = await runCli(`${inputs.join('\n')}\n`, {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -145,7 +145,7 @@ describe('CLI v0.4 state-machine integration', () => {
 
   it('user says "stop": next ctx shows END + loop exits + DB has user_stop reason', async () => {
     const result = await runCli('hi\nstop\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -173,7 +173,7 @@ describe('CLI v0.4 state-machine integration', () => {
   it('"okay stop" (mid-sentence) is NOT a stop; loop continues normally', async () => {
     // 'bye' would be a stop keyword, so use 'castle' (which has a fixture) for turn 3.
     const result = await runCli('hi\nokay stop then continue\ncastle\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -190,7 +190,7 @@ describe('CLI v0.4 state-machine integration', () => {
   it('5 turns: session DB row has summary + JSON-encoded keywords after markEnded', async () => {
     const inputs = ['hi', 'fine', 'castle', 'creeper', 'played']
     const result = await runCli(`${inputs.join('\n')}\n`, {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -216,7 +216,7 @@ describe('CLI v0.4 state-machine integration', () => {
   it('5 turns: summary content reflects the Replay fixture (Minecraft keywords)', async () => {
     const inputs = ['hi', 'fine', 'castle', 'creeper', 'played']
     const result = await runCli(`${inputs.join('\n')}\n`, {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -235,7 +235,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // Run session A: 5 turns, ends with summary
     const inputsA = ['hi', 'fine', 'castle', 'creeper', 'played']
     const a = await runCli(`${inputsA.join('\n')}\n`, {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(a.exitCode).toBe(0)
@@ -243,7 +243,7 @@ describe('CLI v0.4 state-machine integration', () => {
 
     // Run session B in the SAME dataDir: 1 turn, just to see the injected ctx
     const b = await runCli('hi\nfine\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(b.exitCode).toBe(0)
@@ -266,7 +266,7 @@ describe('CLI v0.4 state-machine integration', () => {
 
   it('empty library: first session stderr has NO "Last session" segment (no NPE)', async () => {
     const result = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -288,7 +288,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // sysSeg.dynamic already starts with. v0.7.7 drops the redundant
     // literal so the dump reads cleanly (V752-001 cosmetic fix).
     const result = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -308,7 +308,7 @@ describe('CLI v0.4 state-machine integration', () => {
   it('5 turns: 5 chat-stream calls + 1 summarizer chat call (call count 5+1)', async () => {
     const inputs = ['hi', 'fine', 'castle', 'creeper', 'played']
     const result = await runCli(`${inputs.join('\n')}\n`, {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -329,7 +329,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // summarizer.test.ts marker fix).
     const inputs = ['hi', 'fine', 'castle', 'creeper', 'played']
     const result = await runCli(`${inputs.join('\n')}\n`, {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -342,7 +342,7 @@ describe('CLI v0.4 state-machine integration', () => {
   it('5 turns (minecraft keywords): topic_stats.minecraft count=1 + stderr has "topic match: minecraft"', async () => {
     const inputs = ['hi', 'fine', 'castle', 'creeper', 'played']
     const result = await runCli(`${inputs.join('\n')}\n`, {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -366,7 +366,7 @@ describe('CLI v0.4 state-machine integration', () => {
     const inputs = ['hi', 'fine', 'castle', 'creeper', 'played']
     // Session A
     const a = await runCli(`${inputs.join('\n')}\n`, {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(a.exitCode).toBe(0)
@@ -374,7 +374,7 @@ describe('CLI v0.4 state-machine integration', () => {
 
     // Session B in SAME data dir
     const b = await runCli(`${inputs.join('\n')}\n`, {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(b.exitCode).toBe(0)
@@ -398,7 +398,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // (The "topic match: none" path is unit-tested in topic-matcher.test.ts
     // — there's no LLM fixture that returns [] keywords to exercise it at L3.)
     const a = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(a.exitCode).toBe(0)
@@ -417,7 +417,7 @@ describe('CLI v0.4 state-machine integration', () => {
   it('7 seed topics loaded by migration 003: TopicsDao.list() returns 7', async () => {
     // Trigger a session so DB is initialized
     const result = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -441,7 +441,7 @@ describe('CLI v0.4 state-machine integration', () => {
     //   (b) log "[cli] tool call: mark_mistake(...)" to stderr
     //   (c) NOT leak the <tool>...</tool> block into stdout (DoD #6)
     const result = await runCli('I go to school yesterday\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -468,7 +468,7 @@ describe('CLI v0.4 state-machine integration', () => {
 
   it('2 turns both with "yesterday": dedup blocks 2nd mark, DB has 1 row + stderr has dedup log', async () => {
     const result = await runCli('I go to school yesterday\nI see my friend yesterday\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -494,7 +494,7 @@ describe('CLI v0.4 state-machine integration', () => {
   it('cross-session: session A marks a mistake, session B startup loads it via getRecent(5)', async () => {
     // Session A: 1 mistake
     const a = await runCli('I go to school yesterday\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(a.exitCode).toBe(0)
@@ -504,7 +504,7 @@ describe('CLI v0.4 state-machine integration', () => {
 
     // Session B: same dataDir → startup log shows 1 recent mistake loaded
     const b = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(b.exitCode).toBe(0)
@@ -513,13 +513,13 @@ describe('CLI v0.4 state-machine integration', () => {
 
   it('session A + session B both produce mistakes: total 2 mistakes across 2 sessions', async () => {
     const a = await runCli('I go to school yesterday\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(a.exitCode).toBe(0)
 
     const b = await runCli('I go to school yesterday\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(b.exitCode).toBe(0)
@@ -544,7 +544,7 @@ describe('CLI v0.4 state-machine integration', () => {
 
   it('v0.7.2 single session: END writes 1536-byte embedding BLOB (384 floats × 4 bytes)', async () => {
     const result = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       HF_ENDPOINT: 'https://hf-mirror.com',
     })
@@ -574,7 +574,7 @@ describe('CLI v0.4 state-machine integration', () => {
     //   - excludeSessionId = B  →  result = [A]
     // → stderr shows "retrieved 1 relevant sessions".
     const a = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       HF_ENDPOINT: 'https://hf-mirror.com',
     })
@@ -582,7 +582,7 @@ describe('CLI v0.4 state-machine integration', () => {
     expect(a.stderr).toMatch(/\[cli\] embedded session\.summary/)
 
     const b = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       HF_ENDPOINT: 'https://hf-mirror.com',
     })
@@ -592,7 +592,7 @@ describe('CLI v0.4 state-machine integration', () => {
     expect(b.stderr).toMatch(/\[cli\] embedded session\.summary/)
 
     const c = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       HF_ENDPOINT: 'https://hf-mirror.com',
     })
@@ -612,7 +612,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // oldest pair, and logs. Same for turn 3.
     const inputs = ['hi', 'fine', 'castle']
     const result = await runCli(`${inputs.join('\n')}\n`, {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       LLM_CONTEXT_BUDGET_TOKENS: '1',
     })
@@ -637,7 +637,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // and a text chunk. With LLM_CONTEXT_BUDGET_TOKENS=100, 95/100=95% ≥ 80%
     // so the warn fires (and is gated to once-per-session).
     const result = await runCli('budget please\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       LLM_CONTEXT_BUDGET_TOKENS: '100',
     })
@@ -667,7 +667,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // static), total=2000. With budget=2000, 2000/2000=100% ≥ 80% → warn.
     // Pre-fix code would have computed 200/2000=10% and NOT warned.
     const result = await runCli('cache budget\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       LLM_CONTEXT_BUDGET_TOKENS: '2000',
     })
@@ -685,7 +685,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // A's fixture (greeting) is the simplest "happy path" — the session
     // gets a summary + embedding written at END (v0.7.2 wiring).
     const a = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       HF_ENDPOINT: 'https://hf-mirror.com',
     })
@@ -699,7 +699,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // The 2nd-call fixture (memory-search-followup) matches on the
     // [tool_result_v073] marker in that synthetic message.
     const b = await runCli('earlier session\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       HF_ENDPOINT: 'https://hf-mirror.com',
     })
@@ -727,7 +727,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // message to stdout, auto-saves the session with a placeholder summary,
     // and exits with code 1.
     const result = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       LLM_TEST_FAIL: '500',
     })
@@ -758,7 +758,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // → chatStreamWithRetry fails fast (no "retrying in 1s..." line). The
     // catch-all still fires because the wrapper throws on the (single) attempt.
     const result = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       LLM_TEST_FAIL: '401',
     })
@@ -778,7 +778,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // fires. This test mirrors the 5xx test but uses 429 to confirm the
     // classification path for rate limits works end-to-end.
     const result = await runCli('hi\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       LLM_TEST_FAIL: '429',
     })
@@ -817,7 +817,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // and doesn't break the rest of the loop).
     const inputs = ['hi', 'fine', 'castle']
     const result = await runCli(`${inputs.join('\n')}\n`, {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       LLM_CONTEXT_BUDGET_TOKENS: '1',
     })
@@ -853,7 +853,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // verifies the A+B wiring and stdout/stderr observability. The actual
     // rewrite path is exercised by the live demo (B-DoD #2).
     const result = await runCli('compress chat\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)
@@ -889,7 +889,7 @@ describe('CLI v0.4 state-machine integration', () => {
     // sees the 2nd-call fixture text ("Great! Let's talk about sports.")
     // which is the LLM's natural reply to the selected topic.
     const result = await runCli('pick a topic\nexit\n', {
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
     })
     expect(result.exitCode).toBe(0)

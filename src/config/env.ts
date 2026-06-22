@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 const EnvSchema = z.object({
   LLM_PROVIDER: z.enum(['minimax']).default('minimax'),
-  MINIMAX_API_KEY: z.string().min(1, 'MINIMAX_API_KEY is required'),
+  API_KEY: z.string().min(1, 'API_KEY is required'),
   ANTHROPIC_BASE_URL: z.string().url().default('https://api.minimaxi.com/anthropic'),
   LLM_MODEL_MAIN: z.string().default('MiniMax-M3'),
   LLM_MODEL_SUMMARIZER: z.string().default('MiniMax-M3'),

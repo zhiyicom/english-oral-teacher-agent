@@ -91,7 +91,7 @@ function toAnthropicMessages(messages: Message[]): Anthropic.Messages.MessagePar
 
 export function createAnthropicProvider(env: Env): LLMClient {
   const client = new Anthropic({
-    apiKey: env.MINIMAX_API_KEY,
+    apiKey: env.API_KEY,
     baseURL: env.ANTHROPIC_BASE_URL,
   })
 

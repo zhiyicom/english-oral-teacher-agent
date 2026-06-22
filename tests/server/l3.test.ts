@@ -40,7 +40,7 @@ async function spawnServer(): Promise<ServerHandle> {
     env: {
       ...process.env,
       // Required by env validation; real key not used in Replay mode.
-      MINIMAX_API_KEY: 'sk-test',
+      API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
       PORT: String(port),
       RUN_LIVE_LLM: '0', // force replay mode in tests
