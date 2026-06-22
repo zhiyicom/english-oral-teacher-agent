@@ -216,7 +216,7 @@ const middleware: Middleware[] = [
 | `memory_search` | `{query: string, top_k: int}` | 只读 | 检索历史相关摘要 | ✅ v0.7.3（top_k 1-5, default 2）|
 | `summarize_history` | `{target_tokens: int}` | 改写 history | 压缩历史（保留 anchor + 近期 6 条）| ✅ v0.7.6 B2（target_tokens 100-3000, default 500）|
 | `topic_select` | `{phase: Phase, exclude_recent_days: int}` | 只读 | 选题（带去重 + 加权随机）| ✅ v0.7.6 D5（exclude_recent_days 0-365, default 30）|
-| `mark_mistake` | `{type, original, corrected}` | 写 SQLite | 记录错例 | ✅ v0.7（实际 schema 含 `category`）|
+| `mark_mistake` | `{original, corrected, category}` | 写 SQLite | 记录错例（category ∈ `grammar` / `vocabulary` / `spelling`） | ✅ v0.7 |
 | `mark_vocabulary` | `{word, context_sentence}` | 写 SQLite | 记录新词 | 📋 v1.0+（未实现）|
 | `mark_homework` | `{content, due_days}` | 写 SQLite | 布置作业 | 📋 v1.0+（未实现）|
 
@@ -417,9 +417,9 @@ src/storage/
 ├── sessions.ts           # sessions DAO
 ├── messages.ts
 ├── mistakes.ts
-├── vocabulary.ts
-├── homework.ts
-└── topic-stats.ts
+├── topics.ts
+├── index.ts              # barrel export
+└── (vocabulary.ts / homework.ts：v1.0+ 规划，DAO 未创建)
 ```
 
 **关键设计**：
@@ -688,10 +688,9 @@ src/
 │   ├── sessions.ts
 │   ├── messages.ts
 │   ├── mistakes.ts
-│   ├── vocabulary.ts
-│   ├── homework.ts
-│   ├── topic-stats.ts
-│   └── index.ts
+│   ├── topics.ts
+│   ├── index.ts
+│   # 注：vocabulary.ts / homework.ts（对应 mark_vocabulary / mark_homework 工具，v1.0+ 规划）尚未创建
 │
 ├── memory/                   # 向量记忆
 │   ├── embeddings.ts

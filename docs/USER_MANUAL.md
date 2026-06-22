@@ -291,13 +291,20 @@ MINIMAX_API_KEY=你的API密钥
 
 ## 8. 提示词编辑
 
-所有系统提示词都可以直接编辑 `.md` 文件（在 `prompts/` 目录），重启服务端后生效：
+所有系统提示词都可以直接编辑 `.md` 文件（在 `prompts/` 目录），重启服务端后生效。
 
-| 文件 | 作用 |
-|---|---|
-| `prompts/SOUL.md` | AI 角色身份、铁律、语气、阶段指引 |
-| `prompts/AGENTS.md` | 工具速查卡片 |
-| `prompts/phases.md` | 每个阶段的详细行为指令（Context + Reminder）|
-| `prompts/topic-library.md` | 话题库（可通过 Web UI 编辑，自动生成）|
-| `prompts/USER.md` | 学生档案（可通过设置页面修改，系统自动补充）|
-| `prompts/tools.md` | 工具使用规范 |
+**进入主系统 prompt 的文件**（`buildSystemString` 拼装顺序，参见 `src/prompts/loader.ts:112-127`）：
+
+| 文件 | 加载后 | 作用 |
+|---|---|---|
+| `prompts/SOUL.md` | `# SOUL` 块 | AI 角色身份、铁律、语气 |
+| `prompts/AGENTS.md` | `# AGENTS` 块 | 工具速查卡片 |
+| `prompts/USER.md` | `# STUDENT` 块 | 学生档案（系统自动补充）|
+| `prompts/tools.md` | `# TOOLS` 块 | 工具使用规范（供 LLM 参考）|
+
+**不进入主系统 prompt 的文件**（独立加载）：
+
+| 文件 | 加载方式 | 作用 |
+|---|---|---|
+| `prompts/phases.md` | `loadPhaseInstructions()` → 注入 `[System Context]` 动态块 + 用户消息前缀 | 每个阶段的详细行为指令（Context + Reminder）|
+| `prompts/topic-library.md` | 仅供参考（**不再注入** system prompt，v1.0.1 B4）| 话题列表（可通过 Web UI 编辑，自动重新生成）|
