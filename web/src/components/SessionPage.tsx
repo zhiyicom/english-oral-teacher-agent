@@ -18,6 +18,20 @@ const PHASE_LABELS: Record<string, string> = {
   END: STRINGS.phaseEnd,
 }
 
+// v1.0.1 — strip <tool>...</tool> blocks (internal signal) AND emoji (per SOUL Iron rule #7).
+// Emoji ranges: U+1F000–1FFFF (emoticons, pictographs, symbols, transport),
+// U+2600–27BF (misc symbols, dingbats), U+2300–23FF (misc technical).
+// Built from a string so the unicode escapes survive JSON encoding.
+const EMOJI_REGEX = new RegExp(
+  '[\\u{1F000}-\\u{1FFFF}\\u{2600}-\\u{27BF}\\u{2300}-\\u{23FF}]',
+  'gu',
+)
+function stripInternal(text: string): string {
+  return text
+    .replace(/<tool>[\s\S]*?<\/tool>\n?/g, '')
+    .replace(EMOJI_REGEX, '')
+}
+
 export default function SessionPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -43,7 +57,7 @@ export default function SessionPage() {
 
   function speakAssistant(text: string) {
     if (!voiceRef.current) return
-    const clean = text.replace(/<tool>[\s\S]*?<\/tool>\n?/g, '').trim()
+    const clean = stripInternal(text).trim()
     if (!clean) return
     const voiceSpeed = Number(localStorage.getItem('settings:voice_speed')) || 1.0
     const voiceAccent = localStorage.getItem('settings:voice_accent') || 'en-US'
@@ -172,8 +186,7 @@ export default function SessionPage() {
     es.addEventListener('text-chunk', (e) => {
       const data = JSON.parse((e as MessageEvent).data) as { delta: string }
       streamingRef.current += data.delta
-      // Strip <tool>...</tool> blocks from display (internal signal, not student-facing)
-      setStreamingText(streamingRef.current.replace(/<tool>[\s\S]*?<\/tool>\n?/g, ''))
+      setStreamingText(stripInternal(streamingRef.current))
     })
 
     es.addEventListener('student-text', (e) => {
@@ -190,8 +203,7 @@ export default function SessionPage() {
       esRef.current = null
 
       const raw = streamingRef.current
-      // Strip tool blocks before displaying
-      const text = raw.replace(/<tool>[\s\S]*?<\/tool>\n?/g, '').trim()
+      const text = stripInternal(raw).trim()
       if (text) {
         setMessages((prev) => [...prev, { role: 'assistant', content: text }])
         speakAssistant(text)
