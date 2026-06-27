@@ -1,7 +1,10 @@
-import type { Topic, TopicStat } from '../storage/topics.js'
+import type { KeywordHit, Topic, TopicStat } from '../storage/topics.js'
 
 /**
  * v0.7.6 D1-D4 — Topic selection engine (PRD §3.5.3 + §5.1).
+ * v1.0.2 D5 — Keyword-freshness bias: penalize topics whose inner keywords
+ *   have already been hit many times. avgKeywordHit per topic = mean of
+ *   its keywords' hit_count in `keyword_hits`. Missing (never hit) = 0.
  *
  * Pure functions, no I/O, no DB. Picks a topic from the library using:
  *   D1: hard exclude  — drop topics discussed in the last `excludeDays` days
@@ -9,6 +12,7 @@ import type { Topic, TopicStat } from '../storage/topics.js'
  *   D3: interest boost — count of topic.keywords ∩ student.interests
  *   D4: weighted random — small noise (±NOISE_RANGE) so the same pool doesn't
  *       always pick the same winner; ties broken by name ASC.
+ *   D5 (v1.0.2): keyword freshness — bonus to topics with low avg keyword hits
  *
  * The CLI uses this in a `topic_select` tool the LLM can call to pick a
  * new conversation topic mid-session.
@@ -18,6 +22,7 @@ export interface TopicCandidate {
   topic: Topic
   count: number
   interest: number
+  avgKeywordHit: number
   score: number
 }
 
@@ -53,19 +58,38 @@ export function computeInterest(topic: Topic, interests: readonly string[]): num
   return topic.keywords.filter((k) => norm.has(k.toLowerCase())).length
 }
 
+/**
+ * D5 (v1.0.2) — mean hit_count across the topic's keywords.
+ * - Keywords missing from `keywordStats` are treated as 0 (never hit).
+ * - Empty topic.keywords → 0 (no penalty, no bonus).
+ * - Returns a non-negative number.
+ */
+export function avgKeywordHit(topic: Topic, keywordStats: KeywordHit[]): number {
+  if (topic.keywords.length === 0) return 0
+  const byKeyword = new Map(keywordStats.map((h) => [h.keyword.toLowerCase(), h.hitCount]))
+  let sum = 0
+  for (const k of topic.keywords) sum += byKeyword.get(k.toLowerCase()) ?? 0
+  return sum / topic.keywords.length
+}
+
 const COUNT_WEIGHT = 0.1
+const KEYWORD_WEIGHT = 0.05
 const INTEREST_WEIGHT = 0.5
 const NOISE_RANGE = 0.2
 
 /**
- * Top-level — D1+D2+D3+D4 in one call.
+ * Top-level — D1+D2+D3+D4(+D5) in one call.
  * Returns null when the hard-exclude filter removes every topic (e.g. all
  * topics have been discussed within excludeDays).
+ *
+ * `keywordStats` is optional; when omitted (legacy callers, tests), D5
+ * contributes zero to the score so the v0.7.6 contract is preserved.
  */
 export function selectTopic(opts: {
   topics: Topic[]
   stats: TopicStat[]
   interests: readonly string[]
+  keywordStats?: KeywordHit[]
   excludeDays?: number
   now?: Date
   rng?: () => number
@@ -73,6 +97,7 @@ export function selectTopic(opts: {
   const excludeDays = opts.excludeDays ?? 30
   const now = opts.now ?? new Date()
   const rng = opts.rng ?? Math.random
+  const keywordStats = opts.keywordStats ?? []
 
   let pool = filterHardExclude(opts.topics, opts.stats, excludeDays, now)
   if (pool.length === 0) return null
@@ -83,12 +108,14 @@ export function selectTopic(opts: {
     const stat = opts.stats.find((s) => s.topic === t.name) ?? null
     const count = stat?.discussionCount ?? 0
     const interest = computeInterest(t, opts.interests)
+    const kAvg = avgKeywordHit(t, keywordStats)
     const noise = (rng() * 2 - 1) * NOISE_RANGE
     return {
       topic: t,
       count,
       interest,
-      score: -count * COUNT_WEIGHT + interest * INTEREST_WEIGHT + noise,
+      avgKeywordHit: kAvg,
+      score: -count * COUNT_WEIGHT - kAvg * KEYWORD_WEIGHT + interest * INTEREST_WEIGHT + noise,
     }
   })
 

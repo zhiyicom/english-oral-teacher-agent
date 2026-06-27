@@ -19,8 +19,11 @@ export {
   type TopicStat,
   type TopicStatsDao,
   type TopicsDao,
+  type KeywordHit,
+  type KeywordHitsDao,
   createTopicStatsDao,
   createTopicsDao,
+  createKeywordHitsDao,
 } from './topics.js'
 export {
   type AppendMistakeInput,

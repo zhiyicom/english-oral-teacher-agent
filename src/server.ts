@@ -34,6 +34,7 @@ import {
   summarize,
 } from './agent/index.js'
 import type { PhaseTransition, SessionState } from './agent/index.js'
+import { extractStudentDiscoveries } from './agent/profile-extractor.js'
 import type { TurnOutput } from './agent/turn.js'
 import { loadEnv } from './config/env.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
@@ -42,9 +43,9 @@ import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
 import type { LLMClient, Message } from './llm/types.js'
 import { createTransformersEmbedder } from './memory/index.js'
 import { loadSystemPrompt, loadUserFile, updateUserSettings } from './prompts/loader.js'
-import { extractStudentDiscoveries } from './agent/profile-extractor.js'
 import {
   applyMigrations,
+  createKeywordHitsDao,
   createMessagesDao,
   createMistakesDao,
   createSessionsDao,
@@ -240,6 +241,7 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
   const messages = createMessagesDao(db)
   const topics = createTopicsDao(db)
   const topicStats = createTopicStatsDao(db)
+  const keywordHits = createKeywordHitsDao(db)
   const mistakesDao = createMistakesDao(db)
   const systemPrompt = loadSystemPrompt()
   const client = selectClient(env, opts.fixturesDir)
@@ -275,6 +277,10 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
       topics: topics.list(),
       stats: topicStats.all(),
       interests: [],
+      // v1.0.2 — keyword-freshness bias. Read once at startup; only
+      // mutated in the session-end finally block (same module-scoped DB),
+      // so reading once is correct (mirrors how `stats` is loaded above).
+      keywordStats: keywordHits.getAll(),
     }),
   )
 
@@ -484,11 +490,16 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
                   keywords: review.keywords,
                   reason: output.endedReason,
                 })
-                // Update topic stats from summary keywords
+                // Update topic stats + per-keyword hits from summary keywords
                 try {
                   const matched = matchTopic(review.keywords, topics.list())
                   if (matched) {
-                    topicStats.incrementAndUpdate(matched.topic, new Date())
+                    const now = new Date()
+                    topicStats.incrementAndUpdate(matched.topic, now)
+                    // v1.0.2 — accumulate per-(topic, keyword) hits so the
+                    // keyword-freshness bias in selectTopic() can prefer
+                    // topics whose inner keywords are still under-used.
+                    keywordHits.upsertMany(matched.topic, matched.shared, now)
                   }
                 } catch {
                   // topic matching is best-effort
@@ -558,21 +569,51 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
   })
 
   // ---- 8. GET /api/topics ----
+  // v1.0.2 — joins topic_stats + keyword_hits so the Web UI can render
+  // hit counts without a second round-trip.
+  // - `hitCount` is the per-topic discussion_count (0 included for topics
+  //   that have never been selected).
+  // - `keywordHits` is `Record<keyword, hit_count>` for keywords that have
+  //   at least one hit. Keywords with 0 hits are omitted (they wouldn't
+  //   appear in the table) — the UI shows them as 0 directly.
   app.get('/api/topics', (c) => {
     const all = topics.list()
+    const allStats = topicStats.all()
+    const allKeywordHits = keywordHits.getAll()
+    const statByTopic = new Map(allStats.map((s) => [s.topic, s.discussionCount]))
+    const hitsByTopic = new Map<string, Record<string, number>>()
+    for (const h of allKeywordHits) {
+      const bucket = hitsByTopic.get(h.topic) ?? {}
+      bucket[h.keyword] = h.hitCount
+      hitsByTopic.set(h.topic, bucket)
+    }
     return c.json(
       all.map((t) => ({
         name: t.name,
         keywords: t.keywords,
         description: t.description,
+        hitCount: statByTopic.get(t.name) ?? 0,
+        keywordHits: hitsByTopic.get(t.name) ?? {},
       })),
     )
   })
 
   // ---- 9. PUT /api/topics ----
+  // v1.0.2 — field whitelist. The body is parsed but ONLY `name`,
+  // `keywords`, `description` are persisted. Any `hitCount` / `keywordHits`
+  // that a client accidentally sends are silently dropped to keep the
+  // aggregated stats tables from being clobbered.
   app.put('/api/topics', async (c) => {
-    const body = (await c.req.json()) as Array<{ name: string; keywords: string[]; description: string }>
-    if (!Array.isArray(body)) return c.json({ error: 'expected array of topics' }, 400)
+    const rawBody = (await c.req.json()) as unknown
+    if (!Array.isArray(rawBody)) return c.json({ error: 'expected array of topics' }, 400)
+    const body = rawBody.map((row) => {
+      const r = row as { name?: unknown; keywords?: unknown; description?: unknown }
+      return {
+        name: typeof r.name === 'string' ? r.name : '',
+        keywords: Array.isArray(r.keywords) ? (r.keywords as string[]) : [],
+        description: typeof r.description === 'string' ? r.description : '',
+      }
+    })
 
     // Replace all topics in a transaction
     const updateTopic = db.raw.prepare(

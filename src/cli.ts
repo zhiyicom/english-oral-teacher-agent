@@ -35,6 +35,7 @@ import {
   type Mistake,
   type TopicStat,
   applyMigrations,
+  createKeywordHitsDao,
   createMessagesDao,
   createMistakesDao,
   createSessionsDao,
@@ -245,6 +246,7 @@ export async function main(): Promise<void> {
   const messages = createMessagesDao(db)
   const topics = createTopicsDao(db)
   const topicStats = createTopicStatsDao(db)
+  const keywordHits = createKeywordHitsDao(db)
   const session = sessions.create()
 
   const systemPrompt = loadSystemPrompt()
@@ -332,6 +334,10 @@ export async function main(): Promise<void> {
       topics: topics.list(),
       stats: topicStats.all(),
       interests: [],
+      // v1.0.2 — keyword-freshness bias. Read once at startup; only
+      // mutated in the session-end finally block (same module-scoped DB),
+      // so reading once is correct (mirrors how `stats` is loaded above).
+      keywordStats: keywordHits.getAll(),
     }),
   )
   let relevantPast: RelevantSession[] = []
@@ -519,6 +525,11 @@ export async function main(): Promise<void> {
         const match = matchTopic(summaryKeywords, topics.list())
         if (match) {
           topicStats.incrementAndUpdate(match.topic, new Date())
+          // v1.0.2 — accumulate per-(topic, keyword) hits so the
+          // keyword-freshness bias in selectTopic() can prefer topics whose
+          // inner keywords are still under-used. Same shared[] already
+          // computed by matchTopic for the stderr log.
+          keywordHits.upsertMany(match.topic, match.shared, new Date())
           process.stderr.write(
             `[cli] topic match: ${match.topic} jaccard=${match.jaccard.toFixed(2)} shared=[${match.shared.join(',')}]\n`,
           )

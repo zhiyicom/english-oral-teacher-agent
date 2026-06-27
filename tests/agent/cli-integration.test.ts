@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   applyMigrations,
+  createKeywordHitsDao,
   createMessagesDao,
   createMistakesDao,
   createSessionsDao,
@@ -431,6 +432,62 @@ describe('CLI v0.4 state-machine integration', () => {
     expect(names).toEqual(['family', 'food', 'minecraft', 'movies', 'music', 'school', 'sports'])
     db.close()
   }, 20000)
+
+  // -------- v1.0.2 — keyword_hits accumulation at session end --------
+
+  it('5 turns (minecraft keywords): keyword_hits table has minecraft rows for the shared keywords', async () => {
+    // Same fixture-driven inputs as the v0.6 topic-match tests. The
+    // summarize.json fixture returns keywords ['minecraft','castle',
+    // 'creeper','wall','build'] (capped to ≤8). The matchTopic() shared[]
+    // should contain 'minecraft' and 'castle' and 'creeper' (all in the
+    // minecraft topic's keyword list). Each gets a row in keyword_hits
+    // with hit_count=1.
+    const inputs = ['hi', 'fine', 'castle', 'creeper', 'played']
+    const result = await runCli(`${inputs.join('\n')}\n`, {
+      API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toMatch(/\[cli\] topic match: minecraft/)
+
+    const db = openDb({ dataDir })
+    applyMigrations(db, migrationsDir)
+    const hits = createKeywordHitsDao(db)
+    const rows = hits.getByTopic('minecraft')
+    expect(rows.length).toBeGreaterThanOrEqual(3)
+    // Each row starts at hit_count=1 (first session).
+    for (const r of rows) expect(r.hitCount).toBe(1)
+    // The shared[] from the stderr line lists the same keywords. We verify
+    // at least one of the v0.5 fixture keywords landed in keyword_hits.
+    const names = rows.map((r) => r.keyword)
+    expect(names).toContain('minecraft')
+    db.close()
+  }, 25000)
+
+  it('session A + session B (same minecraft topic): keyword hit_count increments to 2', async () => {
+    const inputs = ['hi', 'fine', 'castle', 'creeper', 'played']
+    const a = await runCli(`${inputs.join('\n')}\n`, {
+      API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(a.exitCode).toBe(0)
+    const b = await runCli(`${inputs.join('\n')}\n`, {
+      API_KEY: 'sk-test',
+      APP_DATA_DIR: dataDir,
+    })
+    expect(b.exitCode).toBe(0)
+    expect(b.stderr).toMatch(/\[cli\] topic match: minecraft/)
+
+    const db = openDb({ dataDir })
+    applyMigrations(db, migrationsDir)
+    const hits = createKeywordHitsDao(db)
+    const rows = hits.getByTopic('minecraft')
+    // Each keyword that appeared in BOTH sessions' shared[] should be at 2.
+    const minecraftRow = rows.find((r) => r.keyword === 'minecraft')
+    expect(minecraftRow).toBeDefined()
+    expect(minecraftRow?.hitCount).toBe(2)
+    db.close()
+  }, 45000)
 
   // -------- v0.7 — tool calling: mark_mistake --------
 

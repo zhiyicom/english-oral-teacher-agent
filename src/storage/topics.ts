@@ -25,6 +25,20 @@ export interface TopicStatsDao {
   incrementAndUpdate(topic: string, now: Date): void
 }
 
+export interface KeywordHit {
+  topic: string
+  keyword: string
+  hitCount: number
+  firstHitAt: string | null
+  lastHitAt: string | null
+}
+
+export interface KeywordHitsDao {
+  upsertMany(topic: string, keywords: string[], now: Date): void
+  getAll(): KeywordHit[]
+  getByTopic(topic: string): KeywordHit[]
+}
+
 interface TopicRow {
   name: string
   keywords_json: string
@@ -37,6 +51,14 @@ interface TopicStatRow {
   discussion_count: number
   first_discussed_at: string | null
   last_discussed_at: string | null
+}
+
+interface KeywordHitRow {
+  topic: string
+  keyword: string
+  hit_count: number
+  first_hit_at: string | null
+  last_hit_at: string | null
 }
 
 function rowToTopic(row: TopicRow): Topic {
@@ -54,6 +76,16 @@ function rowToStat(row: TopicStatRow): TopicStat {
     discussionCount: row.discussion_count,
     firstDiscussedAt: row.first_discussed_at,
     lastDiscussedAt: row.last_discussed_at,
+  }
+}
+
+function rowToKeywordHit(row: KeywordHitRow): KeywordHit {
+  return {
+    topic: row.topic,
+    keyword: row.keyword,
+    hitCount: row.hit_count,
+    firstHitAt: row.first_hit_at,
+    lastHitAt: row.last_hit_at,
   }
 }
 
@@ -105,6 +137,50 @@ export function createTopicStatsDao(handle: DbHandle): TopicStatsDao {
     incrementAndUpdate(topic, now) {
       const nowIso = now.toISOString()
       upsert.run(topic, nowIso, nowIso)
+    },
+  }
+}
+
+export function createKeywordHitsDao(handle: DbHandle): KeywordHitsDao {
+  const { raw } = handle
+  const selectAll = raw.prepare(`
+    SELECT topic, keyword, hit_count, first_hit_at, last_hit_at
+    FROM keyword_hits
+    ORDER BY topic ASC, keyword ASC
+  `)
+  const selectByTopic = raw.prepare(`
+    SELECT topic, keyword, hit_count, first_hit_at, last_hit_at
+    FROM keyword_hits
+    WHERE topic = ?
+    ORDER BY keyword ASC
+  `)
+  // UPSERT each (topic, keyword) pair.
+  // - INSERT: count starts at 1, first/last = now.
+  // - UPDATE: count += 1, last_hit_at = now; first_hit_at preserved.
+  // The INSERT ... ON CONFLICT ... DO UPDATE is atomic per statement
+  // (better-sqlite3 runs each .run() in implicit transaction).
+  const upsertOne = raw.prepare(`
+    INSERT INTO keyword_hits (topic, keyword, hit_count, first_hit_at, last_hit_at)
+    VALUES (?, ?, 1, ?, ?)
+    ON CONFLICT(topic, keyword) DO UPDATE SET
+      hit_count = hit_count + 1,
+      last_hit_at = excluded.last_hit_at
+  `)
+  return {
+    upsertMany(topic, keywords, now) {
+      if (keywords.length === 0) return
+      const nowIso = now.toISOString()
+      // Wrap in a single transaction so N UPSERTs are atomic.
+      const tx = raw.transaction((items: string[]) => {
+        for (const k of items) upsertOne.run(topic, k, nowIso, nowIso)
+      })
+      tx(keywords)
+    },
+    getAll() {
+      return (selectAll.all() as KeywordHitRow[]).map(rowToKeywordHit)
+    },
+    getByTopic(topic) {
+      return (selectByTopic.all(topic) as KeywordHitRow[]).map(rowToKeywordHit)
     },
   }
 }

@@ -5,9 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Note**: Sprint-by-sprint release history (v0.2 → v1.0.1) lives in
+> **Note**: Sprint-by-sprint release history (v0.2 → v1.0.2) lives in
 > [docs/ARCHITECTURE.md §11](docs/ARCHITECTURE.md). This file tracks user-facing
 > changes only.
+
+## [v1.0.2] — 2026-06-28 — Topic hit stats + Bug fixes
+
+> Sprint details: [v1.0.2-scope.md](docs/sprint/v1.0.2-scope.md) /
+> [v1.0.2-design.md](docs/sprint/v1.0.2-design.md)
+
+### Fixed
+- **Bug A (frequent topic switching)**: MIN_TOPIC_AGE=5 gate on `topic_select` tool. New `src/agent/topic-counter.ts` enforces ≥5 user turns on current topic before allowing another switch. Explicit user requests like "switch topic" / "换个话题" bypass via regex. Resolves the 11-switches-in-27-min symptom in session `ddb32b4f` (2026-06-27).
+- **Bug B (SSE 2nd-call drop)**: removed `if (!streamingRef.current)` compat shim in `SessionPage` student-text handler. The shim was a v0.8 holdover that silently dropped 2nd-call LLM responses whenever the 1st call had streamed anything — including pure `<tool>...</tool>` calls that strip down to empty. Now `student-text` always replaces `streamingRef`. Resolves the 11-of-33 affected turns in session `ddb32b4f`.
+
+### Added
+- **Turn-level diagnostic logging** (opt-in): `src/llm/debug-log.ts` `logTurnDiagnostic()` writes JSONL per-turn snapshots to `data/llm-debug/<sessionId>_diag.jsonl` at 4 key events (1st-call done, 2nd-call done, topic-select blocked, turn done). `POST /api/diagnostic/log` accepts web-side SSE event traces when `localStorage('debug:web_diag=1')`. Purpose: shorten root-cause time for future "no reply / wrong reply" symptoms.
+- **`TOPIC_AGE_MIN` env var**: 0 disables the topic-age gate (used by regression tests); default 5.
+- **Per-keyword hit stats** (`keyword_hits` table): new SQLite table `keyword_hits(topic, keyword, hit_count, first_hit_at, last_hit_at)` PK `(topic, keyword)` records per-session per-keyword discussion frequency. `KeywordHitsDao.upsertMany()` is wired into the session-end pipeline in both CLI and server. `selectTopic()` adds a keyword-freshness bias (`score = -count*0.1 - avgKeywordHit*0.05 + interest*0.5 + noise`, `W_KEYWORD=0.05`) so topics whose inner keywords are still fresh get picked more often. `topic_select` tool now returns `suggested_keyword` (lowest-hit keyword, alphabetical tiebreak) so the LLM has a soft hint on the under-used opening angle.
+- **`GET /api/topics` extended**: response now includes `hitCount` (total discussion_count from `topic_stats`) and `keywordHits` (per-keyword hit_count map) per topic. `PUT /api/topics` accepts only the legacy 3 fields (name/keywords/description) and silently drops the read-only stats fields to prevent the editor from clobbering the live counters.
+- **Web UI: topic stats display**: the `/topics` page now shows `(N)` next to the topic slug in gray small text (the total discussion count), and each keyword chip displays `keyword (N)` so the user can see at a glance which keywords have been used heavily.
 
 ## [v1.0.1] — 2026-06-22 — Feature polish
 

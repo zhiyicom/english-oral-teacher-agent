@@ -249,4 +249,80 @@ describe('createApp (v0.8.1 L1)', () => {
     const res = await harness.app.request('/api/sessions/no-such', { method: 'DELETE' })
     expect(res.status).toBe(404)
   })
+
+  // ---- v1.0.2: GET /api/topics extended shape + PUT whitelist ----
+
+  it('GET /api/topics: includes hitCount + keywordHits (zero on fresh DB)', async () => {
+    // v1.0.2 — the response shape now joins topic_stats + keyword_hits.
+    // On a fresh DB the seeded topics from migration 003 are listed with
+    // hitCount=0 and keywordHits={}. We verify shape, not behavior here;
+    // the DAO + write-path tests cover the data layer.
+    const res = await harness.app.request('/api/topics')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as Array<{
+      name: string
+      keywords: string[]
+      description: string | null
+      hitCount: number
+      keywordHits: Record<string, number>
+    }>
+    expect(Array.isArray(body)).toBe(true)
+    expect(body.length).toBeGreaterThan(0)
+    for (const t of body) {
+      expect(t.hitCount).toBe(0)
+      expect(t.keywordHits).toEqual({})
+    }
+    // Sanity: one of the seed topics must be present.
+    const names = body.map((t) => t.name)
+    expect(names).toContain('minecraft')
+  })
+
+  it('GET /api/topics: returns topics in alphabetical order (unchanged from v0.8.5)', async () => {
+    const res = await harness.app.request('/api/topics')
+    const body = (await res.json()) as Array<{ name: string }>
+    const names = body.map((t) => t.name)
+    const sorted = [...names].sort()
+    expect(names).toEqual(sorted)
+  })
+
+  it('PUT /api/topics: silently drops hitCount + keywordHits (field whitelist)', async () => {
+    // v1.0.2 — even if the client (or a buggy script) sends the new stat
+    // fields in the PUT body, the server must NOT persist them. This
+    // protects topic_stats + keyword_hits from accidental clobbering.
+    const malicious = [
+      {
+        name: 'minecraft',
+        keywords: ['minecraft', 'castle', 'creeper'],
+        description: 'Minecraft game',
+        hitCount: 9999, // must be ignored
+        keywordHits: { creeper: 9999 }, // must be ignored
+      },
+    ]
+    const put = await harness.app.request('/api/topics', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(malicious),
+    })
+    expect(put.status).toBe(200)
+
+    // Re-GET: hitCount must still be 0 (we never ran a session).
+    const get = await harness.app.request('/api/topics')
+    const body = (await get.json()) as Array<{ name: string; hitCount: number }>
+    const mc = body.find((t) => t.name === 'minecraft')
+    expect(mc?.hitCount).toBe(0)
+  })
+
+  it('PUT /api/topics: still accepts the legacy 3-field shape unchanged', async () => {
+    // Regression: the whitelist must not break the existing 3-field contract.
+    const before = await (await harness.app.request('/api/topics')).json() as Array<{
+      name: string
+    }>
+    const sameShape = before.map((t) => ({ name: t.name, keywords: ['placeholder'], description: 't' }))
+    const put = await harness.app.request('/api/topics', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sameShape),
+    })
+    expect(put.status).toBe(200)
+  })
 })

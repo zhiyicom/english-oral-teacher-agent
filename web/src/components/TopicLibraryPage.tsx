@@ -27,9 +27,7 @@ export default function TopicLibraryPage() {
       .split(',')
       .map((k) => k.trim())
       .filter(Boolean)
-    const updated = topics.map((t) =>
-      t.name === editingTopic ? { ...t, keywords } : t,
-    )
+    const updated = topics.map((t) => (t.name === editingTopic ? { ...t, keywords } : t))
     setTopics(updated)
     setEditingTopic(null)
     setSaving(true)
@@ -63,14 +61,15 @@ export default function TopicLibraryPage() {
 
       <div className="mt-4 space-y-1">
         {topics.map((t) => (
-          <div
-            key={t.name}
-            className="rounded border border-slate-200 bg-white p-3"
-          >
+          <div key={t.name} className="rounded border border-slate-200 bg-white p-3">
             <div className="flex items-center justify-between">
-              <div>
+              <div className="flex items-baseline gap-2">
                 <span className="font-medium text-sm text-slate-700">{t.description}</span>
-                <span className="ml-2 text-xs text-slate-400">({t.name})</span>
+                <span className="text-xs text-slate-400">({t.name})</span>
+                {/* v1.0.2 — total discussion_count for this topic, in the
+                    same gray small style as the slug. 0 is shown the same
+                    way as other counts (no dimming, per user confirmation). */}
+                <span className="text-xs text-slate-400">({t.hitCount})</span>
               </div>
               <button
                 type="button"
@@ -108,12 +107,14 @@ export default function TopicLibraryPage() {
               </div>
             ) : (
               <div className="mt-1 flex flex-wrap gap-1">
+                {/* v1.0.2 — chip text shows per-keyword hit count from
+                    keyword_hits. Missing → 0 (same style, no dimming). */}
                 {t.keywords.map((kw) => (
                   <span
                     key={kw}
                     className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500"
                   >
-                    {kw}
+                    {kw} ({t.keywordHits[kw] ?? 0})
                   </span>
                 ))}
               </div>

@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  avgKeywordHit,
   computeInterest,
   filterHardExclude,
   selectTopic,
   sortByCountAsc,
 } from '../../src/agent/topic-engine.js'
-import type { Topic, TopicStat } from '../../src/storage/topics.js'
+import type { KeywordHit, Topic, TopicStat } from '../../src/storage/topics.js'
 
 const NOW = new Date('2026-06-10T12:00:00.000Z')
 const DAY = 86_400_000
@@ -150,5 +151,97 @@ describe('selectTopic (D1+D2+D3+D4 top-level)', () => {
     })
     expect(r1?.name).toBe('school')
     expect(r2?.name).toBe('food')
+  })
+})
+
+describe('avgKeywordHit (D5 helper)', () => {
+  it('returns mean hit_count across the topic keywords', () => {
+    // minecraft keywords: minecraft=5, castle=2, creeper=0 (missing)
+    // mean = (5 + 2 + 0) / 3 = 2.333...
+    const hits: KeywordHit[] = [
+      { topic: 'minecraft', keyword: 'minecraft', hitCount: 5, firstHitAt: null, lastHitAt: null },
+      { topic: 'minecraft', keyword: 'castle', hitCount: 2, firstHitAt: null, lastHitAt: null },
+    ]
+    expect(avgKeywordHit(minecraft, hits)).toBeCloseTo(7 / 3, 5)
+  })
+
+  it('keywords missing from stats are treated as 0', () => {
+    // school keywords: school, class, teacher — none in stats → avg = 0.
+    expect(avgKeywordHit(school, [])).toBe(0)
+  })
+
+  it('empty topic.keywords → 0 (no penalty, no bonus)', () => {
+    const empty = topic('empty', [])
+    expect(avgKeywordHit(empty, [])).toBe(0)
+  })
+
+  it('keyword lookup is case-insensitive', () => {
+    // stats row stores 'Minecraft', topic.keywords stores 'minecraft' → same.
+    const hits: KeywordHit[] = [
+      { topic: 'minecraft', keyword: 'MINECRAFT', hitCount: 4, firstHitAt: null, lastHitAt: null },
+    ]
+    expect(avgKeywordHit(minecraft, hits)).toBeCloseTo(4 / 3, 5)
+  })
+})
+
+describe('selectTopic D5 — keyword freshness bias (v1.0.2)', () => {
+  it('two topics with equal count + interest: lower avgKeywordHit wins', () => {
+    // minecraft: count=1, interest=0, avg=2 (keywords hit hard)
+    //   score = -0.1 + 0 - 2*0.05 + 0 + 0 = -0.2
+    // school:   count=1, interest=0, avg=0 (no keyword hits)
+    //   score = -0.1 + 0 - 0      + 0 + 0 = -0.1
+    // With rng=0.5 (noise=0), school wins.
+    const stats: TopicStat[] = [stat('minecraft', 1, 100), stat('school', 1, 100)]
+    const hits: KeywordHit[] = [
+      { topic: 'minecraft', keyword: 'minecraft', hitCount: 2, firstHitAt: null, lastHitAt: null },
+      { topic: 'minecraft', keyword: 'castle', hitCount: 2, firstHitAt: null, lastHitAt: null },
+      { topic: 'minecraft', keyword: 'creeper', hitCount: 2, firstHitAt: null, lastHitAt: null },
+    ]
+    const result = selectTopic({
+      topics: [minecraft, school],
+      stats,
+      interests: [],
+      keywordStats: hits,
+      rng: () => 0.5,
+      now: NOW,
+    })
+    expect(result?.name).toBe('school')
+  })
+
+  it('omitting keywordStats preserves the v0.7.6 contract (no D5 penalty)', () => {
+    // Regression: callers that don't pass keywordStats should still get the
+    // old behavior. food (count=0) beats sports (count=5) just like before.
+    const stats: TopicStat[] = [stat('sports', 5, 100)]
+    const result = selectTopic({
+      topics: [minecraft, school, sports, food],
+      stats,
+      interests: [],
+      rng: () => 0.5,
+      now: NOW,
+    })
+    expect(result?.name).toBe('food')
+  })
+
+  it('keyword freshness cannot override interest boost (W_KEYWORD < W_INTEREST)', () => {
+    // minecraft: count=0, interest=2 → +1.0; avg=10 → -0.5
+    //   score = 0 + 1.0 - 0.5 + 0 = 0.5
+    // food: count=0, interest=0 → 0; avg=0 → 0
+    //   score = 0 + 0 + 0 + 0 = 0
+    // interest boost is still strong enough to keep minecraft on top.
+    const stats: TopicStat[] = []
+    const hits: KeywordHit[] = [
+      { topic: 'minecraft', keyword: 'minecraft', hitCount: 10, firstHitAt: null, lastHitAt: null },
+      { topic: 'minecraft', keyword: 'castle', hitCount: 10, firstHitAt: null, lastHitAt: null },
+      { topic: 'minecraft', keyword: 'creeper', hitCount: 10, firstHitAt: null, lastHitAt: null },
+    ]
+    const result = selectTopic({
+      topics: [minecraft, food],
+      stats,
+      interests: ['minecraft', 'castle'],
+      keywordStats: hits,
+      rng: () => 0.5,
+      now: NOW,
+    })
+    expect(result?.name).toBe('minecraft')
   })
 })

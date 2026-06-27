@@ -62,10 +62,16 @@ export async function deleteSession(id: string): Promise<void> {
   if (!res.ok) throw new Error(`deleteSession: HTTP ${res.status}`)
 }
 
+// v1.0.2 — GET /api/topics joins topic_stats + keyword_hits.
+// - hitCount: per-topic discussion_count (0 included).
+// - keywordHits: Record<keyword, hit_count> for keywords with ≥1 hit;
+//   missing keywords are implicit 0.
 export interface TopicApi {
   name: string
   keywords: string[]
   description: string
+  hitCount: number
+  keywordHits: Record<string, number>
 }
 
 export async function getTopics(): Promise<TopicApi[]> {
