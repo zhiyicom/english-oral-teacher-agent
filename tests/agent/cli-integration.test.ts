@@ -891,6 +891,10 @@ describe('CLI v0.4 state-machine integration', () => {
     const result = await runCli('pick a topic\nexit\n', {
       API_KEY: 'sk-test',
       APP_DATA_DIR: dataDir,
+      // v1.0.2 — disable the topic-age gate for this regression test
+      // (which sends a single user turn and expects topic_select to fire
+      // immediately). Production default is 5; CLI tests use 0.
+      TOPIC_AGE_MIN: '0',
     })
     expect(result.exitCode).toBe(0)
     // (a) Both stderr markers fire.

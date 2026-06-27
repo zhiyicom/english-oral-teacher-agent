@@ -170,9 +170,24 @@ export default function SessionPage() {
 
     streamingRef.current = ''
 
+    // v1.0.1 diagnostic — opt-in via localStorage('debug:web_diag=1').
+    // Tracks per-turn SSE event counts + final streamingRef state, then
+    // POSTs a summary to /api/diagnostic/log on `done`. Server appends
+    // to the same JSONL file as turn.ts so we can correlate end-to-end.
+    const diagEnabled = localStorage.getItem('debug:web_diag') === '1'
+    let textChunkCount = 0
+    let textChunkTotalLen = 0
+    let studentTextCount = 0
+    let lastStudentTextPayload = ''
+    const firstEvents: Array<{ type: string; len?: number }> = []
+    const recordEvent = (type: string, len?: number) => {
+      if (firstEvents.length < 20) firstEvents.push(len !== undefined ? { type, len } : { type })
+    }
+
     es.addEventListener('phase', (e) => {
       const data = JSON.parse((e as MessageEvent).data) as { phase: string }
       if (data.phase) setPhase(data.phase)
+      if (diagEnabled) recordEvent('phase')
     })
 
     es.addEventListener('ctx', (e) => {
@@ -181,20 +196,36 @@ export default function SessionPage() {
         startedAtRef.current = Date.now() - data.elapsed * 60000
         setElapsedMin(data.elapsed)
       }
+      if (diagEnabled) recordEvent('ctx')
     })
 
     es.addEventListener('text-chunk', (e) => {
       const data = JSON.parse((e as MessageEvent).data) as { delta: string }
       streamingRef.current += data.delta
       setStreamingText(stripInternal(streamingRef.current))
+      if (diagEnabled) {
+        textChunkCount += 1
+        textChunkTotalLen += data.delta.length
+        recordEvent('text-chunk', data.delta.length)
+      }
     })
 
     es.addEventListener('student-text', (e) => {
       const data = JSON.parse((e as MessageEvent).data) as { text: string }
-      // Backward compat: if no text-chunk arrived, use student-text as fallback
-      if (!streamingRef.current) {
-        streamingRef.current = data.text
-        setStreamingText(data.text)
+      // v1.0.2 — always replace, don't guard on streamingRef. The old guard
+      // was a v0.8 compat shim for clients without text-chunk support; it
+      // silently dropped 2nd-call responses (topic_select / memory_search /
+      // summarize_history) whenever the 1st-call had streamed anything,
+      // including pure <tool>...</tool> calls that strip down to empty.
+      // Symptom: empty or preamble-only assistant bubble mid-session,
+      // full message only visible after page refresh. See 2026-06-27
+      // session ddb32b4f for a real case (11 of 33 turns affected).
+      streamingRef.current = data.text
+      setStreamingText(stripInternal(data.text))
+      if (diagEnabled) {
+        studentTextCount += 1
+        lastStudentTextPayload = data.text
+        recordEvent('student-text', data.text.length)
       }
     })
 
@@ -204,6 +235,7 @@ export default function SessionPage() {
 
       const raw = streamingRef.current
       const text = stripInternal(raw).trim()
+      const addedToMessages = text.length > 0
       if (text) {
         setMessages((prev) => [...prev, { role: 'assistant', content: text }])
         speakAssistant(text)
@@ -217,6 +249,33 @@ export default function SessionPage() {
         setPhase('END')
       }
       setIsTurning(false)
+
+      if (diagEnabled) {
+        recordEvent('done')
+        fetch('/api/diagnostic/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: id,
+            type: 'web-done',
+            data: {
+              endedReason: data.endedReason,
+              firstEvents,
+              textChunkCount,
+              textChunkTotalLen,
+              studentTextCount,
+              lastStudentTextLen: lastStudentTextPayload.length,
+              lastStudentTextHead: lastStudentTextPayload.slice(0, 200),
+              finalStreamingRefLen: raw.length,
+              finalStreamingRefHead: raw.slice(0, 200),
+              finalStreamingRefTail: raw.length > 200 ? raw.slice(-100) : '',
+              addedToMessages,
+            },
+          }),
+        }).catch(() => {
+          // best-effort
+        })
+      }
     })
 
     es.addEventListener('error', (e) => {
@@ -228,6 +287,18 @@ export default function SessionPage() {
       es.close()
       esRef.current = null
       setIsTurning(false)
+      if (diagEnabled) {
+        recordEvent('error')
+        fetch('/api/diagnostic/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: id,
+            type: 'web-error',
+            data: { firstEvents, classification: data.classification, message: data.message },
+          }),
+        }).catch(() => {})
+      }
     })
 
     es.onerror = () => {
@@ -235,6 +306,18 @@ export default function SessionPage() {
       setError(STRINGS.sessionLoadError)
       closeES()
       setIsTurning(false)
+      if (diagEnabled) {
+        recordEvent('onerror')
+        fetch('/api/diagnostic/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: id,
+            type: 'web-onerror',
+            data: { firstEvents },
+          }),
+        }).catch(() => {})
+      }
     }
   }
 

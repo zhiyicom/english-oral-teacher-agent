@@ -37,11 +37,11 @@ import type { PhaseTransition, SessionState } from './agent/index.js'
 import type { TurnOutput } from './agent/turn.js'
 import { loadEnv } from './config/env.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
+import { logSummarize, logWebDiagnostic } from './llm/debug-log.js'
 import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
 import type { LLMClient, Message } from './llm/types.js'
 import { createTransformersEmbedder } from './memory/index.js'
 import { loadSystemPrompt, loadUserFile, updateUserSettings } from './prompts/loader.js'
-import { logSummarize } from './llm/debug-log.js'
 import { extractStudentDiscoveries } from './agent/profile-extractor.js'
 import {
   applyMigrations,
@@ -500,8 +500,15 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
                 } catch {
                   // embedding is best-effort
                 }
-              } catch {
-                // If summarization fails, still mark as ended with a placeholder
+              } catch (err) {
+                // v0.8.5 — mirror CLI: log the failure to stderr so the cause
+                // is diagnosable. The placeholder keeps markEnded running so
+                // the session isn't lost, but the silent catch from v0.8.4
+                // (and earlier) made every "summarization failed" row a
+                // mystery. Format mirrors src/cli.ts:483.
+                process.stderr.write(
+                  `[server] summarize failed session=${id.slice(0, 8)} msgs=${msgObjs.length} err=${(err as Error).message}\n`,
+                )
                 sessions.markEnded(id, {
                   phaseHistory: output.phaseHistory,
                   summary: '(summarization failed)',
@@ -642,6 +649,25 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
   // Returns the count of sessions as a quick smoke check.
   app.get('/api/health', (c) => {
     return c.json({ ok: true, sessions: sessions.list().length })
+  })
+
+  // ---- Diagnostic log endpoint (v1.0.1) ----
+  // Client posts one event per turn when localStorage `debug:web_diag=1`
+  // is set. Server appends to the same diag-*.jsonl file used by
+  // turn.ts so server-side and client-side events can be correlated.
+  app.post('/api/diagnostic/log', async (c) => {
+    if (process.env.DEBUG_LOG_LLM !== '1') return c.json({ ok: false, reason: 'disabled' }, 403)
+    let body: { sessionId?: string; type?: string; data?: Record<string, unknown> } = {}
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ ok: false, reason: 'invalid json' }, 400)
+    }
+    if (!body.sessionId || typeof body.sessionId !== 'string') {
+      return c.json({ ok: false, reason: 'sessionId required' }, 400)
+    }
+    logWebDiagnostic(body.sessionId, { type: body.type ?? 'unknown', ...(body.data ?? {}) })
+    return c.json({ ok: true })
   })
 
   // ---- Production SPA fallback (v0.8.5) ----

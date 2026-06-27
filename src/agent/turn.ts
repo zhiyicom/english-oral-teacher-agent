@@ -20,9 +20,16 @@
 // (this file is a 1:1 extraction with stderr.write() calls replaced by
 // event yields; behavior is identical under CLI regression tests).
 
-import { logLLMRequest } from '../llm/debug-log.js'
+import { logLLMRequest, logTurnDiagnostic } from '../llm/debug-log.js'
 import { chatStreamWithRetry, chatStreamWithRetryGen } from '../llm/retry.js'
 import { loadPhaseInstructions } from '../prompts/loader.js'
+import {
+  getCurrentMinTopicAge,
+  getTopicTurnCount,
+  incrementTopicTurnCount,
+  isExplicitTopicSwitch,
+  resetTopicTurnCount,
+} from './topic-counter.js'
 
 const PHASES = loadPhaseInstructions()
 import type { ChatChunk, LLMClient, Message, SystemBlock, UsageChunk } from '../llm/types.js'
@@ -499,6 +506,17 @@ export async function* runTurn(
     }
   }
 
+  // v1.0.1 diagnostic — record what the 1st-call LLM actually produced,
+  // before any tool parsing / stripping. Used to track down "no reply"
+  // cases where the Web UI shows nothing.
+  logTurnDiagnostic(sessionId, phaseHistory.length, nextState.phase, {
+    ev: 'llm_done',
+    rawLen: response.length,
+    rawHead: response.slice(0, 300),
+    rawTail: response.length > 400 ? response.slice(-100) : '',
+    rawEchoesPhasePrefix: /^\[Phase:/.test(response.trim()),
+  })
+
   // ---------- 4. Post-LLM: usage + 80% warn ----------
   if (usage) {
     yield {
@@ -599,6 +617,13 @@ export async function* runTurn(
       const resultText = formatToolResult(parsed.name, result)
       history.push({ role: 'user', content: resultText })
       const followup = await deps.client.chat({ systemBlocks, messages: history })
+      logTurnDiagnostic(sessionId, phaseHistory.length, nextState.phase, {
+        ev: 'tool_2nd_call_done',
+        toolName: parsed.name,
+        followupLen: followup.content.length,
+        followupHead: followup.content.slice(0, 200),
+        followupEchoesPhasePrefix: /^\[Phase:/.test(followup.content.trim()),
+      })
       const argSummary = `top_k=${(parsed.args as { top_k?: number }).top_k ?? ''}`
       yield { type: 'tool-2nd-call', name: parsed.name, argSummary }
       // Safety strip 2nd-call response (don't recurse)
@@ -685,6 +710,13 @@ export async function* runTurn(
       const resultText = formatToolResult(parsed.name, result)
       history.push({ role: 'user', content: resultText })
       const followup = await deps.client.chat({ systemBlocks, messages: history })
+      logTurnDiagnostic(sessionId, phaseHistory.length, nextState.phase, {
+        ev: 'tool_2nd_call_done',
+        toolName: parsed.name,
+        followupLen: followup.content.length,
+        followupHead: followup.content.slice(0, 200),
+        followupEchoesPhasePrefix: /^\[Phase:/.test(followup.content.trim()),
+      })
       yield {
         type: 'tool-2nd-call',
         name: parsed.name,
@@ -715,27 +747,67 @@ export async function* runTurn(
       history.push({ role: 'assistant', content: displayText })
       deps.messages.append({ sessionId, role: 'assistant', content: displayText })
     } else {
-      yield {
-        type: 'tool-call',
-        name: parsed.name,
-        args: parsed.args,
-        argSummary: `phase=${(parsed.args as { phase?: string }).phase ?? 'WARM_UP'}, exclude=${(parsed.args as { exclude_recent_days?: number }).exclude_recent_days ?? 30}d`,
-      }
+      // v1.0.2 — enforce MIN_TOPIC_AGE so the LLM can't ping-pong between
+      // topics every turn. counter tracks user turns since the last
+      // successful topic_select (or session start). Explicit user request
+      // ("switch topic", "换个话题") bypasses the gate. Default threshold
+      // is 5 user turns; override via TOPIC_AGE_MIN env var (0 disables).
+      const minAge = getCurrentMinTopicAge()
+      // Read from history (not callMessages) — callMessages may have been
+      // mutated by phase-transition / first-turn hint injection, but the
+      // raw user input is always the last entry of history.
+      const lastUserInput = history[history.length - 1]?.content ?? ''
+      const explicitSwitch = isExplicitTopicSwitch(lastUserInput)
+      const currentCount = getTopicTurnCount(sessionId)
       let result: TopicSelectResult | { error: string }
-      try {
-        result = tool.execute(parsed.args) as TopicSelectResult | { error: string }
-      } catch (err) {
-        yield {
-          type: 'tool-execute-error',
-          name: parsed.name,
-          message: (err as Error).message,
+      let blocked = false
+      if (minAge > 0 && !explicitSwitch && currentCount < minAge) {
+        const remaining = minAge - currentCount
+        result = {
+          error: `Topic too young (${currentCount}/${minAge} user turns on current topic). Stay on this topic for ${remaining} more turn${remaining > 1 ? 's' : ''}. The user has not asked to switch.`,
         }
-        result = { error: `tool execution failed: ${(err as Error).message}` }
+        blocked = true
+        logTurnDiagnostic(sessionId, phaseHistory.length, nextState.phase, {
+          ev: 'topic_select_blocked',
+          count: currentCount,
+          minAge,
+          lastUserInput: lastUserInput.slice(0, 80),
+        })
+      } else {
+        yield {
+          type: 'tool-call',
+          name: parsed.name,
+          args: parsed.args,
+          argSummary: `phase=${(parsed.args as { phase?: string }).phase ?? 'WARM_UP'}, exclude=${(parsed.args as { exclude_recent_days?: number }).exclude_recent_days ?? 30}d`,
+        }
+        try {
+          result = tool.execute(parsed.args) as TopicSelectResult | { error: string }
+        } catch (err) {
+          yield {
+            type: 'tool-execute-error',
+            name: parsed.name,
+            message: (err as Error).message,
+          }
+          result = { error: `tool execution failed: ${(err as Error).message}` }
+        }
+        if (!('error' in result)) {
+          // Successful topic switch — reset counter so the new topic starts
+          // fresh (0 user turns on it yet).
+          resetTopicTurnCount(sessionId)
+        }
       }
       history.push({ role: 'assistant', content: response })
       const resultText = formatToolResult(parsed.name, result)
       history.push({ role: 'user', content: resultText })
       const followup = await deps.client.chat({ systemBlocks, messages: history })
+      logTurnDiagnostic(sessionId, phaseHistory.length, nextState.phase, {
+        ev: 'tool_2nd_call_done',
+        toolName: parsed.name,
+        followupLen: followup.content.length,
+        followupHead: followup.content.slice(0, 200),
+        followupEchoesPhasePrefix: /^\[Phase:/.test(followup.content.trim()),
+        blocked,
+      })
       const errOrSlug = 'error' in result ? 'error' : `slug=${result.slug}`
       yield { type: 'tool-2nd-call', name: parsed.name, argSummary: errOrSlug }
       let followupDisplay = followup.content
@@ -772,6 +844,25 @@ export async function* runTurn(
   if (mockTime) {
     ;(deps.clock as MockClock).advance(60_000)
   }
+
+  // v1.0.1 diagnostic — record what was actually saved to history and
+  // what was yielded to the client. Pairs with `llm_done` above to
+  // diagnose the "no reply" / empty-bubble symptom.
+  const lastHist = history[history.length - 1]
+  logTurnDiagnostic(sessionId, phaseHistory.length, nextState.phase, {
+    ev: 'turn_done',
+    toolName: parsed?.name ?? null,
+    lastHistoryRole: lastHist?.role,
+    lastHistoryLen: lastHist?.content.length ?? 0,
+    lastHistoryHead: (lastHist?.content ?? '').slice(0, 200),
+    endedReason,
+  })
+
+  // v1.0.2 — increment the topic-age counter for this user turn. Counter
+  // is reset to 0 when topic_select succeeds (above). V751-002 paths
+  // return early before reaching this line and don't increment — a
+  // failed turn doesn't count as a real turn on the topic.
+  incrementTopicTurnCount(sessionId)
 
   yield { type: 'done', endedReason }
   return {

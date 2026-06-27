@@ -13,6 +13,61 @@ function ensureDir(): void {
   }
 }
 
+// v1.0.1 diagnostic — used to track down "no reply" / empty-stream bugs.
+// Each call appends one JSON line to data/llm-debug/diag-<session>-<id>.jsonl
+// so server-side (turn.ts) and client-side (SessionPage) logs land in the
+// same file and can be correlated by sessionId + turnIndex.
+function diagFile(sessionId: string): string {
+  return join(DEBUG_DIR, `diag-${sessionId.slice(0, 8)}.jsonl`)
+}
+
+function truncate(s: string, head: number, tail: number): string {
+  if (s.length <= head + tail + 32) return s
+  return `${s.slice(0, head)}…[${s.length - head - tail} chars omitted]…${s.slice(-tail)}`
+}
+
+export function logTurnDiagnostic(
+  sessionId: string,
+  turnIndex: number,
+  phase: string,
+  data: Record<string, unknown>,
+): void {
+  if (process.env.DEBUG_LOG_LLM !== '1') return
+  ensureDir()
+  const line = `${JSON.stringify({
+    ts: new Date().toISOString(),
+    src: 'server',
+    session: sessionId,
+    turn: turnIndex,
+    phase,
+    ...data,
+  })}\n`
+  try {
+    appendFileSync(diagFile(sessionId), line, 'utf-8')
+  } catch {
+    // best-effort
+  }
+}
+
+// Client posts here so web-side events land in the same JSONL file.
+// Always rewrites the file (one event per call) — the client fires this
+// at most once per turn.
+export function logWebDiagnostic(sessionId: string, payload: Record<string, unknown>): void {
+  if (process.env.DEBUG_LOG_LLM !== '1') return
+  ensureDir()
+  const line = `${JSON.stringify({
+    ts: new Date().toISOString(),
+    src: 'web',
+    session: sessionId,
+    ...payload,
+  })}\n`
+  try {
+    appendFileSync(diagFile(sessionId), line, 'utf-8')
+  } catch {
+    // best-effort
+  }
+}
+
 export function logLLMRequest(
   sessionId: string,
   turnIndex: number,
