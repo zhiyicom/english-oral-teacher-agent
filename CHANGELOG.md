@@ -5,9 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Note**: Sprint-by-sprint release history (v0.2 → v1.0.3) lives in
+> **Note**: Sprint-by-sprint release history (v0.2 → v1.0.4) lives in
 > [docs/ARCHITECTURE.md §11](docs/ARCHITECTURE.md). This file tracks user-facing
 > changes only.
+
+## [v1.0.4] — 2026-06-28 — LLM prompt assembly cleanup (no behavior change)
+
+> Sprint details: [v1.0.4-scope.md](docs/sprint/v1.0.4-scope.md) /
+> [v1.0.4-design.md](docs/sprint/v1.0.4-design.md) /
+> [v1.0.4-test-report.md](docs/sprint/v1.0.4-test-report.md)
+
+### Changed
+- **System prompt H1 dedup** (§1.1): the prompt sent to the LLM no longer contains duplicate headings. `buildSystemString()` no longer prepends `# SOUL` / `# AGENTS` / `# STUDENT` / `# TOOLS` — each section's H1 now comes from the source file itself (`prompts/SOUL.md`, `prompts/AGENTS.md`, `prompts/USER.md`, `prompts/tools.md`). Each H1 appears exactly once in the rendered system prompt. Visible bytes saved: ~48 B per turn x every turn.
+- **Last session summary single-source** (§1.2): Block 1's last-review line is now a one-line pointer (date, duration, 6 keywords, and `(full summary in opening user message)`) instead of repeating the full summary. The full summary text still appears in the WARM_UP first-turn synthetic user message (`Messages[0]`), which remains the LLM's sole reading point. Visible bytes saved: ~250-400 B on the WARM_UP turn 1 only.
+- **Keyword list count alignment** (§1.2): the keyword list shown to the LLM in both Block 1 and `Messages[0]` now shows 6 keywords (was 4 in `Messages[0]`, 6 in Block 1). Both segments now carry the same 6 keywords in the same order.
+- **Runtime guard on prompt source files**: `assertHasH1()` is called on every `loadSystemPrompt()`. If any of `SOUL.md` / `AGENTS.md` / `USER.md` / `tools.md` loses its `# <Title>` first line, startup throws a clear error pointing at the offending file. Prevents silently malformed prompts when someone hand-edits a source file.
+
+### Notes
+- This release is internal-only. The student's first-turn greeting, the LLM's tool-calling behavior, and the visible session transcript are all unchanged — verified by replay-fixture diffs and unit tests asserting no message-shape regression.
+- Total per-session prompt savings on a 64-turn session: ~3 KB (H1 dedup, all turns) + ~400 B (Last session pointer, WARM_UP turn 1). Tool-examples dedup (~400 KB/session) is deliberately out of scope; requires cache-strategy + A/B validation.
 
 ## [v1.0.3] — 2026-06-28 — UI polish + phase-based topic strategy
 
