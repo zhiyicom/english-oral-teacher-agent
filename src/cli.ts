@@ -30,6 +30,7 @@ import {
   createTransformersEmbedder,
   retrieveRelevant,
 } from './memory/index.js'
+import { extractStudentDiscoveries } from './agent/profile-extractor.js'
 import { type SystemPrompt, loadSystemPrompt } from './prompts/loader.js'
 import {
   type Mistake,
@@ -266,10 +267,21 @@ export async function main(): Promise<void> {
   // outside the loop) can mutate it without closure capture issues.
   const warnedRef = { value: false }
 
+  // v1.0.3 §1.3 — module-scoped WARM_UP opener hook. Written by the
+  // session-end profile-extract of THIS process's previous invocation
+  // (in-memory only — process restart resets to null, which is fine:
+  // WARM_UP hint gracefully falls back to "natural connection" text).
+  // Single-user system so a global is sufficient.
+  let pendingWarmUpSeed: string | null = null
+
   // v0.5 — load the most recent session's summary for [System Context] injection.
   // Injected only on the FIRST turn of this session (first-turn-only per v0.5 design §2.5).
   const lastReview: LastReview | null = loadLastReview(db)
   let isFirstTurn = true
+  // v1.0.3 §1.3 — read & clear the WARM_UP opener hook from the previous
+  // session-end. Mirrors server.ts: POST /api/sessions semantics.
+  const warmUpHook = pendingWarmUpSeed
+  pendingWarmUpSeed = null
 
   // v0.6 — load aggregated topic_stats once at startup. Unlike lastReview
   // (per-session retrospective, first-turn-only), active topics are a
@@ -338,6 +350,9 @@ export async function main(): Promise<void> {
       // mutated in the session-end finally block (same module-scoped DB),
       // so reading once is correct (mirrors how `stats` is loaded above).
       keywordStats: keywordHits.getAll(),
+      // v1.0.3 §1.3 — D3 (interest boost) disabled. WARM_UP phase prompt
+      // handles interest matching; this tool only sees call-count signals.
+      useInterestBoost: false,
     }),
   )
   let relevantPast: RelevantSession[] = []
@@ -412,6 +427,8 @@ export async function main(): Promise<void> {
           lastReview,
           isFirstTurn,
           systemPrompt,
+          // v1.0.3 §1.3 — WARM_UP opener hook read at startup above.
+          warmUpHook,
           mockTime,
         },
         {
@@ -537,6 +554,27 @@ export async function main(): Promise<void> {
           process.stderr.write(
             `[cli] topic match: none (keywords=[${summaryKeywords.join(',')}])\n`,
           )
+        }
+
+        // v1.0.3 §1.3 — extend the session-end pipeline with profile-extract
+        // for parity with server.ts. Picks `nextWarmUpSeed` (single social-
+        // opener keyword for the NEXT session's WARM_UP) and writes it to
+        // the module-scoped cache. Skipped on summarization failure (no
+        // meaningful summary to extract from).
+        if (summaryText && summaryText !== '(summarization failed)') {
+          try {
+            const discoveries = await extractStudentDiscoveries(
+              summaryText,
+              systemPrompt.userProfile.interests,
+              client,
+            )
+            pendingWarmUpSeed = discoveries.nextWarmUpSeed
+            process.stderr.write(
+              `[cli] WARM_UP seed picked: ${discoveries.nextWarmUpSeed ?? '(none)'}\n`,
+            )
+          } catch (err) {
+            process.stderr.write(`[cli] profile-extract failed: ${(err as Error).message}\n`)
+          }
         }
       }
     } finally {

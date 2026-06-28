@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
 import { getSession, getSessionStreamUrl } from '../lib/api'
 import LoadingSpinner from './shared/LoadingSpinner'
@@ -35,6 +35,15 @@ function stripInternal(text: string): string {
 export default function SessionPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
+
+  // v1.0.3 §1.3 — WARM_UP opener hook forwarded by MainPage / Sidebar via
+  // navigation state. Read once on mount; passed on every /stream call so
+  // server can use it on first turn. The ref avoids re-renders and survives
+  // across the user input that triggers the actual first turn.
+  const warmUpHookRef = useRef<string | null>(
+    (location.state as { warmUpHook?: string | null } | null)?.warmUpHook ?? null,
+  )
 
   const [phase, setPhase] = useState<string>('WARM_UP')
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -164,7 +173,7 @@ export default function SessionPage() {
 
     closeES()
 
-    const url = getSessionStreamUrl(id, 'turn', input)
+    const url = getSessionStreamUrl(id, 'turn', input, warmUpHookRef.current)
     const es = new EventSource(url)
     esRef.current = es
 

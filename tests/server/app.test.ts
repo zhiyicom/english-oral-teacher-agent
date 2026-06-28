@@ -86,6 +86,30 @@ describe('createApp (v0.8.1 L1)', () => {
     expect(session.id).toBe(body.id)
   })
 
+  it('POST /api/sessions: response includes warmUpHook field (v1.0.3 §1.3)', async () => {
+    // Fresh server → pendingWarmUpSeed is null → warmUpHook must be null.
+    // The field MUST be present in the shape even when null so the web can
+    // always read it without an `in` check or destructuring fallback.
+    const res = await harness.app.request('/api/sessions', { method: 'POST' })
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as { id: string; warmUpHook: string | null }
+    expect(typeof body.id).toBe('string')
+    expect(body.warmUpHook).toBeNull()
+  })
+
+  it('POST /api/sessions: read-once semantics — second POST returns null too', async () => {
+    // After the first POST clears pendingWarmUpSeed, a second POST must
+    // also return null. This proves the module-scoped state is consumed
+    // exactly once, not just peeked.
+    const first = await harness.app.request('/api/sessions', { method: 'POST' })
+    const firstBody = (await first.json()) as { warmUpHook: string | null }
+    expect(firstBody.warmUpHook).toBeNull()
+
+    const second = await harness.app.request('/api/sessions', { method: 'POST' })
+    const secondBody = (await second.json()) as { warmUpHook: string | null }
+    expect(secondBody.warmUpHook).toBeNull()
+  })
+
   it('GET /api/sessions/:id: 404 for unknown id, 200 with correct shape for known id', async () => {
     // 404 path
     const notFound = await harness.app.request('/api/sessions/does-not-exist')

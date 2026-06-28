@@ -28,8 +28,10 @@ export default function MainPage() {
   async function handleStart() {
     setCreating(true)
     try {
-      const { id } = await createSession()
-      navigate(`/session/${id}`)
+      const { id, warmUpHook } = await createSession()
+      // v1.0.3 §1.3 — pass warmUpHook via navigation state so SessionPage
+      // can include it in the first-turn /stream URL.
+      navigate(`/session/${id}`, { state: { warmUpHook } })
     } catch (e) {
       setError((e as Error).message)
       setCreating(false)

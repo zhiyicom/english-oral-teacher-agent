@@ -84,6 +84,13 @@ const NOISE_RANGE = 0.2
  *
  * `keywordStats` is optional; when omitted (legacy callers, tests), D5
  * contributes zero to the score so the v0.7.6 contract is preserved.
+ *
+ * v1.0.3 §1.3 — `useInterestBoost` defaults to `false`. When false, D3
+ * (interest boost) is skipped entirely: interest = 0 regardless of the
+ * `interests` argument. This is the v1.0.3 default for both CLI and Server
+ * topic_select tool callers — interest matching is handled by WARM_UP phase
+ * prompt, not by this algorithm. Pass `useInterestBoost: true` to opt back
+ * into D3 (legacy / test paths).
  */
 export function selectTopic(opts: {
   topics: Topic[]
@@ -93,11 +100,16 @@ export function selectTopic(opts: {
   excludeDays?: number
   now?: Date
   rng?: () => number
+  useInterestBoost?: boolean
 }): Topic | null {
   const excludeDays = opts.excludeDays ?? 30
   const now = opts.now ?? new Date()
   const rng = opts.rng ?? Math.random
   const keywordStats = opts.keywordStats ?? []
+  // v1.0.3 §1.3 — D3 disabled by default. opts.interests is still required
+  // in the signature for backwards compat but is only consulted when
+  // useInterestBoost === true.
+  const useInterestBoost = opts.useInterestBoost ?? false
 
   let pool = filterHardExclude(opts.topics, opts.stats, excludeDays, now)
   if (pool.length === 0) return null
@@ -107,7 +119,7 @@ export function selectTopic(opts: {
   const scored: TopicCandidate[] = pool.map((t) => {
     const stat = opts.stats.find((s) => s.topic === t.name) ?? null
     const count = stat?.discussionCount ?? 0
-    const interest = computeInterest(t, opts.interests)
+    const interest = useInterestBoost ? computeInterest(t, opts.interests) : 0
     const kAvg = avgKeywordHit(t, keywordStats)
     const noise = (rng() * 2 - 1) * NOISE_RANGE
     return {

@@ -40,13 +40,18 @@ export interface TopicSelectResult {
   suggested_keyword?: string
 }
 
+// v1.0.3 §1.3 — D3 (interest boost) is permanently disabled in this tool.
+// Interest matching is handled by the WARM_UP phase prompt, not by the
+// selection algorithm. Description deliberately does NOT advertise interest
+// boost so the LLM doesn't waste turns trying to influence selection via
+// user.interests (which is read-only context for the WARM_UP hook anyway).
 const DESCRIPTION =
-  'Pick a topic for the current conversation phase. Uses: ' +
+  'Pick the next topic based on call-count signals: ' +
   '(1) hard exclude topics discussed in the last N days, ' +
   '(2) soft preference for topics with low discussion count, ' +
   '(3) keyword freshness: prefer topics whose inner keywords have been hit less, ' +
-  '(4) interest boost if student.interests matches, ' +
-  '(5) weighted random selection to avoid deterministic picks. ' +
+  '(4) weighted random selection to avoid deterministic picks. ' +
+  'Interest matching happens in WARM_UP phase via prompt — this tool does NOT consider user.interests. ' +
   'Returns the topic slug, title, estimated minutes, and a suggested_keyword ' +
   'to use as the opening angle.'
 
@@ -80,8 +85,12 @@ export function createTopicSelectTool(opts: {
   interests: string[]
   keywordStats?: KeywordHit[]
   rng?: () => number
+  // v1.0.3 §1.3 — defaults to false (D3 disabled). WARM_UP handles
+  // interest matching; this tool only sees call-count signals.
+  useInterestBoost?: boolean
 }): Tool {
   const keywordStats = opts.keywordStats ?? []
+  const useInterestBoost = opts.useInterestBoost ?? false
   return {
     name: 'topic_select',
     description: DESCRIPTION,
@@ -95,6 +104,7 @@ export function createTopicSelectTool(opts: {
         keywordStats,
         excludeDays: parsed.exclude_recent_days,
         rng: opts.rng,
+        useInterestBoost,
       })
       if (!winner) {
         return { error: 'No topics available after hard exclude' }

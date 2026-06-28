@@ -19,12 +19,12 @@ export async function listSessions(): Promise<SessionApi[]> {
   return body.sessions
 }
 
-export async function createSession(): Promise<{ id: string }> {
+export async function createSession(): Promise<{ id: string; warmUpHook: string | null }> {
   const res = await checkOk(
     await fetch(`${BASE}/api/sessions`, { method: 'POST' }),
     'createSession',
   )
-  return (await res.json()) as { id: string }
+  return (await res.json()) as { id: string; warmUpHook: string | null }
 }
 
 export async function getSession(id: string): Promise<SessionApi> {
@@ -92,12 +92,19 @@ export async function updateTopics(topics: TopicApi[]): Promise<void> {
 
 // v0.8.3 — build the SSE stream URL for a session turn.
 // Each turn opens a fresh EventSource connection with query params.
+// v1.0.3 §1.3 — optionally include `warmUpHook` (LLM-curated opener
+// keyword from previous session's profile-extract). Server only uses it
+// on the first turn; later turns ignore the value.
 export function getSessionStreamUrl(
   sessionId: string,
   action: 'init' | 'turn',
   input?: string,
+  warmUpHook?: string | null,
 ): string {
   const params = new URLSearchParams({ action })
   if (input) params.set('input', input)
+  if (warmUpHook && warmUpHook.trim().length > 0) {
+    params.set('warmUpHook', warmUpHook.trim())
+  }
   return `${BASE}/api/sessions/${encodeURIComponent(sessionId)}/stream?${params}`
 }

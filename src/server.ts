@@ -265,6 +265,12 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
 
   const sessionStore = new Map<string, SessionRuntime>()
 
+  // v1.0.3 §1.3 — WARM_UP opener hook seeded by last session's profile-extract.
+  // Module-scoped memory: server restart loses it (acceptable, falls back to
+  // the existing "natural connection" WARM_UP hint when null). Single-user
+  // system, so a global is sufficient — no per-user keying needed.
+  let pendingWarmUpSeed: string | null = null
+
   // Register tools so the v0.8.3 turn loop can dispatch. v0.8.1 doesn't
   // call them yet (the SSE endpoint is a stub), but the registry is here
   // so the wiring is correct when we flip the switch.
@@ -281,6 +287,9 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
       // mutated in the session-end finally block (same module-scoped DB),
       // so reading once is correct (mirrors how `stats` is loaded above).
       keywordStats: keywordHits.getAll(),
+      // v1.0.3 §1.3 — D3 (interest boost) disabled. WARM_UP phase prompt
+      // handles interest matching; this tool only sees call-count signals.
+      useInterestBoost: false,
     }),
   )
 
@@ -308,9 +317,15 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
   // ---- 2. POST /api/sessions ----
   // Creates a new session row. v0.8.1: no body parsing (interests ignored).
   // v0.8.3 may parse `interests` from body to thread into topic_select.
+  // v1.0.3 §1.3 — also returns `warmUpHook` (and clears the module-scoped
+  // pending seed). Read-once semantics: subsequent POST calls without a
+  // prior session-end will return `null`. Web stores this in React state
+  // and passes it back via /stream body for the first-turn WARM_UP hint.
   app.post('/api/sessions', (c) => {
     const row = sessions.create()
-    return c.json({ id: row.id }, 201)
+    const warmUpHook = pendingWarmUpSeed
+    pendingWarmUpSeed = null
+    return c.json({ id: row.id, warmUpHook }, 201)
   })
 
   // ---- 3. GET /api/sessions/:id ----
@@ -345,10 +360,18 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
   // Query params:
   //   ?action=init — return current phase + done (for initial page load)
   //   ?action=turn&input=... — run one turn, stream all TurnEvents as SSE
+  //   v1.0.3 §1.3 — ?warmUpHook=... — WARM_UP opener keyword from the
+  //     session-end profile-extract of the previous session. Web passes
+  //     this on first-turn only; null when not provided.
   app.get('/api/sessions/:id/stream', async (c) => {
     const id = c.req.param('id')
     const action = c.req.query('action')
     const input = c.req.query('input')
+    const warmUpHookRaw = c.req.query('warmUpHook')
+    const warmUpHook =
+      typeof warmUpHookRaw === 'string' && warmUpHookRaw.trim().length > 0
+        ? warmUpHookRaw.trim()
+        : null
 
     const row = sessions.get(id)
     if (!row) return c.json({ error: 'session not found', id }, 404)
@@ -421,6 +444,10 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
         lastReview,
         isFirstTurn: rt.isFirstTurn,
         systemPrompt,
+        // v1.0.3 §1.3 — LLM-picked WARM_UP opener from previous session's
+        // profile-extract. Only meaningful on the first turn; later turns
+        // ignore it because the WARM_UP hint block is gated by wasFirstTurn.
+        warmUpHook,
         mockTime: false,
       }
 
@@ -480,6 +507,9 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
                       bodyAppend: discoveries.bodyUpdate ?? undefined,
                     })
                   }
+                  // v1.0.3 §1.3 — cache next session's WARM_UP opener hook.
+                  // In-memory only; consumed by next POST /api/sessions call.
+                  pendingWarmUpSeed = discoveries.nextWarmUpSeed
                 } catch {
                   // Best-effort — don't block session end on profile extraction
                 }

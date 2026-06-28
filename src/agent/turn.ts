@@ -152,6 +152,13 @@ export interface TurnInput {
   lastReview: LastReview | null
   isFirstTurn: boolean
   systemPrompt: LoaderSystemPrompt
+  // v1.0.3 §1.3 — LLM-curated single keyword from previous session's
+  // profile-extract. Used to focus the WARM_UP opener hint on the first
+  // turn. Null when not available (first-ever session, server restart,
+  // LLM failed to pick). Caller (CLI / Server) reads module-scoped state
+  // and clears it on consume. Optional in the interface for tests that
+  // don't care about WARM_UP behaviour.
+  warmUpHook?: string | null
   mockTime: boolean
 }
 
@@ -429,10 +436,17 @@ export async function* runTurn(
       if (wasFirstTurn && input.lastReview?.summary) {
         const summary = input.lastReview.summary
         const kws = (input.lastReview.keywords ?? []).slice(0, 4).join(', ')
+        // v1.0.3 §1.3 — when the previous session's profile-extract produced
+        // a focused opener keyword, prepend a directive seed line. Falls
+        // back to the original "make a natural connection" text when no
+        // hook is available (first-ever session, server restart, LLM failed).
+        const opener = input.warmUpHook
+          ? `Your opener topic for today: "${input.warmUpHook}". Make the first question naturally about this — then chat around the student's interests.`
+          : `Greet the student first, then make a natural connection to something from last session before moving to a new topic.`
         const hint = [
           `Last session (${input.lastReview.daysAgo} days ago): ${summary}`,
           `Keywords: ${kws}`,
-          `Greet the student first, then make a natural connection to something from last session before moving to a new topic.`,
+          opener,
         ].join('\n')
         process.stderr.write(`[turn] WARM_UP hint as standalone message\n`)
         callMessages = [

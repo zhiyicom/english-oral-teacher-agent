@@ -114,6 +114,7 @@ describe('selectTopic (D1+D2+D3+D4 top-level)', () => {
     // food: count=0, interest=0 (none in interests) → score = 0
     // minecraft: count=1, interest=2 (matches 'minecraft', 'castle') → score = -0.1 + 1.0 = 0.9
     // rng=0.5 → noise=0. minecraft wins by a lot.
+    // v1.0.3 §1.3 — opt back into D3 explicitly; default useInterestBoost is now false.
     const stats = [stat('food', 0, 100), stat('minecraft', 1, 100)]
     const result = selectTopic({
       topics: [minecraft, school, food],
@@ -121,6 +122,7 @@ describe('selectTopic (D1+D2+D3+D4 top-level)', () => {
       interests: ['minecraft', 'castle'],
       rng: () => 0.5,
       now: NOW,
+      useInterestBoost: true,
     })
     expect(result?.name).toBe('minecraft')
   })
@@ -228,6 +230,7 @@ describe('selectTopic D5 — keyword freshness bias (v1.0.2)', () => {
     // food: count=0, interest=0 → 0; avg=0 → 0
     //   score = 0 + 0 + 0 + 0 = 0
     // interest boost is still strong enough to keep minecraft on top.
+    // v1.0.3 §1.3 — must opt back into D3 explicitly to test legacy scoring.
     const stats: TopicStat[] = []
     const hits: KeywordHit[] = [
       { topic: 'minecraft', keyword: 'minecraft', hitCount: 10, firstHitAt: null, lastHitAt: null },
@@ -241,7 +244,70 @@ describe('selectTopic D5 — keyword freshness bias (v1.0.2)', () => {
       keywordStats: hits,
       rng: () => 0.5,
       now: NOW,
+      useInterestBoost: true,
     })
     expect(result?.name).toBe('minecraft')
+  })
+})
+
+describe('selectTopic v1.0.3 §1.3 — useInterestBoost flag', () => {
+  it('default (false) ignores interests even when non-empty', () => {
+    // minecraft: count=0, interest (would-be) =2 → +1.0
+    // food:      count=0, interest =0 → 0
+    // Without useInterestBoost, minecraft's interest is 0 → food wins on count tie.
+    const stats: TopicStat[] = []
+    const result = selectTopic({
+      topics: [minecraft, food],
+      stats,
+      interests: ['minecraft', 'castle'],
+      rng: () => 0.5,
+      now: NOW,
+    })
+    // Both have count=0; tie broken alphabetically → 'food' < 'minecraft' → food.
+    expect(result?.name).toBe('food')
+  })
+
+  it('explicit useInterestBoost:false still ignores interests', () => {
+    const stats: TopicStat[] = []
+    const result = selectTopic({
+      topics: [minecraft, food],
+      stats,
+      interests: ['minecraft', 'castle'],
+      useInterestBoost: false,
+      rng: () => 0.5,
+      now: NOW,
+    })
+    expect(result?.name).toBe('food')
+  })
+
+  it('useInterestBoost:true preserves legacy D3 behavior', () => {
+    // minecraft: count=0, interest=2 → +1.0; food: count=0, interest=0 → 0
+    // minecraft wins.
+    const stats: TopicStat[] = []
+    const result = selectTopic({
+      topics: [minecraft, food],
+      stats,
+      interests: ['minecraft', 'castle'],
+      useInterestBoost: true,
+      rng: () => 0.5,
+      now: NOW,
+    })
+    expect(result?.name).toBe('minecraft')
+  })
+
+  it('useInterestBoost:false with matching interests does NOT change score on count ties', () => {
+    // Same setup as the legacy "interest boost overrides low count" test above
+    // but with useInterestBoost:false. food should win instead of minecraft.
+    const stats: TopicStat[] = [stat('food', 0, 100), stat('minecraft', 1, 100)]
+    const result = selectTopic({
+      topics: [minecraft, school, food],
+      stats,
+      interests: ['minecraft', 'castle'],
+      useInterestBoost: false,
+      rng: () => 0.5,
+      now: NOW,
+    })
+    // food count=0, minecraft count=1. D2 sort → food first → wins on tie.
+    expect(result?.name).toBe('food')
   })
 })

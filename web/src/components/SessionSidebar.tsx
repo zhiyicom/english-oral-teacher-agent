@@ -64,8 +64,9 @@ export default function SessionSidebar() {
   async function handleNew() {
     setCreating(true)
     try {
-      const { id } = await createSession()
-      navigate(`/session/${id}`)
+      const { id, warmUpHook } = await createSession()
+      // v1.0.3 §1.3 — forward warmUpHook via navigation state.
+      navigate(`/session/${id}`, { state: { warmUpHook } })
     } catch {
       // Keep button enabled on error
     } finally {
