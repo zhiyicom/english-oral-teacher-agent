@@ -12,7 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [v1.0.5] — 2026-06-28 — Topic-selection tool widening + anti-# STUDENT rule
 
 > Sprint details: [v1.0.5-scope.md](docs/sprint/v1.0.5-scope.md) /
-> [v1.0.5-design.md](docs/sprint/v1.0.5-design.md)
+> [v1.0.5-design.md](docs/sprint/v1.0.5-design.md) /
+> [v1.0.5-test-report.md](docs/sprint/v1.0.5-test-report.md)
+>
+> **Scope note**: 原 v1.0.5 scope 定义的"安装器架构前置 4 段（§1.1 单进程 + §1.2 AppData + §1.3 USER.md 种子 + §1.4 /setup 向导）"推迟到 v1.0.5.1+ 实施（v1.0.6 启动前必须完成）。完整设计稿保留在 [v1.0.5-design.md](docs/sprint/v1.0.5-design.md) 作为 v1.0.5.1+ 蓝图。当前 v1.0.5 实际完成的是 §A 提示词禁令 + §B tool 返回拓宽（topic selection 健壮性）。
 
 ### Changed
 - **`topic_select` tool returns `keywords[]` + description-based title** (§B): the LLM now gets the full keyword list (e.g. `["morning","afternoon","breakfast","lunch","dinner","school","homework","habit",...]` for `daily_routine`) and the human-readable `title` from the topic's `description` field (e.g. "日常生活习惯") instead of the raw slug. Gives the LLM concrete vocabulary to anchor the opening question so it no longer falls back to mining `# STUDENT` interests for topic material. Backwards compatible — no DB migration, no new endpoints, no schema break.
