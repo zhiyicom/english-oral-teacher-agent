@@ -61,6 +61,7 @@ describe('createTopicSelectTool', () => {
     expect(typeof result).toBe('object')
     if ('error' in result) throw new Error(`expected success, got error: ${result.error}`)
     expect(result.slug).toBeTruthy()
+    // v1.0.5 §B — when description is null, title falls back to slug.
     expect(result.title).toBe(result.slug)
     expect(result.est_minutes).toBe(15)
   })
@@ -183,5 +184,77 @@ describe('createTopicSelectTool — suggested_keyword (v1.0.2)', () => {
       | { error: string }
     if ('error' in result) throw new Error(`unexpected error: ${result.error}`)
     expect(result.suggested_keyword).toBeUndefined()
+  })
+})
+
+describe('createTopicSelectTool — v1.0.5 §B (keywords[] + description title)', () => {
+  it('returns the full keywords list of the chosen topic so the LLM has opening material', () => {
+    const tool = createTopicSelectTool({
+      topics: [minecraft, school, sports],
+      stats: [],
+      interests: [],
+      rng: () => 0.5,
+    })
+    const result = tool.execute({ phase: 'MAIN_ACTIVITY' }) as
+      | { slug: string; keywords: string[] }
+      | { error: string }
+    if ('error' in result) throw new Error(`unexpected error: ${result.error}`)
+    // The LLM can use these to anchor the opening question. Minecraft has
+    // count=0 (wins over the others), so its keywords are returned verbatim.
+    expect(result.slug).toBe('minecraft')
+    expect(result.keywords).toEqual(['minecraft', 'castle', 'creeper'])
+  })
+
+  it('uses the topic description as title when present, instead of the raw slug', () => {
+    const schoolWithDesc: Topic = {
+      ...school,
+      description: 'School life',
+    }
+    const tool = createTopicSelectTool({
+      topics: [schoolWithDesc],
+      stats: [],
+      interests: [],
+      rng: () => 0.5,
+    })
+    const result = tool.execute({ phase: 'MAIN_ACTIVITY' }) as
+      | { slug: string; title: string; keywords: string[] }
+      | { error: string }
+    if ('error' in result) throw new Error(`unexpected error: ${result.error}`)
+    expect(result.slug).toBe('school')
+    expect(result.title).toBe('School life')
+    // keywords should still be returned even when description is present.
+    expect(result.keywords).toEqual(['school', 'class', 'teacher'])
+  })
+
+  it('falls back to slug when description is null or empty/whitespace', () => {
+    const withWhitespace: Topic = { ...school, description: '   ' }
+    const tool = createTopicSelectTool({
+      topics: [withWhitespace],
+      stats: [],
+      interests: [],
+      rng: () => 0.5,
+    })
+    const result = tool.execute({ phase: 'MAIN_ACTIVITY' }) as
+      | { slug: string; title: string }
+      | { error: string }
+    if ('error' in result) throw new Error(`unexpected error: ${result.error}`)
+    expect(result.slug).toBe('school')
+    expect(result.title).toBe('school') // fallback, not the whitespace string
+  })
+
+  it('returns an empty keywords array when the chosen topic has no keywords', () => {
+    const empty: Topic = { ...minecraft, keywords: [] }
+    const tool = createTopicSelectTool({
+      topics: [empty],
+      stats: [],
+      interests: [],
+      rng: () => 0.5,
+    })
+    const result = tool.execute({ phase: 'MAIN_ACTIVITY' }) as
+      | { slug: string; keywords: string[] }
+      | { error: string }
+    if ('error' in result) throw new Error(`unexpected error: ${result.error}`)
+    expect(result.slug).toBe('minecraft')
+    expect(result.keywords).toEqual([])
   })
 })

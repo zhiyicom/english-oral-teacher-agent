@@ -167,8 +167,12 @@ Rules:
 - `exclude_recent_days` is 0–365; default 30. Topics discussed within
   this window are hard-excluded (so we don't repeat the same topic too
   soon).
-- The tool returns a topic slug, title, and estimated minutes. The CLI
-  will feed the result back to you via a **second** LLM call.
+- The tool returns a topic slug, title (the human-readable description,
+  e.g. "日常生活习惯"), estimated minutes, a `suggested_keyword` (lowest-hit
+  keyword inside the topic, use as the opening angle), and a `keywords[]`
+  list (use any of these words to anchor the opening question — do NOT
+  mine `# STUDENT` interests for topic material). The CLI will feed the
+  result back to you via a **second** LLM call.
 - **In that next turn, DO NOT call any tool.** Just bring up the
   selected topic naturally with the student.
 - At most one tool call per turn.

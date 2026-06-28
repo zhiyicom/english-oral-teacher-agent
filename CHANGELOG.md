@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > [docs/ARCHITECTURE.md §11](docs/ARCHITECTURE.md). This file tracks user-facing
 > changes only.
 
+## [v1.0.5] — 2026-06-28 — Topic-selection tool widening + anti-# STUDENT rule
+
+> Sprint details: [v1.0.5-scope.md](docs/sprint/v1.0.5-scope.md) /
+> [v1.0.5-design.md](docs/sprint/v1.0.5-design.md)
+
+### Changed
+- **`topic_select` tool returns `keywords[]` + description-based title** (§B): the LLM now gets the full keyword list (e.g. `["morning","afternoon","breakfast","lunch","dinner","school","homework","habit",...]` for `daily_routine`) and the human-readable `title` from the topic's `description` field (e.g. "日常生活习惯") instead of the raw slug. Gives the LLM concrete vocabulary to anchor the opening question so it no longer falls back to mining `# STUDENT` interests for topic material. Backwards compatible — no DB migration, no new endpoints, no schema break.
+- **Anti-# STUDENT rule in MAIN_ACTIVITY prompt** (§A): `prompts/phases.md` MAIN_ACTIVITY Context now explicitly states "Do NOT use `# STUDENT` interests as a topic source" and the per-turn Reminder now appends "(NEVER pick from `# STUDENT` interests directly)". The profile is for personalizing the LLM's tone, not for picking conversation topics — variety is the point.
+
+### Notes
+- This release is internal-only: student-visible behavior change is "Alex picks a wider variety of topics instead of repeatedly mining the same interests" (e.g. less repeated Zhao Lei / Delta Force / hiking across sessions). No new LLM calls, no DB migration, no API endpoint changes.
+- Root cause addressed: 2026-06-28 session `dc50b481` showed the LLM bypassing `topic_select` for 4 consecutive turns and inventing "travel anywhere in the world" questions from the student's interest list. After this change, the LLM has concrete material inside the tool's return shape (`keywords[]` + descriptive `title`) and an explicit prompt rule against the bypass.
+
 ## [v1.0.4] — 2026-06-28 — LLM prompt assembly cleanup (no behavior change)
 
 > Sprint details: [v1.0.4-scope.md](docs/sprint/v1.0.4-scope.md) /

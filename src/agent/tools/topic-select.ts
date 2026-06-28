@@ -38,6 +38,14 @@ export interface TopicSelectResult {
    * backwards compatibility with LLM that ignore unknown fields.
    */
   suggested_keyword?: string
+  /**
+   * v1.0.5 §B — full keyword list for the chosen topic. Exposed so the
+   * LLM has a grab-bag of concrete words to anchor its opening question
+   * (e.g. topic `daily_routine` + keyword `breakfast` → "What did you have
+   * for breakfast today?"). Without this, the LLM fell back to mining
+   * `# STUDENT` interests for opening material.
+   */
+  keywords: string[]
 }
 
 // v1.0.3 §1.3 — D3 (interest boost) is permanently disabled in this tool.
@@ -52,8 +60,10 @@ const DESCRIPTION =
   '(3) keyword freshness: prefer topics whose inner keywords have been hit less, ' +
   '(4) weighted random selection to avoid deterministic picks. ' +
   'Interest matching happens in WARM_UP phase via prompt — this tool does NOT consider user.interests. ' +
-  'Returns the topic slug, title, estimated minutes, and a suggested_keyword ' +
-  'to use as the opening angle.'
+  'Returns the topic slug, title, estimated minutes, a suggested_keyword ' +
+  '(lowest-hit keyword, use as the opening angle), and the full keywords[] list ' +
+  '(use any of these words to anchor the opening question — do NOT mine `# STUDENT` ' +
+  'interests for topic material).'
 
 // est_minutes is hardcoded in v0.7.6 (Topic schema has no such field).
 // F7 topic library will add it to Topic frontmatter; at that point the
@@ -111,9 +121,12 @@ export function createTopicSelectTool(opts: {
       }
       return {
         slug: winner.name,
-        title: winner.name,
+        // v1.0.5 §B — prefer the human-readable description (e.g. "日常生活习惯")
+        // over the raw slug. Falls back to slug if description is null.
+        title: winner.description?.trim() || winner.name,
         est_minutes: DEFAULT_EST_MINUTES,
         suggested_keyword: pickFreshestKeyword(winner, keywordStats) ?? undefined,
+        keywords: winner.keywords,
       }
     },
   }
