@@ -32,9 +32,16 @@ export default function SessionSidebar() {
   const [sessions, setSessions] = useState<SessionApi[]>([])
   const [creating, setCreating] = useState(false)
 
+  // v1.0.4 §1.5 — a session row is "active" both when the user is in the
+  // live conversation page AND when they're reviewing that session's
+  // transcript on the history detail page. Previously /history/:id did
+  // not match, leaving the sidebar without a highlight while the user
+  // was staring at the corresponding session on the right.
   const activeId = location.pathname.startsWith('/session/')
     ? location.pathname.slice('/session/'.length)
-    : null
+    : location.pathname.startsWith('/history/')
+      ? location.pathname.slice('/history/'.length)
+      : null
 
   const refresh = useCallback(() => {
     listSessions()
@@ -117,7 +124,13 @@ export default function SessionSidebar() {
                     navigate(target)
                   }}
                   className={`group relative w-full px-3 py-2 text-left text-sm transition-colors hover:bg-slate-200 ${
-                    isActive ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700'
+                    // v1.0.4 §1.5 — strong gray highlight (slate-300 on
+                    // slate-50 sidebar bg) replaces the previous blue-50
+                    // which was too low-contrast to read at a glance.
+                    // Bottom nav (Topics / Settings) keeps blue-50 to keep
+                    // a visible distinction between "session data view"
+                    // (gray row) and "page nav" (blue button).
+                    isActive ? 'bg-slate-300 text-slate-900 font-medium' : 'text-slate-700'
                   }`}
                 >
                   <div className="truncate pr-5">
