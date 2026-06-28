@@ -57,5 +57,6 @@ export const STRINGS = {
   settingsSave: '保存',
   settingsSaved: '已保存',
   settingsSaving: '保存中…',
+  settingsCancel: '取消',
   settingsVoiceDisabled: 'v0.9+ 可用',
 } as const

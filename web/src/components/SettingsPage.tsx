@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
-import { getSettings, updateSettings } from '../lib/api'
+import { getSettings, listSessions, updateSettings } from '../lib/api'
 import type { SettingsApi } from '../lib/types'
 import HotkeyInput, { type Hotkey, parseHotkey } from './HotkeyInput'
 import LoadingSpinner from './shared/LoadingSpinner'
@@ -14,6 +15,7 @@ const LS_MIC_HOTKEY = 'settings:mic_hotkey'
 const LS_SEND_HOTKEY = 'settings:send_hotkey'
 
 export default function SettingsPage() {
+  const navigate = useNavigate()
   const [settings, setSettings] = useState<SettingsApi | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -94,6 +96,23 @@ export default function SettingsPage() {
       setError((e as Error).message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  // v1.0.3 — Cancel navigates to the most recently ended session.
+  // listSessions() is already sorted by started_at DESC, so the first
+  // ended session is also the most recent. If none ended yet, fall back
+  // to the most recent session overall (started but not yet ended).
+  async function handleCancel() {
+    try {
+      const sessions = await listSessions()
+      const ended = sessions.find((s) => s.endedAt !== null)
+      const target = ended ?? sessions[0]
+      if (target) {
+        navigate(`/session/${target.id}`)
+      }
+    } catch {
+      // swallow — cancel is best-effort; stay on /settings on failure
     }
   }
 
@@ -256,7 +275,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Save */}
+      {/* Save / Cancel */}
       <div className="mt-4 flex items-center gap-3">
         <button
           type="button"
@@ -266,6 +285,14 @@ export default function SettingsPage() {
           className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-40"
         >
           {saving ? STRINGS.settingsSaving : STRINGS.settingsSave}
+        </button>
+        <button
+          type="button"
+          onClick={handleCancel}
+          data-testid="cancel-button"
+          className="rounded border border-slate-300 bg-white px-4 py-2 text-slate-700 hover:bg-slate-100"
+        >
+          {STRINGS.settingsCancel}
         </button>
         {saved && (
           <span className="text-sm text-green-600" data-testid="saved-toast">

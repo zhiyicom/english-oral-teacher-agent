@@ -53,7 +53,6 @@ export default function SessionSidebar() {
 
   async function handleDelete(e: { stopPropagation: () => void }, id: string) {
     e.stopPropagation()
-    if (!window.confirm('确定删除此会话？所有对话记录将被永久删除。')) return
     try {
       await deleteSession(id)
       refresh()
