@@ -5,9 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Note**: Sprint-by-sprint release history (v0.2 → v1.0.2) lives in
+> **Note**: Sprint-by-sprint release history (v0.2 → v1.0.3) lives in
 > [docs/ARCHITECTURE.md §11](docs/ARCHITECTURE.md). This file tracks user-facing
 > changes only.
+
+## [v1.0.3] — 2026-06-28 — UI polish + phase-based topic strategy
+
+> Sprint details: [v1.0.3-scope.md](docs/sprint/v1.0.3-scope.md) /
+> [v1.0.3-design.md](docs/sprint/v1.0.3-design.md)
+
+### Added
+- **WARM_UP opener hook** (§1.3): the LLM-curated `next_warm_up_seed` keyword from the previous session's profile-extract is cached in module-scoped state on the server (and in the CLI's process memory). The next `POST /api/sessions` returns it as `warmUpHook` and the Web/CLI threads it into the first-turn `WARM_UP` hint as a focused opener line: `Your opener topic for today: "<seed>". Make the first question naturally about this…`. Falls back gracefully to the existing "natural connection" text on first-ever session / server restart / LLM failure. Zero new LLM calls — reuses the existing session-end profile-extract.
+- **Phase-based topic strategy** (§1.3): D3 (interest boost) is now permanently disabled in `topic_select` tool. Interest matching is handled by the WARM_UP phase prompt, not by the selection algorithm. The `topic_select` tool description no longer advertises interest boost. `selectTopic()` accepts a new `useInterestBoost?: boolean` flag (default `false`) for callers that need the legacy D3 behavior (e.g. unit tests).
+- **Sidebar session delete** (no confirm dialog) (§1.1): the delete `×` button now removes the session immediately — no second click required. Removes the destructive confirm UX (matches desktop email-app conventions).
+- **SettingsPage Cancel button** (§1.2): the Settings page Save button now shows a Cancel that discards in-flight form changes. The Cancel button resets form state to the last saved values.
+- **`POST /api/sessions` returns `warmUpHook`** (§1.3): the response shape now includes `{id, warmUpHook}`. `warmUpHook` is `null` on first-ever session; read-once semantics (subsequent POSTs after a session-end return the latest seed and clear the cache).
+- **`GET /api/sessions/:id/stream?warmUpHook=...`** (§1.3): the SSE stream URL accepts an optional `warmUpHook` query param for the first turn only. The server threads it into `TurnInput.warmUpHook` for the WARM_UP hint.
+- **CLI parity** (§1.3): the CLI now also calls `extractStudentDiscoveries` at session-end (was missing in v1.0.2 server-only) and threads the seed into the next session-startup's first turn.
+
+### Changed
+- **CLI startup topic_select wiring** (§1.3): `useInterestBoost: false` is now passed at startup so the algorithm matches the new server behavior.
+- **`topic_select` tool description** (§1.3): explicitly notes that interest matching happens via the WARM_UP phase prompt and that this tool does NOT consult `user.interests`. Removes ambiguity that previously led the LLM to waste turns trying to influence selection via interests.
+- **`TurnInput.warmUpHook` made optional**: tests that don't care about WARM_UP behaviour no longer need to pass it.
 
 ## [v1.0.2] — 2026-06-28 — Topic hit stats + Bug fixes
 
