@@ -151,7 +151,7 @@ interface StateMachine {
 **输入**：
 
 ```
-[静态] SOUL.md, AGENTS.md, USER.md
+[静态] SOUL.md, AGENTS.md, USER.md, tools.md（可选）
 [动态] [System Context] 块（阶段、时间、检索摘要、待办）
 [动态] 当前 session 完整对话
 [动态] 工具调用结果
@@ -174,6 +174,11 @@ interface PromptBuilder {
 **v0.7.5 拆分**：Prompt Builder 暴露两个函数：
 - `buildFinalSystem(...)` —— legacy，返回拼接好的 string（既有 5 L1 + L3 测试不破）
 - `buildFinalSystemSplit(...)` —— 新增，返回 `{ static, dynamic }` 两段。CLI 把两段作为独立 `systemBlocks` 传给 Anthropic SDK；第一段（SOUL + AGENTS + USER）带 `cache_control: ephemeral`，后续 turn 命中 prompt cache
+- **v0.7.6 升级**为 `buildFinalSystemSegments` —— 返回 `{phase, last, relevant, active, mistakes}` 5 段 token counts 用于 context-injector 调试
+
+**v1.0.4 §1.1 单一来源 H1**：每个 prompt 源文件**自身**持有一条 `# <Title>` 第一行（`# SOUL` / `# AGENTS` / `# STUDENT` / `# TOOLS`）。`buildSystemString()` 仅做 trim + `\n\n` 拼接，不再硬拼标题前缀。`loader.assertHasH1(label, body)` 在 `loadSystemPrompt()` 入口 fail-fast 校验每个 H1 — 手工编辑导致任一文件丢 H1 启动失败并明确报错（避免静默生成畸形 prompt）。
+
+**v1.0.4 §1.2 上一会话单一来源**：`context-injector` Block 1 lastReview 段从 2 行（摘要全文 + 4 keywords）改为 1 行 pointer（metadata + 6 keywords + `(full summary in opening user message)`），摘要全文保留在 `turn.ts` WARM_UP 首轮合成的 `Messages[0]`，是 LLM 唯一阅读入口。`Messages[0]` keywords `slice(0, 4) → slice(0, 6)` 与 Block 1 对齐两处列表完全一致。
 
 **实现**：见 PRD §5.4 注入顺序
 
@@ -209,16 +214,34 @@ const middleware: Middleware[] = [
 
 **职责**：定义 agent 可调用的工具。每个工具有明确的 schema 和执行函数。
 
-**v1.0 工具清单**：
+**v1.0.4 工具清单**：
 
 | 工具名 | 输入 | 副作用 | 用途 | 状态 |
 |---|---|---|---|---|
 | `memory_search` | `{query: string, top_k: int}` | 只读 | 检索历史相关摘要 | ✅ v0.7.3（top_k 1-5, default 2）|
 | `summarize_history` | `{target_tokens: int}` | 改写 history | 压缩历史（保留 anchor + 近期 6 条）| ✅ v0.7.6 B2（target_tokens 100-3000, default 500）|
-| `topic_select` | `{phase: Phase, exclude_recent_days: int}` | 只读 | 选题（带去重 + 加权随机）| ✅ v0.7.6 D5（exclude_recent_days 0-365, default 30）|
-| `mark_mistake` | `{original, corrected, category}` | 写 SQLite | 记录错例（category ∈ `grammar` / `vocabulary` / `spelling`） | ✅ v0.7 |
-| `mark_vocabulary` | `{word, context_sentence}` | 写 SQLite | 记录新词 | 📋 v1.0+（未实现）|
-| `mark_homework` | `{content, due_days}` | 写 SQLite | 布置作业 | 📋 v1.0+（未实现）|
+| `topic_select` | `{phase: Phase, exclude_recent_days: int}` | 只读 | 选题（去重 + 加权随机 + 兴趣匹配）；返回 `suggested_keyword`（v1.0.2）| ✅ v0.7.6 D5 + v1.0.2 D5 + v1.0.3 §1.3 `useInterestBoost: false`（exclude_recent_days 0-365, default 30）|
+| `mark_mistake` | `{original, corrected, category}` | 写 SQLite | 记录错例（category ∈ `grammar` / `vocabulary` / `spelling`）| ✅ v0.7 |
+| `mark_vocabulary` | `{word, context_sentence}` | 写 SQLite | 记录新词 | 📋 v1.0+ backlog（未实现）|
+| `mark_homework` | `{content, due_days}` | 写 SQLite | 布置作业 | 📋 v1.0+ backlog（未实现）|
+
+**`topic_select` 评分（v1.0.2 + v1.0.3）**：
+
+```
+score = -count*0.1  -  avgKeywordHit*0.05  +  interest*0.5  +  noise
+       \_________/      \________________/    \_________/    \____/
+        讨论次数惩罚      关键词命中新鲜度         兴趣匹配      抖动
+```
+
+- **v1.0.2 D5** `avgKeywordHit`：从 `keyword_hits` 表读每个 keyword 的 hit_count，topic 内 keyword 命中均值；命中少的 topic 优先被选
+- **v1.0.3 §1.3** `useInterestBoost: false` 默认值生效，CLI 和 server 端 `topic_select` 调用者不再传 interests；兴趣匹配改由 WARM_UP 阶段 prompt 引导
+- **v1.0.2 Bug A 修复**：`MIN_TOPIC_AGE=5` 强制约束在 `src/agent/topic-counter.ts` —— 当前 topic 累计 ≥ 5 轮用户发言才允许切换；显式"换话题" / "switch topic" 旁路（`isExplicitTopicSwitch()` 正则）；`TOPIC_AGE_MIN=0` env 禁用 gate（仅测试用）
+
+**工具调用 A+B 协议**（v0.7.3 引入，v1.0.4 沿用）：
+
+- **A 形状**：LLM 输出 `<tool>name({json})</tool>` 文本块；execute → strip tool 块 → 学生看不到 tool 痕迹。`mark_mistake` 走此路径
+- **A+B 混合**：execute 完不直接写 stdout —— 把 tool result 拼成 synthetic user message 推回 history，**再做 1 次 LLM call（非流式）**，用 2nd-call 的回复作为 final output。`memory_search` 走此路径
+- 关键不变量：1 round-trip（2nd-call 不再调 tool），synthetic user message 含唯一 marker `[v073_followup_responder]`
 
 **Tool 接口（`src/agent/tool-registry.ts`）**：
 
@@ -346,10 +369,10 @@ type ChatChunk =
   | { type: 'usage'; inputTokens; outputTokens; cacheReadTokens; cacheCreationTokens }
 ```
 
-**v1.0 provider**：
+**v1.0.4 provider**：
 
-- `AnthropicProvider`（首选，claude-sonnet-4-6）
-- `OpenAIProvider`（备选）
+- **唯一 provider**：`AnthropicProvider`（`@anthropic-ai/sdk` 0.41）通过 `env.ANTHROPIC_BASE_URL` 指向 **MiniMax**（`https://api.minimaxi.com/anthropic`）。其他 Anthropic-API 兼容厂商（Anthropic 直连、OpenRouter、其他 Anthropic-API 兼容端点）切换 `ANTHROPIC_BASE_URL` + `LLM_MODEL_*` 即可
+- `.env` 中的 `LLM_PROVIDER=minimax` 是为未来 provider 切换预留的扩展位（v1.0.4 时 `selectClient()` 尚未消费该字段，但保留以避免后续 migration）
 
 **v0.7.5 增强**：
 - Anthropic SDK 0.41 支持 `cache_control: ephemeral` 标记 system 文本块（v0.7.5 用上）
@@ -358,11 +381,11 @@ type ChatChunk =
 
 **抽象层职责**：
 
-- 消息格式转换（Anthropic content blocks vs OpenAI messages）
+- 消息格式转换（Anthropic content blocks）
 - 工具调用格式转换
 - 流式协议差异
 - 错误码统一
-- prompt cache 协议差异（Anthropic cache_control vs OpenAI prompt caching）
+- prompt cache 协议（Anthropic `cache_control: ephemeral`）
 
 ### 3.2 Voice I/O（`src/voice/`）
 
@@ -479,19 +502,19 @@ src/memory/
 - 单进程部署：server (Hono) 既 serve API 又 serve `web/dist/` static + SPA fallback
 - 未来 Tauri 评估：v0.8.5+ 看用户反馈；包装 v0.8 已有的 server 即可
 
-### 4.3 组件划分（v1.0.1 实际布局）
+### 4.3 组件划分（v1.0.4 实际布局）
 
 | 组件 | 路径 | 说明 | Sprint |
 |---|---|---|---|
-| SessionSidebar | `web/src/components/SessionSidebar.tsx` | 左侧会话列表 + 新建 + 删除 | v1.0.1 |
-| Session Window | `web/src/components/SessionPage.tsx` | 对话窗口 + TTS + voice input | v0.8.3 |
-| History Detail | `web/src/components/HistoryPage.tsx` | 只读 transcript | v0.8.4 |
-| Settings Panel | `web/src/components/SettingsPage.tsx` | 语音/字体/快捷键设置 | v0.8.4 |
-| Topic Library Editor | `web/src/components/TopicLibraryPage.tsx` | 话题库关键词编辑 | v1.0.1 |
+| SessionSidebar | `web/src/components/SessionSidebar.tsx` | 左侧会话列表 + 新建 + 删除；**v1.0.4 §1.5** active row `bg-slate-300` 高亮 + `/history/:id` 也匹配；**v1.0.3 §1.1** 删除无 confirm | v1.0.1 / v1.0.3 / v1.0.4 |
+| Session Window | `web/src/components/SessionPage.tsx` | 对话窗口 + TTS + voice input；**v0.8.5** 真正逐字 `text-chunk` 流式 | v0.8.3 / v0.8.5 |
+| History Detail | `web/src/components/HistoryPage.tsx` | 只读 transcript + metadata card | v0.8.4 |
+| Settings Panel | `web/src/components/SettingsPage.tsx` | 语音/字体/快捷键设置；**v1.0.3 §1.2** Cancel 按钮 | v0.8.4 / v1.0.3 |
+| Topic Library Editor | `web/src/components/TopicLibraryPage.tsx` | 话题库关键词编辑；**v1.0.2** 显示 `(N)` 命中次数 | v1.0.1 / v1.0.2 |
 | VoiceInput | `web/src/components/VoiceInput.tsx` | STT 麦克风按钮 | v0.9 |
 | HotkeyInput | `web/src/components/HotkeyInput.tsx` | 快捷键捕获输入 | v0.9 |
 | Shared (Bubble / Spinner) | `web/src/components/shared/` | 消息气泡、Loading | v0.8.5 |
-| API client | `web/src/lib/api.ts` | REST + SSE 封装 | v0.8.2 |
+| API client | `web/src/lib/api.ts` | REST + SSE 封装；`createSession()` 接收 `warmUpHook`（v1.0.3）| v0.8.2 / v1.0.3 |
 | i18n (zh + en stub) | `web/src/i18n/` | 中文字符串 | v0.8.5 |
 
 ### 4.4 Web Server（v0.8 新模块）
@@ -522,20 +545,30 @@ SSE events: `phase / text-chunk / ctx / ctx-segment / ctx-block / student-text /
 User clicks [开始新练习]
    │
    ▼
-UI: emit('session:start')
+UI: POST /api/sessions
    │
    ▼
+server: sessions.create() + return { id, warmUpHook }   # v1.0.3 §1.3
+   │     warmUpHook = module-scoped pendingWarmUpSeed (read-once)
+   │     (null on first-ever session; cleared on session-end of next session)
+   │
+   ▼
+browser: router.push('/session/:id') + GET /api/sessions/:id/stream?action=turn&input=&warmUpHook=...
+   │
+   ▼
+turn.ts: TurnInput.warmUpHook (optional) → WARM_UP hint
+   │
 SessionManager.start()
    │
-   ├─→ loadUserProfile()      # prompts/USER.md
-   ├─→ loadTopicsIndex()      # prompts/topics/_index.yaml
+   ├─→ loadUserProfile()      # prompts/USER.md (frontmatter)
+   ├─→ loadTopicsIndex()      # prompts/topic-library.md (single file, not dir)
    ├─→ retrieveLastReview()   # SELECT * FROM sessions ORDER BY started_at DESC LIMIT 1
    ├─→ retrieveHomework()     # SELECT * FROM homework WHERE completed_at IS NULL
    ├─→ retrieveMistakes()     # SELECT * FROM mistakes WHERE reviewed = 0
-   ├─→ selectTopic()          # §3.5.3 三层筛选
-   ├─→ buildSystemPrompt()    # SOUL + AGENTS + USER
-   ├─→ buildSystemContext()   # 阶段 + 时间 + 摘要 + 待办
-   ├─→ firstTurn()            # 第一个 agent 消息
+   ├─→ selectTopic()          # §3.5.3: -count*0.1 - avgKeywordHit*0.05 + interest*0.5 + noise (v1.0.2 + v1.0.3 useInterestBoost:false)
+   ├─→ buildSystemPrompt()    # SOUL + AGENTS + USER + tools (H1 单一来源 v1.0.4)
+   ├─→ buildSystemContext()   # 阶段 + 时间 + 摘要 pointer + 待办
+   ├─→ firstTurn()            # 第一个 agent 消息；WARM_UP 注入 warmUpHook 提示
    │
    ▼
 LLMClient.chat(streaming)
@@ -587,6 +620,7 @@ LLMClient.chatStream({ systemBlocks, messages: history })   ← 1st call
    ├─→ v0.7.5: stderr "[cli] tokens: input=X output=Y cache_read=Z cache_creation=W"
    ├─→ v0.7.5: if inputTokens / budget >= 0.8 (per session, 1 次):
    │     stderr "[cli] warn: context usage X% (budget=Y)"
+   ├─→ v1.0.2: logTurnDiagnostic('1st-call-done') → data/llm-debug/<id>_diag.jsonl
    │
    ├─→ UI: 边显示边 TTS（按句切分增量合成）
    │
@@ -605,6 +639,14 @@ LLMClient.chatStream({ systemBlocks, messages: history })   ← 1st call
    │     ├─→ safety strip 2nd-call response（防 LLM 误输出 tool 块）
    │     └─→ stdout 2nd-call 剥过的 response
    │
+   ├─→ name === 'topic_select'    (pure compute, A+B 形状):
+   │     ├─→ ToolRegistry.execute(toolCall)  // selectTopic() 纯函数
+   │     ├─→ 2nd-call LLM 用工具结果决定开场角度
+   │     └─→ v1.0.2: 工具返回 suggested_keyword 给 LLM 作 soft hint
+   │
+   ├─→ name === 'summarize_history'  (history 改写, A+B 形状):
+   │     └─→ v0.7.6 B2 marker tool — CLI 改写 history 后 2nd-call 总结
+   │
    └─→ name === null / unknown
          └─→ stdout response（v0.7 旧行为）
    │
@@ -613,13 +655,15 @@ LLMClient.chatStream({ systemBlocks, messages: history })   ← 1st call
 ```
 
 **关键不变量**：
-- `memory_search` 走 A+B = **1 round-trip**（2nd-call 不递归调 tool）
+- `memory_search` / `topic_select` / `summarize_history` 走 A+B = **1 round-trip**（2nd-call 不递归调 tool）
 - 1 round-trip 总 token 成本 ~400（result 200 + 2nd-call 200）
 - 2nd-call LLM 误调 tool → safety strip 兜底（prompt 显式禁止 + cli 兜底）
 - v0.7.5 budget: pre-truncate 用 estimator（chars/4），post-call 用 SDK usage 校验；80% warn 一次/每 session
 - v0.7.5 cache: `static` 段带 `cache_control: ephemeral`，跨 turn 复用（hit 时 cache_read 上升）
+- v0.8.5 streaming: `chatStreamWithRetryGen` async generator 真正逐字流式 → SSE `text-chunk` 事件 → SessionPage 实时渲染闪烁光标
+- v1.0.3 §1.3: WARM_UP 首轮 `TurnInput.warmUpHook` 注入 hint；phase 切换时 prefix 注入完整 `[System Context]` 块打断 LLM 惯性
 
-### 5.3 END + 归档
+### 5.3 END + 归档（v1.0.1 endSession 流水线）
 
 ```
 User clicks [结束本次]
@@ -628,24 +672,37 @@ User clicks [结束本次]
 SessionManager.end(id)
    │
    ├─→ StateMachine.transition(END)
-   ├─→ Agent 发告别消息
-   ├─→ 写 transcript → data/sessions/<timestamp>_<id>.md
+   ├─→ Agent 发告别消息（v1.0.1 END 立即 return，告别后用户再发言立即结束）
    │
-   ├─→ Summarizer.summarize(transcript)
-   │     └─→ { summary, keywords }
-   │
-   ├─→ saveSession({summary, keywords, topics_used, ...})
-   │
-   ├─→ embed(summary) → vector
-   ├─→ sessions.setEmbedding(sessionId, vector) → SQLite BLOB
-   │
-   ├─→ matchKeywords(keywords) → 命中 topics
-   │     └─→ UPDATE topic_stats SET discussion_count += 1, last_discussed_at = now
+   ├─→ endSession pipeline（v1.0.1 起 server 端也跑，CLI 同步）：
+   │     │
+   │     ├─→ Summarizer.summarize(transcript)
+   │     │     └─→ { summary, keywords }    (prompts/summarizer-system.md)
+   │     │
+   │     ├─→ saveSession({summary, keywords, topics_used, ended_at, duration_min})
+   │     │     └─→ sessions.update() → markEnded
+   │     │
+   │     ├─→ embed(summary) → vector
+   │     │     └─→ sessions.setEmbedding(sessionId, vector) → SQLite BLOB
+   │     │
+   │     ├─→ keyword_hits.upsertMany(sessionId, keywords)   // v1.0.2
+   │     │     └─→ 每个 (topic, keyword) 累加 hit_count
+   │     │
+   │     ├─→ matchKeywords(keywords) → 命中 topics
+   │     │     └─→ UPDATE topic_stats SET discussion_count += 1, last_discussed_at = now
+   │     │
+   │     ├─→ extractStudentDiscoveries(summary, history)    // v1.0.1
+   │     │     └─→ { newInterests[], newSkills[], nextWarmUpSeed }  (v1.0.3 扩字段)
+   │     │     └─→ updateUserSettings({interests, bodyAppend})  → USER.md
+   │     │
+   │     └─→ pendingWarmUpSeed = nextWarmUpSeed    // v1.0.3，server 模块级缓存
    │
    ├─→ UI: 关闭窗口，回到主界面
    │
    ▼
 进程继续运行，等待下一次 [开始新练习]
+   │
+   └─→ 下次 POST /api/sessions 返回 { id, warmUpHook: <cached seed> }
 ```
 
 ---
@@ -808,21 +865,22 @@ ui/  →  agent/  →  { llm/, voice/, storage/, memory/ }
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `LLM_PROVIDER` | `anthropic` | `anthropic` / `openai` |
-| `ANTHROPIC_API_KEY` | — | Claude API key |
-| `OPENAI_API_KEY` | — | OpenAI API key（fallback 或 embedding） |
-| `LLM_MODEL_MAIN` | `claude-sonnet-4-6` | 主对话模型 |
-| `LLM_MODEL_SUMMARIZER` | `claude-sonnet-4-6` | 摘要模型（可调小降本） |
-| `LLM_MODEL_EMBEDDING` | `Xenova/all-MiniLM-L6-v2` (q8) | Embedding 模型（v0.7.2 用本地） |
-| `LLM_EMBEDDING_PROVIDER` | `local` | `local`（v0.7.2）/ `openai`（v1.x 可切） |
-| `HF_ENDPOINT` | — | HuggingFace 镜像 URL（可选，中国网络 `https://hf-mirror.com`） |
+| `LLM_PROVIDER` | `minimax` | v1.0.4 仅 MiniMax；`selectClient()` 尚未消费该字段，保留为多 provider 扩展位 |
+| `API_KEY` | — | LLM 厂商 API key（`@anthropic-ai/sdk` 的 `auth` 参数）|
+| `ANTHROPIC_BASE_URL` | `https://api.minimaxi.com/anthropic` | Anthropic-SDK 兼容端点；切换端点即可换 vendor |
+| `LLM_MODEL_MAIN` | `MiniMax-M3` | 主对话模型 |
+| `LLM_MODEL_SUMMARIZER` | `MiniMax-M3` | 摘要模型（可调小降本）|
+| `LLM_EMBEDDING_PROVIDER` | `local` | `local`（MiniLM-L6-v2 q8 本地 ONNX）|
+| `HF_ENDPOINT` | — | HuggingFace 镜像 URL（可选，中国网络 `https://hf-mirror.com`）|
 | `LLM_TEMPERATURE` | `0.7` | 采样温度 |
 | `LLM_MAX_TOKENS` | `2048` | 单轮输出上限 |
-| `LLM_CONTEXT_BUDGET_TOKENS` | `6000` | v0.7.5：单轮 input token cap；超此值 sliding window truncate；80% 时 warn（per session 1 次） |
-| `APP_PORT` | `3000` | 本地服务端口 |
+| `LLM_CONTEXT_BUDGET_TOKENS` | `6000` | v0.7.5：单轮 input token cap；超此值 sliding window truncate；80% 时 warn（per session 1 次）|
+| `RUN_LIVE_LLM` | `0` | `1` = 调真实 LLM；不设 = replay 模式（默认，无需 API 调用）|
+| `DEBUG_LOG_LLM` | `0` | `1` = 记录完整 LLM 请求 + 摘要到 `data/llm-debug/` |
+| `TOPIC_AGE_MIN` | `5` | v1.0.2 `topic-counter.ts` 强制约束：当前 topic 累计 ≥ N 轮用户发言才允许切换；`0` 禁用（仅测试用）|
+| `PORT` | `3000` | Hono server 监听端口（v0.8.1 引入，**不是** `APP_PORT`）|
+| `APP_DATA_DIR` | `./data` | 数据目录（v1.0.5 起默认改 AppData 平台 fallback）|
 | `APP_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
-| `APP_DATA_DIR` | `./data` | 数据目录 |
-| `APP_TTS_ENGINE` | `web-speech` | `web-speech`（v1.x：`edge-tts` / `mmx-tts`） |
 
 > **改 `.env` 后需要重启进程**。UI 不暴露这些——保持"高级配置"和"日常使用"分离。
 
@@ -830,10 +888,14 @@ ui/  →  agent/  →  { llm/, voice/, storage/, memory/ }
 
 | 文件 | 用途 | 何时加载 |
 |---|---|---|
-| `SOUL.md` | Agent 核心规则（人格、铁律、行为） | 每次 session 启动 |
-| `AGENTS.md` | 操作手册（怎么选话题、怎么记错） | 每次 session 启动 |
-| `USER.md` | 学生画像（覆盖模板即可） | 每次 session 启动 |
-| `topics/**/*.md` | 话题库 | session 启动 + 自动生成 `_index.yaml` |
+| `SOUL.md` | Agent 核心规则（人格、铁律、行为）| 每次 session 启动 |
+| `AGENTS.md` | 操作手册（怎么选话题、怎么记错）| 每次 session 启动 |
+| `USER.md` | 学生画像（覆盖 `USER.md.example` 模板即可）| 每次 session 启动 |
+| `USER.md.example` | 模板文件（git tracked；`USER.md` 缺失时回退）| 每次 session 启动 |
+| `phases.md` | 4 阶段行为指令（Context + Reminder 每阶段）| 每次 session 启动 |
+| `topic-library.md` | 话题列表（**不再注入** system prompt，v1.0.1 B4；通过 Web UI 编辑）| 仅供人读 / 重新生成参考 |
+| `tools.md` | 工具使用规范（可选，v1.0+ 启用）| 每次 session 启动 |
+| `summarizer-system.md` | 摘要 agent 专用 system prompt | session END `summarize()` 时 |
 
 > **改 markdown 不需要 rebuild**。代码层每次都重读这些文件。
 
@@ -841,18 +903,21 @@ ui/  →  agent/  →  { llm/, voice/, storage/, memory/ }
 
 | 路径 | 内容 | 何时写入 |
 |---|---|---|
-| `data/oral-teacher.db` | SQLite（含 sessions.embedding BLOB） | 实时 |
-| `data/sessions/*.md` | 完整 transcript | session END 时 |
+| `data/oral-teacher.db` | SQLite（含 `sessions.embedding BLOB`、`keyword_hits` 表）| 实时 |
+| `data/sessions/*.md` | 完整 transcript | session END 时（endSession pipeline 步骤）|
+| `data/preferences.json` | v1.0.1 服务端偏好备份（font_size / show_debug / mic_hotkey / send_hotkey）| PUT `/api/settings` 时；localStorage 兜底，浏览器重启不丢 |
+| `data/llm-debug/<id>_*` | v0.7.5+ 完整 LLM 请求 + 摘要日志（`DEBUG_LOG_LLM=1`）| 每次 turn + 每次 summarize |
+| `data/llm-debug/<id>_diag.jsonl` | v1.0.2 turn-level JSONL 诊断（4 关键事件）| `logTurnDiagnostic()` 写入 |
 | `~/.cache/huggingface/` | transformers.js 模型缓存 | 首次 `embed()` 时下载 |
 
-> `data/` 全部 gitignored。删掉 `data/` = 重置到全新状态（应用首次启动会创建空库）。
+> `data/` 全部 gitignored。删掉 `data/` = 重置到全新状态（应用首次启动会创建空库）。`preferences.json` 删了不影响功能（前端从 USER.md 读 voice_*，从 localStorage 读其他项的兜底）。
 
 ### 10.5 UI 与配置的边界
 
-- **UI 可见**：语音开关 / 语速 / 口音 / 字体大小 / 显示调试（写回 USER.md 或 session-only）
+- **UI 可见**（写回 `prompts/USER.md` frontmatter + `data/preferences.json` 服务端备份 + localStorage）：语音开关 / 语速 / 口音 / 字体大小 / 显示调试 / 麦克风快捷键 / 发送快捷键
 - **UI 不可见**：LLM 模型、provider、API key、TTS 引擎、生成参数、日志级别——**只在 `.env` 改**
 
-> 原则：UI 暴露的是"日常使用可能想换的"；`.env` 暴露的是"装好之后基本不动的"。两者物理隔离。
+> 原则：UI 暴露的是"日常使用可能想换的"；`.env` 暴露的是"装好之后基本不动的"。两者物理隔离。`preferences.json` 是 localStorage 之外的 server-side fallback（v1.0.1 引入，回应 localStorage 在浏览器重启后偶发清空的问题）。
 
 ---
 
