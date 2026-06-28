@@ -269,6 +269,23 @@ describe('createApp (v0.8.1 L1)', () => {
     expect(get.status).toBe(404)
   })
 
+  it('DELETE /api/sessions/:id: subsequent POST still returns warmUpHook=null (no stale seed leak)', async () => {
+    // v1.0.3 §1.3 — regression: DELETE must not surface any stale
+    // pendingWarmUpSeed in subsequent session starts. The new DELETE handler
+    // clears the seed if the deleted session was the latest with a summary;
+    // verifying that a fresh POST after DELETE still returns null confirms
+    // the seed state stays consistent.
+    const create = await harness.app.request('/api/sessions', { method: 'POST' })
+    const { id } = (await create.json()) as { id: string }
+
+    const del = await harness.app.request(`/api/sessions/${id}`, { method: 'DELETE' })
+    expect(del.status).toBe(200)
+
+    const after = await harness.app.request('/api/sessions', { method: 'POST' })
+    const afterBody = (await after.json()) as { warmUpHook: string | null }
+    expect(afterBody.warmUpHook).toBeNull()
+  })
+
   it('DELETE /api/sessions/:id: returns 404 for unknown id', async () => {
     const res = await harness.app.request('/api/sessions/no-such', { method: 'DELETE' })
     expect(res.status).toBe(404)

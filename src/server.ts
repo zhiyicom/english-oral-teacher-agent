@@ -593,6 +593,20 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
     const id = c.req.param('id')
     const row = sessions.get(id)
     if (!row) return c.json({ error: 'session not found', id }, 404)
+    // v1.0.3 §1.3 — if this deleted session was the latest with a summary,
+    // its WARM_UP opener seed (cached in `pendingWarmUpSeed`) is now orphaned
+    // and must NOT surface in the next session's first-turn hint. Deleting
+    // an older session leaves the seed alone (it was produced by the newer
+    // session-end, not this one). Use loadLastReview() before the DELETE so
+    // the row is still visible.
+    if (
+      pendingWarmUpSeed !== null &&
+      row.summary &&
+      row.summary.length > 30 &&
+      loadLastReview(db)?.sessionId === id
+    ) {
+      pendingWarmUpSeed = null
+    }
     sessions.delete(id)
     sessionStore.delete(id)
     return c.json({ ok: true })
