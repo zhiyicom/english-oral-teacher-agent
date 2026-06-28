@@ -82,6 +82,22 @@ function parseUserProfile(data: Record<string, unknown>): UserProfile {
   }
 }
 
+// v1.0.4 §3.4 — runtime guard: each source file must start with a '# Title'
+// heading after trim. This catches the case where a hand-maintained prompt
+// file silently loses its H1 and produces a malformed system prompt.
+//
+// Exported for testing (the failure-mode test would otherwise need real
+// file IO mocking — exporting lets us test the regex/throwing logic
+// directly against crafted strings).
+export function assertHasH1(label: string, body: string): void {
+  const firstLine = body.trim().split('\n', 1)[0]?.trim() ?? ''
+  if (!/^# \S/.test(firstLine)) {
+    throw new Error(
+      `[loader] ${label} must start with a '# <Title>' heading after trim. Got: ${JSON.stringify(firstLine.slice(0, 40))}. See v1.0.4-design.md §3.4.`,
+    )
+  }
+}
+
 export function loadSystemPrompt(): SystemPrompt {
   const soul = readIfExists(join(PROMPTS_DIR, 'SOUL.md'))
   const agents = readIfExists(join(PROMPTS_DIR, 'AGENTS.md'))
@@ -97,6 +113,16 @@ export function loadSystemPrompt(): SystemPrompt {
   const { body: userBody, data: userData } = loadUserFile()
   const userProfile = parseUserProfile(userData)
 
+  // v1.0.4 §1.1 — every section's H1 must come from the source file itself,
+  // not the loader. `assertHasH1` fails fast if a hand-maintained file loses
+  // its heading. USER.md is required to begin with `# STUDENT` (see
+  // prompts/USER.md) so its body passes the check.
+  assertHasH1('prompts/SOUL.md', soul)
+  assertHasH1('prompts/AGENTS.md', agents)
+  assertHasH1('prompts/USER.md', userBody)
+  // tools.md is optional; only check when present.
+  if (tools) assertHasH1('prompts/tools.md', tools)
+
   return {
     soul,
     agents,
@@ -107,21 +133,12 @@ export function loadSystemPrompt(): SystemPrompt {
 }
 
 export function buildSystemString(sp: SystemPrompt): string {
-  const sections = [
-    '# SOUL',
-    '',
-    sp.soul.trim(),
-    '',
-    '# AGENTS',
-    '',
-    sp.agents.trim(),
-    '',
-    '# STUDENT',
-    '',
-    sp.user,
-  ]
+  // v1.0.4 §1.1 — H1s are owned by the source files themselves (SOUL.md,
+  // AGENTS.md, USER.md, tools.md). The loader no longer prepends any heading;
+  // it just concatenates the trimmed bodies with blank-line separators.
+  const sections = [sp.soul.trim(), '', sp.agents.trim(), '', sp.user]
   if (sp.tools) {
-    sections.push('', '# TOOLS', '', sp.tools)
+    sections.push('', sp.tools)
   }
   return sections.join('\n')
 }

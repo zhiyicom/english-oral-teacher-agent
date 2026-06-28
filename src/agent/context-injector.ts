@@ -87,10 +87,13 @@ export function buildSystemContext(
   if (lastReview) {
     const dayWord = lastReview.daysAgo === 1 ? 'day' : 'days'
     const durStr = lastReview.durationMin != null ? `${lastReview.durationMin} min` : 'unknown'
-    lastSeg = [
-      `- Last session (${lastReview.daysAgo} ${dayWord} ago, ${durStr}): ${lastReview.summary}`,
-      `- Last session keywords: ${lastReview.keywords.join(', ')}`,
-    ].join('\n')
+    // v1.0.4 §1.2 — Block 1 is a pointer, not the full summary. The full
+    // summary text is injected as the WARM_UP first-turn Messages[0] in
+    // turn.ts (which remains the LLM's sole reading point for the body).
+    // We keep all metadata (daysAgo, durationMin) + the full keywords list
+    // here so the system block stays a complete index of "what was discussed".
+    const kwList = lastReview.keywords.join(', ')
+    lastSeg = `- Last session (${lastReview.daysAgo} ${dayWord} ago, ${durStr}) — keywords: ${kwList} (full summary in opening user message)`
     lines.push(lastSeg)
   }
 

@@ -435,7 +435,9 @@ export async function* runTurn(
       // impact — same strategy as phase transitions.
       if (wasFirstTurn && input.lastReview?.summary) {
         const summary = input.lastReview.summary
-        const kws = (input.lastReview.keywords ?? []).slice(0, 4).join(', ')
+        // v1.0.4 §1.2 — align keyword count with Block 1 (6 items, not 4)
+        // so both segments show the same keywords in the same order.
+        const kws = (input.lastReview.keywords ?? []).slice(0, 6).join(', ')
         // v1.0.3 §1.3 — when the previous session's profile-extract produced
         // a focused opener keyword, prepend a directive seed line. Falls
         // back to the original "make a natural connection" text when no
