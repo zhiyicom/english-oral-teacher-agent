@@ -12,9 +12,10 @@ import {
   runTurn,
 } from '../../src/agent/index.js'
 import { createToolRegistry } from '../../src/agent/tool-registry.js'
-import type { TurnEvent, TurnOutput } from '../../src/agent/turn.js'
+import type { TurnEvent, TurnInput, TurnOutput } from '../../src/agent/turn.js'
 import { createReplayProvider } from '../../src/llm/testing.js'
 import type { LLMClient } from '../../src/llm/types.js'
+import type { ChatOpts } from '../../src/llm/types.js'
 import type { RelevantSession } from '../../src/memory/index.js'
 import { type SystemPrompt, loadSystemPrompt } from '../../src/prompts/loader.js'
 import { applyMigrations, openDb } from '../../src/storage/db.js'
@@ -88,7 +89,7 @@ function makeTurnInput(opts: {
   const state = opts.state ?? initState(opts.harness.clock.now())
   const phaseHistory: PhaseTransition[] = [{ phase: state.phase, at: 0, reason: 'time' }]
   const history: { role: 'user' | 'assistant' | 'system'; content: string }[] = []
-  return {
+  const out: TurnInput = {
     sessionId: opts.sessionId,
     userInput: opts.userInput,
     state,
@@ -99,10 +100,12 @@ function makeTurnInput(opts: {
     activeTopics: opts.harness.topicStats.all(),
     recentMistakes: [],
     lastReview: null,
+    warmUpHook: null,
     isFirstTurn: opts.isFirstTurn ?? true,
     systemPrompt: opts.harness.systemPrompt,
     mockTime: false,
   }
+  return out
 }
 
 // ---- Tests ----
@@ -241,5 +244,82 @@ describe('runTurn (v0.8.1 L1)', () => {
       [],
     )
     expect(sysSeg.dynamic).toMatch(/\[System Context\]/)
+  })
+})
+
+describe('runTurn (v1.0.4 §1.2 — Last session Messages[0] keyword alignment)', () => {
+  let harness: Harness
+  let sessionId: string
+
+  beforeEach(() => {
+    harness = makeHarness()
+    const session = harness.sessions.create()
+    sessionId = session.id
+  })
+
+  afterEach(() => {
+    harness.db.close()
+    rmSync(harness.dataDir, { recursive: true, force: true })
+  })
+
+  it('first-turn WARM_UP Messages[0] emits up to 6 keywords (aligned with Block 1)', async () => {
+    // v1.0.4 §1.2 — Messages[0] keywords slice changed from 0..4 to 0..6 to
+    // align with Block 1. The synthetic WARM_UP hint lives in the LLM-bound
+    // `callMessages` (not in `input.history`), so we install a tiny capture
+    // client that records the messages it sees and then asserts on them.
+    const sixKeywords = [
+      'short responses',
+      'low engagement',
+      'cello',
+      'throat',
+      'homework task',
+      'fish',
+    ]
+    let captured: { role: string; content: string }[] = []
+    const capturingClient: LLMClient = {
+      async *chatStream(opts: ChatOpts): AsyncIterable<never> {
+        captured = opts.messages.map((m) => ({ role: m.role, content: m.content }))
+        // biome-ignore lint/correctness/useYield: capture-only iterator
+        throw new Error('capture-only')
+      },
+      async chat() {
+        throw new Error('capture-only')
+      },
+    }
+
+    const input = makeTurnInput({ harness, sessionId, userInput: 'hi' })
+    input.lastReview = {
+      sessionId: 'prev',
+      startedAt: '2026-06-25T10:00:00.000Z',
+      endedAt: '2026-06-25T10:25:00.000Z',
+      durationMin: 25,
+      summary: 'A previous session summary that mentions all six keywords.',
+      keywords: sixKeywords,
+      daysAgo: 1,
+    }
+    input.isFirstTurn = true
+
+    const deps = {
+      ...makeTurnDeps(harness),
+      client: capturingClient,
+    }
+    const iter = runTurn(input, deps)
+    try {
+      while (true) {
+        const next = await iter.next()
+        if (next.done) break
+      }
+    } catch {
+      // capture-only throws on iteration; we only care about `captured`
+    }
+
+    // Find the synthetic WARM_UP hint message (user role, contains "Keywords:").
+    const hintMsg = captured.find((m) => m.role === 'user' && m.content.includes('Keywords:'))
+    expect(hintMsg).toBeDefined()
+    const hintContent = hintMsg?.content ?? ''
+    expect(hintContent).toContain('Last session (1 days ago):')
+    for (const kw of sixKeywords) {
+      expect(hintContent).toContain(kw)
+    }
   })
 })

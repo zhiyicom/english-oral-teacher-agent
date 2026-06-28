@@ -69,16 +69,22 @@ describe('buildSystemContext (v0.5 last review)', () => {
     expect(out).not.toContain('Last session')
   })
 
-  it('non-null lastReview appends "Last session (X day(s) ago, Y min): ..." line', () => {
+  it('non-null lastReview appends "Last session (X day(s) ago, Y min) — keywords: ..." line', () => {
+    // v1.0.4 §1.2 — Block 1 is a pointer to the WARM_UP first-turn user
+    // message (which holds the full summary). Block 1 keeps metadata +
+    // keywords list + the "(full summary in opening user message)" suffix.
     const out = ctx(makeState(), makeLastReview())
     expect(out).toContain(
-      '- Last session (1 day ago, 5 min): Student talked about Minecraft castles.',
+      '- Last session (1 day ago, 5 min) — keywords: minecraft, castle, creeper (full summary in opening user message)',
     )
   })
 
-  it('non-null lastReview appends "Last session keywords: ..." line', () => {
+  it('non-null lastReview does NOT include the summary body text', () => {
+    // v1.0.4 §1.2 — single-source invariant: the summary body lives only in
+    // Messages[0] (turn.ts WARM_UP first-turn hint). Block 1 must NOT contain
+    // it. This test fails if someone re-introduces the summary text here.
     const out = ctx(makeState(), makeLastReview())
-    expect(out).toContain('- Last session keywords: minecraft, castle, creeper')
+    expect(out).not.toContain('Student talked about Minecraft castles.')
   })
 
   it('uses singular "day" when daysAgo === 1', () => {
@@ -98,8 +104,9 @@ describe('buildSystemContext (v0.5 last review)', () => {
   })
 
   it('falls back to "unknown" duration string when durationMin is null', () => {
+    // v1.0.4 §1.2 — pointer format uses "—" separator instead of ":".
     const out = ctx(makeState(), makeLastReview({ durationMin: null }))
-    expect(out).toContain('(1 day ago, unknown):')
+    expect(out).toContain('(1 day ago, unknown) —')
   })
 
   it('keeps all v0.4 fields visible alongside the last review segment', () => {
@@ -109,9 +116,39 @@ describe('buildSystemContext (v0.5 last review)', () => {
     expect(out).toContain('Last session (')
   })
 
-  it('still appends the keywords line even when keywords array is empty', () => {
+  it('still appends the keywords segment even when keywords array is empty', () => {
+    // v1.0.4 §1.2 — keywords are inline ("— keywords:") so when the array is
+    // empty we render "— keywords: " with empty list (still visible line).
     const out = ctx(makeState(), makeLastReview({ keywords: [] }))
-    expect(out).toContain('- Last session keywords:')
+    expect(out).toContain('- Last session (1 day ago, 5 min) — keywords: ')
+  })
+})
+
+describe('buildSystemContext (v1.0.4 §1.2 Last session single-source)', () => {
+  it('Block 1 carries the full keywords list (not truncated to 4)', () => {
+    // v1.0.4 §1.2 — Block 1 shows ALL keywords from LastReview (no slice).
+    // turn.ts Messages[0] aligns to the same count (slice 0..6). This test
+    // ensures Block 1 itself never silently drops keywords beyond what
+    // LastReview actually has.
+    const lr = makeLastReview({ keywords: ['a', 'b', 'c', 'd', 'e', 'f'] })
+    const out = ctx(makeState(), lr)
+    expect(out).toContain('keywords: a, b, c, d, e, f')
+  })
+
+  it('Block 1 pointer suffix "(full summary in opening user message)" is always present', () => {
+    // v1.0.4 §1.2 — every Last session line in Block 1 must carry the
+    // pointer suffix so the LLM knows the body is in Messages[0].
+    const out = ctx(makeState(), makeLastReview())
+    expect(out).toContain('(full summary in opening user message)')
+  })
+
+  it('Block 1 is exactly ONE line (not two) when lastReview is present', () => {
+    // v1.0.4 §1.2 — pre-v1.0.4 the segment was 2 lines (summary + keywords).
+    // Post-v1.0.4 it's collapsed to 1 line. We assert by counting occurrences
+    // of the "- Last session (" prefix — must be exactly 1.
+    const out = ctx(makeState(), makeLastReview())
+    const matches = out.match(/- Last session \(/g) ?? []
+    expect(matches.length).toBe(1)
   })
 })
 

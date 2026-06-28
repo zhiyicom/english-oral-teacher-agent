@@ -6,9 +6,14 @@ import type { SystemPrompt } from '../../src/prompts/loader.js'
 import type { Mistake } from '../../src/storage/mistakes.js'
 
 const fakePrompt: SystemPrompt = {
-  soul: 'You are a friendly English tutor.',
-  agents: '## Rules\n- Always ask one follow-up question.',
-  user: 'Student: Alex, 13, intermediate.',
+  // v1.0.4 §1.1 — each section's body now includes its own '# Title' heading.
+  // Production code (`loadSystemPrompt`) enforces this via assertHasH1;
+  // test fixtures mirror that contract so the rendered output still has
+  // '# SOUL' / '# AGENTS — operating manual' / '# STUDENT' / '# Tool Calling'
+  // exactly once each.
+  soul: '# SOUL\n\nYou are a friendly English tutor.',
+  agents: '# AGENTS — operating manual\n\n## Rules\n- Always ask one follow-up question.',
+  user: '# STUDENT\n\nStudent: Alex, 13, intermediate.',
   userProfile: {
     name: 'Alex',
     age: 13,
