@@ -15,7 +15,8 @@
 //   - v0.8.4 — GET/PUT /api/settings (USER.md atomic write)
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { pathToFileURL } from 'node:url'
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
@@ -38,7 +39,7 @@ import { extractStudentDiscoveries } from './agent/profile-extractor.js'
 import type { TurnOutput } from './agent/turn.js'
 import { loadEnv } from './config/env.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
-import { logSummarize, logWebDiagnostic } from './llm/debug-log.js'
+import { logSummarize, logSummarizeFailure, logWebDiagnostic } from './llm/debug-log.js'
 import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
 import type { LLMClient, Message } from './llm/types.js'
 import { createTransformersEmbedder } from './memory/index.js'
@@ -233,7 +234,11 @@ function regenerateTopicLibrary(topicList: Array<{ name: string; keywords: strin
 // Exported as `createApp` so L1 tests can mount the app with a mock
 // DbHandle (in-memory SQLite) and test handler logic without binding
 // to a port. `startServer` (below) is the production entry.
-export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono {
+export function createApp(opts: {
+  dataDir: string
+  fixturesDir: string
+  webDistDir?: string
+}): Hono {
   const env = loadEnv()
   const db = openDb({ dataDir: opts.dataDir })
   applyMigrations(db)
@@ -550,6 +555,10 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
                 process.stderr.write(
                   `[server] summarize failed session=${id.slice(0, 8)} msgs=${msgObjs.length} err=${(err as Error).message}\n`,
                 )
+                // v1.0.6 hotfix — also write a structured failure record to
+                // data/llm-debug/ so the next silent failure is diagnosable
+                // without needing the stderr stream (web mode has no terminal).
+                logSummarizeFailure(id, msgObjs.length, output.endedReason, err)
                 sessions.markEnded(id, {
                   phaseHistory: output.phaseHistory,
                   summary: '(summarization failed)',
@@ -755,33 +764,35 @@ export function createApp(opts: { dataDir: string; fixturesDir: string }): Hono 
     return c.json({ ok: true })
   })
 
-  // ---- Production SPA fallback (v0.8.5) ----
-  // When web/dist exists (pnpm build has been run), serve the built SPA for
-  // any non-API route. Vite outputs index.html + assets/ under web/dist/.
-  const distIndex = resolve('web/dist/index.html')
-  if (existsSync(distIndex)) {
-    const distDir = resolve('web/dist')
-    app.get('/assets/*', (c) => {
-      const filePath = resolve(distDir, c.req.path.slice(1))
-      if (!existsSync(filePath) || !filePath.startsWith(distDir)) return c.notFound()
-      const ext = filePath.split('.').pop()
-      const mime: Record<string, string> = {
-        js: 'text/javascript',
-        css: 'text/css',
-        svg: 'image/svg+xml',
-        png: 'image/png',
-        ico: 'image/x-icon',
-        woff2: 'font/woff2',
-      }
-      return c.body(readFileSync(filePath), 200, {
-        'Content-Type': mime[ext ?? ''] ?? 'application/octet-stream',
-      })
+  // ---- SPA fallback (v1.0.5.1 §1.1) ----
+  // Always-on (no existsSync gate). After `pnpm build`, the postbuild step
+  // copies web/dist/* to dist/web/ so distDir = __dirname/web resolves
+  // correctly. Dev mode uses `pnpm dev-web` (Vite on 5173) and does not
+  // hit this code path. `opts.webDistDir` lets tests inject a fixture.
+  const distDir = opts.webDistDir ?? resolve(dirname(fileURLToPath(import.meta.url)), 'web')
+  const distIndex = join(distDir, 'index.html')
+  app.get('/assets/*', (c) => {
+    const filePath = resolve(distDir, c.req.path.slice(1))
+    if (!filePath.startsWith(distDir)) return c.notFound()
+    if (!existsSync(filePath)) return c.notFound()
+    const ext = filePath.split('.').pop()
+    const mime: Record<string, string> = {
+      js: 'text/javascript',
+      css: 'text/css',
+      svg: 'image/svg+xml',
+      png: 'image/png',
+      ico: 'image/x-icon',
+      woff2: 'font/woff2',
+    }
+    return c.body(readFileSync(filePath), 200, {
+      'Content-Type': mime[ext ?? ''] ?? 'application/octet-stream',
     })
-    app.get('/*', (c) => {
-      if (c.req.path.startsWith('/api')) return c.notFound()
-      return c.html(readFileSync(distIndex, 'utf-8'))
-    })
-  }
+  })
+  app.get('/*', (c) => {
+    if (c.req.path.startsWith('/api')) return c.notFound()
+    if (!existsSync(distIndex)) return c.text('SPA not built. Run `pnpm build` first.', 500)
+    return c.html(readFileSync(distIndex, 'utf-8'))
+  })
 
   return app
 }

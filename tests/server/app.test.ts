@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -368,5 +368,79 @@ describe('createApp (v0.8.1 L1)', () => {
       body: JSON.stringify(sameShape),
     })
     expect(put.status).toBe(200)
+  })
+})
+
+// v1.0.5.1 §1.1 — single-process SPA fallback. After `pnpm build`,
+// dist/web/ holds the Vite output; server.ts serves index.html and
+// /assets/* in-process (no separate static file server). Tests inject
+// a temp dir via createApp({ webDistDir }) so we don't depend on a
+// real `pnpm build` having run.
+//
+// Note: we do NOT rmSync the temp dirs in afterEach — better-sqlite3
+// still holds the .db file open via the createApp call, and Windows
+// EPERMs on rmSync. The OS reclaims /tmp eventually. See the
+// createApp harness comment above.
+describe('createApp SPA fallback (v1.0.5.1 §1.1)', () => {
+  let dataDir: string
+  let spaDir: string
+  let app: ReturnType<typeof createApp>
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'server-spa-data-'))
+    spaDir = mkdtempSync(join(tmpdir(), 'server-spa-dist-'))
+    writeFileSync(join(spaDir, 'index.html'), '<!DOCTYPE html><html><body>SPA</body></html>')
+    mkdirSync(join(spaDir, 'assets'), { recursive: true })
+    writeFileSync(join(spaDir, 'assets', 'main.js'), 'console.log("main")')
+    writeFileSync(join(spaDir, 'assets', 'style.css'), 'body{color:red}')
+    app = createApp({ dataDir, fixturesDir, webDistDir: spaDir })
+  })
+
+  it('GET /: returns the SPA index.html with text/html', async () => {
+    const res = await app.request('/')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/html')
+    expect(await res.text()).toContain('<body>SPA</body>')
+  })
+
+  it('GET /assets/main.js: returns JS with text/javascript MIME', async () => {
+    const res = await app.request('/assets/main.js')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('text/javascript')
+    expect(await res.text()).toBe('console.log("main")')
+  })
+
+  it('GET /assets/style.css: returns CSS with text/css MIME', async () => {
+    const res = await app.request('/assets/style.css')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('text/css')
+  })
+
+  it('GET /api/health: still hits the API route, not the SPA fallback', async () => {
+    const res = await app.request('/api/health')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { ok: boolean }
+    expect(body.ok).toBe(true)
+    expect(res.headers.get('content-type')).toContain('application/json')
+  })
+
+  it('GET /history/abc: returns index.html for client-side routing', async () => {
+    const res = await app.request('/history/abc')
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('<body>SPA</body>')
+  })
+
+  it('GET /assets/missing.js: returns 404 when file does not exist', async () => {
+    const res = await app.request('/assets/missing.js')
+    expect(res.status).toBe(404)
+  })
+
+  it('webDistDir with no index.html: GET / returns 500 with helpful message', async () => {
+    const emptySpa = mkdtempSync(join(tmpdir(), 'server-spa-empty-'))
+    const dataDir2 = mkdtempSync(join(tmpdir(), 'server-spa-data2-'))
+    const app2 = createApp({ dataDir: dataDir2, fixturesDir, webDistDir: emptySpa })
+    const res = await app2.request('/')
+    expect(res.status).toBe(500)
+    expect(await res.text()).toContain('Run `pnpm build` first')
   })
 })

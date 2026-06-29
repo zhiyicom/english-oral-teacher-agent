@@ -95,13 +95,11 @@ pnpm dev-web
 pnpm serve    # tsx watch src/server.ts，开发态
 ```
 
-`pnpm serve` 会自动检测 `web/dist/index.html` 是否存在；若已 `pnpm build` 过，则 3000 端口直接 serve 完整 SPA。
-
-**生产模式（单端口）**：先构建前端，再启动 server。
+**生产模式（单端口）**：先构建前端，再启动 server（v1.0.5.1 §1.1 起 `pnpm start` 直接起 server；CLI 改用 `pnpm cli`）。
 
 ```bash
-pnpm build         # pnpm --dir web build && tsc → web/dist/ + dist/
-pnpm serve         # 3000 端口 serve dist + web/dist（自动 SPA fallback）
+pnpm build         # pnpm --dir web build && tsc && pnpm build:copy-assets → dist/web/ + dist/storage/migrations/
+pnpm start         # node dist/server.js，单进程 3000 端口 serve SPA + API
 ```
 
 浏览器访问 `http://localhost:3000`。
@@ -111,7 +109,7 @@ pnpm serve         # 3000 端口 serve dist + web/dist（自动 SPA fallback）
 ```bash
 pnpm dev           # tsx watch src/cli.ts
 # 或
-pnpm build && pnpm start   # node dist/cli.js
+pnpm build && pnpm cli     # node dist/cli.js
 ```
 
 ### 1.5 验证安装

@@ -31,8 +31,8 @@ Open `http://localhost:5173`. The Vite dev server proxies `/api/*` and `/assets/
 ### Production single-port (UI + API on 3000)
 
 ```bash
-pnpm build                 # pnpm --dir web build && tsc → web/dist/ + dist/
-pnpm serve                 # tsx watch src/server.ts — auto-detects web/dist and serves SPA
+pnpm build                 # pnpm --dir web build && tsc && pnpm build:copy-assets → dist/web/ + dist/storage/migrations/
+pnpm start                 # node dist/server.js — single process serves SPA + API on :3000
 ```
 
 Open `http://localhost:3000`.
@@ -42,7 +42,7 @@ Open `http://localhost:3000`.
 ```bash
 pnpm dev                   # tsx watch src/cli.ts
 # or
-pnpm build && pnpm start   # node dist/cli.js
+pnpm build && pnpm cli     # node dist/cli.js
 ```
 
 ## What's in v1.0.4
