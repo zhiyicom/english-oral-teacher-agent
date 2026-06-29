@@ -44,6 +44,8 @@ async function spawnServer(): Promise<ServerHandle> {
       APP_DATA_DIR: dataDir,
       PORT: String(port),
       RUN_LIVE_LLM: '0', // force replay mode in tests
+      // v1.0.5.2 §1.2 — see tests/agent/cli-integration.test.ts
+      REPLAY_FIXTURES_DIR: resolve('tests/fixtures/replay'),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   })

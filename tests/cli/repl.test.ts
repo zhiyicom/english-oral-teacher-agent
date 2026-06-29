@@ -16,7 +16,12 @@ function runCli(input: string, env: Record<string, string> = {}): Promise<RunRes
       process.execPath,
       ['--import', 'tsx', CLI_PATH],
       {
-        env: { ...process.env, ...env },
+        // v1.0.5.2 §1.2 — see tests/agent/cli-integration.test.ts
+        env: {
+          ...process.env,
+          REPLAY_FIXTURES_DIR: resolve('tests/fixtures/replay'),
+          ...env,
+        },
         stdio: ['pipe', 'pipe', 'pipe'],
       },
     )

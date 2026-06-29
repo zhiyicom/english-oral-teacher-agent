@@ -16,7 +16,10 @@ const EnvSchema = z.object({
   // v0.8.1 — HTTP server listen port for src/server.ts. Default 3000.
   // Range 1..65535. CLI ignores this (it doesn't bind a port).
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  APP_DATA_DIR: z.string().default('./data'),
+  // v1.0.5.2 §1.2 — APP_DATA_DIR is now optional. src/config/paths.ts
+  // picks a platform default (or honors an explicit override). Legacy
+  // ./data is auto-detected with a one-time warning.
+  APP_DATA_DIR: z.string().optional(),
   APP_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   RUN_LIVE_LLM: z.enum(['0', '1']).optional(),
   DEBUG_LOG_LLM: z.enum(['0', '1']).optional(),

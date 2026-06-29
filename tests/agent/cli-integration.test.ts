@@ -30,7 +30,14 @@ function runCli(input: string, env: Record<string, string> = {}): Promise<RunRes
       process.execPath,
       ['--import', 'tsx', CLI_PATH],
       {
-        env: { ...process.env, ...env },
+        // v1.0.5.2 §1.2 — L3 tests need REPLAY_FIXTURES_DIR because
+        // getReplayFixturesDir() now defaults to {APP_DATA_DIR}/replay/,
+        // which is a fresh temp dir in each test (no fixtures).
+        env: {
+          ...process.env,
+          REPLAY_FIXTURES_DIR: resolve('tests/fixtures/replay'),
+          ...env,
+        },
         stdio: ['pipe', 'pipe', 'pipe'],
       },
     )

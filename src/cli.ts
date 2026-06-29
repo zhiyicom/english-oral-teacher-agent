@@ -22,7 +22,9 @@ import {
 } from './agent/index.js'
 import type { TurnEvent } from './agent/turn.js'
 import { loadEnv } from './config/env.js'
+import { getAppDataDir, getReplayFixturesDir } from './config/paths.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
+import { logSummarizeFailure } from './llm/debug-log.js'
 import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
 import type { LLMClient, Message } from './llm/types.js'
 import {
@@ -241,7 +243,7 @@ export async function main(): Promise<void> {
   const mockTime = process.env.MOCK_TIME === '1'
 
   // Open SQLite + run migrations + create session row
-  const db = openDb({ dataDir: env.APP_DATA_DIR })
+  const db = openDb({ dataDir: getAppDataDir() })
   applyMigrations(db)
   const sessions = createSessionsDao(db)
   const messages = createMessagesDao(db)
@@ -252,7 +254,7 @@ export async function main(): Promise<void> {
 
   const systemPrompt = loadSystemPrompt()
 
-  const fixturesDir = resolve('tests/fixtures/replay')
+  const fixturesDir = getReplayFixturesDir()
   const client = selectClient(env, fixturesDir)
 
   const history: Message[] = []
@@ -504,6 +506,10 @@ export async function main(): Promise<void> {
           )
         } catch (err) {
           process.stderr.write(`[cli] summarize failed: ${(err as Error).message}\n`)
+          // v1.0.6 hotfix — also write a structured failure record to
+          // data/llm-debug/ so the next silent failure is diagnosable
+          // without depending on the stderr stream being captured.
+          logSummarizeFailure(session.id, allMessages.length, exitReason, err)
           summaryText = '(summarization failed)'
           summaryKeywords = []
         }

@@ -38,6 +38,7 @@ import type { PhaseTransition, SessionState } from './agent/index.js'
 import { extractStudentDiscoveries } from './agent/profile-extractor.js'
 import type { TurnOutput } from './agent/turn.js'
 import { loadEnv } from './config/env.js'
+import { getAppDataDir, getReplayFixturesDir } from './config/paths.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
 import { logSummarize, logSummarizeFailure, logWebDiagnostic } from './llm/debug-log.js'
 import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
@@ -800,8 +801,8 @@ export function createApp(opts: {
 // ---------- Entry point ----------
 async function startServer(): Promise<void> {
   const env = loadEnv()
-  const dataDir = resolve(env.APP_DATA_DIR)
-  const fixturesDir = resolve('tests/fixtures/replay')
+  const dataDir = getAppDataDir()
+  const fixturesDir = getReplayFixturesDir()
   const app = createApp({ dataDir, fixturesDir })
   const port = env.PORT
 
