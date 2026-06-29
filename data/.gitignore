@@ -1,0 +1,4 @@
+*
+!.gitignore
+# v1.0.5 §C — checked-in default topic library (project asset, not user data)
+!topics-default.json

@@ -1,5 +1,11 @@
 -- 003_topic_stats.sql
 -- v0.6 启用 topic 库 + topic_stats 聚合表
+--
+-- v1.0.5 §C: 7 个 v0.6 starter topics (minecraft/school/sports/food/family/
+-- movies/music) 已从本迁移移除 —— 它们在 JSON / 007 中已演化为 30 个
+-- 基线话题（如 school_life、food_drink、sports_health_b2 等），无名称
+-- 重复。schema_migrations 仅按文件名去重,已应用本迁移的旧库保留其 7
+-- 个 v0.6 话题;新部署只由 007 提供 30 个基线话题。
 
 CREATE TABLE IF NOT EXISTS topics (
   name          TEXT PRIMARY KEY,
@@ -14,15 +20,3 @@ CREATE TABLE IF NOT EXISTS topic_stats (
   first_discussed_at  TEXT,
   last_discussed_at   TEXT
 );
-
--- Seed 7 starter topics. Jaccard match against session keywords (v0.5
--- summarizer output). Coverage: minecraft (gaming) / school / sports /
--- food / family / movies / music — v0.7 tool calls can add more.
-INSERT INTO topics (name, keywords_json, description, created_at) VALUES
-  ('minecraft', '["minecraft","castle","creeper","wall","build","survival","creative","block","mob","pickaxe"]', 'Minecraft game',  '2026-06-09T00:00:00.000Z'),
-  ('school',    '["school","class","teacher","homework","exam","friend","lunch","recess"]',                    'School life',     '2026-06-09T00:00:00.000Z'),
-  ('sports',    '["soccer","basketball","swim","run","ball","team","match","win"]',                            'Sports',          '2026-06-09T00:00:00.000Z'),
-  ('food',      '["food","eat","dinner","lunch","breakfast","restaurant","delicious","cook","recipe"]',         'Food & meals',    '2026-06-09T00:00:00.000Z'),
-  ('family',    '["family","mom","dad","brother","sister","pet","dog","cat","home"]',                          'Family & pets',   '2026-06-09T00:00:00.000Z'),
-  ('movies',    '["movie","film","watch","cartoon","character","story","episode"]',                            'Movies & TV',     '2026-06-09T00:00:00.000Z'),
-  ('music',     '["music","song","sing","dance","band","instrument","piano","guitar"]',                       'Music',           '2026-06-09T00:00:00.000Z');

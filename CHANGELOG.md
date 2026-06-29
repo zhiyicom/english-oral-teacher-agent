@@ -9,21 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > [docs/ARCHITECTURE.md §11](docs/ARCHITECTURE.md). This file tracks user-facing
 > changes only.
 
-## [v1.0.5] — 2026-06-28 — Topic-selection tool widening + anti-# STUDENT rule
+## [v1.0.5] — 2026-06-30 — Topic-selection tool widening + 30-topic default library
 
 > Sprint details: [v1.0.5-scope.md](docs/sprint/v1.0.5-scope.md) /
 > [v1.0.5-design.md](docs/sprint/v1.0.5-design.md) /
 > [v1.0.5-test-report.md](docs/sprint/v1.0.5-test-report.md)
 >
-> **Scope note**: 原 v1.0.5 scope 定义的"安装器架构前置 4 段（§1.1 单进程 + §1.2 AppData + §1.3 USER.md 种子 + §1.4 /setup 向导）"推迟到 v1.0.5.1+ 实施（v1.0.6 启动前必须完成）。完整设计稿保留在 [v1.0.5-design.md](docs/sprint/v1.0.5-design.md) 作为 v1.0.5.1+ 蓝图。当前 v1.0.5 实际完成的是 §A 提示词禁令 + §B tool 返回拓宽（topic selection 健壮性）。
+> **Scope note**: 原 v1.0.5 scope 定义的"安装器架构前置 4 段（§1.1 单进程 + §1.2 AppData + §1.3 USER.md 种子 + §1.4 /setup 向导）"推迟到 v1.0.5.1+ 实施（v1.0.6 启动前必须完成）。完整设计稿保留在 [v1.0.5-design.md](docs/sprint/v1.0.5-design.md) 作为 v1.0.5.1+ 蓝图。当前 v1.0.5 实际完成的是 §A 提示词禁令 + §B tool 返回拓宽 + §C 默认 30 话题库 seed。
 
 ### Changed
 - **`topic_select` tool returns `keywords[]` + description-based title** (§B): the LLM now gets the full keyword list (e.g. `["morning","afternoon","breakfast","lunch","dinner","school","homework","habit",...]` for `daily_routine`) and the human-readable `title` from the topic's `description` field (e.g. "日常生活习惯") instead of the raw slug. Gives the LLM concrete vocabulary to anchor the opening question so it no longer falls back to mining `# STUDENT` interests for topic material. Backwards compatible — no DB migration, no new endpoints, no schema break.
 - **Anti-# STUDENT rule in MAIN_ACTIVITY prompt** (§A): `prompts/phases.md` MAIN_ACTIVITY Context now explicitly states "Do NOT use `# STUDENT` interests as a topic source" and the per-turn Reminder now appends "(NEVER pick from `# STUDENT` interests directly)". The profile is for personalizing the LLM's tone, not for picking conversation topics — variety is the point.
 
+### Added
+- **30-topic default library ships in repo + auto-seeds on new install** (§C): any fresh `git clone` + `pnpm install` + `pnpm serve` now starts with 30 baseline topics (A1-A2 / B1 / B2 mix, covering personal_info through tech_future) instead of the v0.6 7-starter pack (minecraft / school / sports / food / family / movies / music). Two new files: `data/topics-default.json` (human-readable form, project asset) and `src/storage/migrations/007_topics_default.sql` (30 `INSERT OR IGNORE` rows that run on `applyMigrations()`). Both files are physically co-generated from the same in-memory array by `scripts/export-topics-default.ts` — no hand-edit drift possible. Existing users keep their existing topic edits (`OR IGNORE` skips conflicts, never overwrites). Migration 003 was modified to remove the 7 v0.6 starter seeds (they were superseded by the 30 baseline) — `schema_migrations` tracks by filename so old DBs that already applied 003 keep their 7 v0.6 topics untouched.
+
 ### Notes
-- This release is internal-only: student-visible behavior change is "Alex picks a wider variety of topics instead of repeatedly mining the same interests" (e.g. less repeated Zhao Lei / Delta Force / hiking across sessions). No new LLM calls, no DB migration, no API endpoint changes.
-- Root cause addressed: 2026-06-28 session `dc50b481` showed the LLM bypassing `topic_select` for 4 consecutive turns and inventing "travel anywhere in the world" questions from the student's interest list. After this change, the LLM has concrete material inside the tool's return shape (`keywords[]` + descriptive `title`) and an explicit prompt rule against the bypass.
+- This release is internal-only: student-visible behavior changes are (1) "Alex picks a wider variety of topics instead of repeatedly mining the same interests" (§A+§B), and (2) "Alex can choose from 30 conversation topics instead of 7 from day one on any new install" (§C). No new LLM calls. §C adds 2 migration files and 2 supporting scripts/tests — zero new API endpoints, zero new npm deps.
+- Root cause for §A+§B: 2026-06-28 session `dc50b481` showed the LLM bypassing `topic_select` for 4 consecutive turns and inventing "travel anywhere in the world" questions from the student's interest list. After this change, the LLM has concrete material inside the tool's return shape (`keywords[]` + descriptive `title`) and an explicit prompt rule against the bypass.
+- Root cause for §C: 2026-06-28 the user deployed from GitHub on a second machine and found only 7 topics in DB (vs 30 locally). The extra 23 topics were runtime Web UI additions in the local DB — host-local, never in the repo. Now those 30 baseline topics ship as project assets and any new host gets them on first migration.
 
 ## [v1.0.4] — 2026-06-28 — LLM prompt assembly cleanup (no behavior change)
 

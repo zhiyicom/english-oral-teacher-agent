@@ -295,9 +295,12 @@ describe('createApp (v0.8.1 L1)', () => {
 
   it('GET /api/topics: includes hitCount + keywordHits (zero on fresh DB)', async () => {
     // v1.0.2 — the response shape now joins topic_stats + keyword_hits.
-    // On a fresh DB the seeded topics from migration 003 are listed with
+    // On a fresh DB the seeded topics from migration 007 are listed with
     // hitCount=0 and keywordHits={}. We verify shape, not behavior here;
     // the DAO + write-path tests cover the data layer.
+    //
+    // v1.0.5 §C: migration 003 no longer seeds v0.6 starters; the 30
+    // baseline topics come from migration 007. Sanity check one of them.
     const res = await harness.app.request('/api/topics')
     expect(res.status).toBe(200)
     const body = (await res.json()) as Array<{
@@ -308,14 +311,14 @@ describe('createApp (v0.8.1 L1)', () => {
       keywordHits: Record<string, number>
     }>
     expect(Array.isArray(body)).toBe(true)
-    expect(body.length).toBeGreaterThan(0)
+    expect(body.length).toBe(30)
     for (const t of body) {
       expect(t.hitCount).toBe(0)
       expect(t.keywordHits).toEqual({})
     }
-    // Sanity: one of the seed topics must be present.
+    // Sanity: one of the baseline topics must be present.
     const names = body.map((t) => t.name)
-    expect(names).toContain('minecraft')
+    expect(names).toContain('food_drink')
   })
 
   it('GET /api/topics: returns topics in alphabetical order (unchanged from v0.8.5)', async () => {

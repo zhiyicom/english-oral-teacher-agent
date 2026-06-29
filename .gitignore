@@ -8,13 +8,18 @@ build/
 out/
 *.tsbuildinfo
 
-# Runtime data (NEVER commit student data)
-data/
+# Runtime data (NEVER commit student data) — `data/*` not `data/`, so
+# the !data/topics-default.json exception below can re-include the JSON
+# (a `!` rule cannot un-ignore a file inside an ignored directory).
+data/*
 *.db
 *.db-shm
 *.db-wal
 *.sqlite
 *.sqlite3
+
+# v1.0.5 §C — checked-in default topic library (project asset, not user data)
+!data/topics-default.json
 
 # Per-instance user config (real student profile)
 prompts/USER.md
