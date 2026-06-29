@@ -26,6 +26,10 @@ interface Harness {
 
 function makeHarness(): Harness {
   const dataDir = mkdtempSync(join(tmpdir(), 'server-test-'))
+  // v1.0.5.3 §1.3 — redirect USER.md reads to the test dataDir so the
+  // loader doesn't read the developer's real profile. Each test gets its
+  // own dir; APP_DATA_DIR is reset by afterEach.
+  process.env.APP_DATA_DIR = dataDir
   const app = createApp({ dataDir, fixturesDir })
   return { dataDir, app }
 }
@@ -388,6 +392,10 @@ describe('createApp SPA fallback (v1.0.5.1 §1.1)', () => {
 
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'server-spa-data-'))
+    // v1.0.5.3 §1.3 — see makeHarness comment. Also redirect USER.md reads
+    // to the test dataDir so createApp's loadSystemPrompt doesn't read
+    // the developer's real profile.
+    process.env.APP_DATA_DIR = dataDir
     spaDir = mkdtempSync(join(tmpdir(), 'server-spa-dist-'))
     writeFileSync(join(spaDir, 'index.html'), '<!DOCTYPE html><html><body>SPA</body></html>')
     mkdirSync(join(spaDir, 'assets'), { recursive: true })

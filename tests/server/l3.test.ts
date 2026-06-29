@@ -33,8 +33,11 @@ function safeRm(dir: string): void {
   }
 }
 
-async function spawnServer(): Promise<ServerHandle> {
-  const dataDir = mkdtempSync(join(tmpdir(), 'server-l3-'))
+async function spawnServer(opts: { dataDir?: string } = {}): Promise<ServerHandle> {
+  // v1.0.5.3 §1.3 — accept an optional shared dataDir so the restart test
+  // (PUT /api/settings persists voice_enabled) keeps its writes across
+  // spawns. Default: fresh dir per spawn.
+  const dataDir = opts.dataDir ?? mkdtempSync(join(tmpdir(), 'server-l3-'))
   const port = pickPort()
   const child: ChildProcessWithoutNullStreams = spawn(NODE_PATH, ['--import', 'tsx', SERVER_PATH], {
     env: {
@@ -88,6 +91,7 @@ async function spawnServer(): Promise<ServerHandle> {
 
 describe('Server end-to-end (v0.8.1 L3 — spawn + curl)', () => {
   let server: ServerHandle | null = null
+  let sharedDataDir: string | null = null
 
   beforeEach(async () => {
     server = await spawnServer()
@@ -96,8 +100,15 @@ describe('Server end-to-end (v0.8.1 L3 — spawn + curl)', () => {
   afterEach(async () => {
     if (server) {
       await server.kill()
-      safeRm(server.dataDir)
+      // Only clean up if this test used the default (per-test) dir.
+      if (server.dataDir !== sharedDataDir) {
+        safeRm(server.dataDir)
+      }
       server = null
+    }
+    if (sharedDataDir) {
+      safeRm(sharedDataDir)
+      sharedDataDir = null
     }
   })
 
@@ -164,6 +175,12 @@ describe('Server end-to-end (v0.8.1 L3 — spawn + curl)', () => {
   })
 
   it('PUT /api/settings persists voice_enabled across server restart', async () => {
+    // v1.0.5.3 §1.3 — USER.md now lives in AppData, which is per-spawn.
+    // To test persistence across restarts, both server instances must share
+    // the same dataDir.
+    const firstDataDir = server!.dataDir
+    sharedDataDir = firstDataDir
+
     const base = `http://127.0.0.1:${server?.port}`
 
     // Save original value first
@@ -185,9 +202,9 @@ describe('Server end-to-end (v0.8.1 L3 — spawn + curl)', () => {
     const s1 = (await get1.json()) as { voice_enabled: boolean }
     expect(s1.voice_enabled).toBe(newValue)
 
-    // Restart server
+    // Restart server with the SAME dataDir so the write persists
     await server?.kill()
-    server = await spawnServer()
+    server = await spawnServer({ dataDir: firstDataDir })
 
     // Verify persistence
     const base2 = `http://127.0.0.1:${server?.port}`

@@ -1,9 +1,17 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import matter from 'gray-matter'
 import lockfile from 'proper-lockfile'
+// v1.0.5.3 §1.3 — the embedded example is read at runtime from
+// dist/prompts/USER.md.example (copied by `pnpm build:copy-assets`).
+// The dev path falls back to the source tree at <project>/prompts/.
+// We can't use esbuild's `?raw` import suffix because tsx (the dev +
+// L3 test loader) doesn't pass it through to esbuild — it tries to
+// resolve the file as a regular module and fails on the .example
+// extension. The build copy step is simpler and works in all runtimes.
+import { getAppDataDir } from '../config/paths.js'
 
 export interface UserProfile {
   name: string
@@ -26,30 +34,71 @@ export interface SystemPrompt {
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const PROMPTS_DIR = join(__dirname, '..', '..', 'prompts')
+// v1.0.5.3 §1.3 — pkg-bundled example. After `pnpm build:copy-assets` runs,
+// the .example file is copied to dist/prompts/USER.md.example. The dev
+// path uses the source tree at <project>/prompts/USER.md.example. The
+// fallback chain checks both locations so tests + dev + prod all work.
+const EMBEDDED_EXAMPLE_PATHS = [
+  join(PROMPTS_DIR, 'USER.md.example'),
+]
+
+let cachedExample: string | null = null
+
+function loadEmbeddedExample(): string {
+  if (cachedExample !== null) return cachedExample
+  for (const p of EMBEDDED_EXAMPLE_PATHS) {
+    if (existsSync(p)) {
+      cachedExample = readFileSync(p, 'utf-8')
+      return cachedExample
+    }
+  }
+  throw new Error(
+    `Could not find USER.md.example. Looked in: ${EMBEDDED_EXAMPLE_PATHS.join(', ')}. ` +
+      `Run \`pnpm build:copy-assets\` to copy it from the source tree.`,
+  )
+}
 
 function readIfExists(path: string): string | null {
   return existsSync(path) ? readFileSync(path, 'utf-8') : null
 }
 
-export function loadUserFile(): { body: string; data: Record<string, unknown> } {
-  const real = join(PROMPTS_DIR, 'USER.md')
-  const example = join(PROMPTS_DIR, 'USER.md.example')
+export interface LoadUserResult {
+  body: string
+  data: Record<string, unknown>
+  seededFromExample: boolean
+}
 
-  if (existsSync(real)) {
-    const raw = readFileSync(real, 'utf-8')
+/**
+ * v1.0.5.3 §1.3 — load the student profile from AppData. On first run
+ * (no AppData/USER.md yet) we copy the embedded `USER.md.example` into
+ * place so subsequent settings writes have a real file to update.
+ *
+ * Returns a `seededFromExample: true` flag the first time so callers can
+ * show a "first-time setup complete" UI hint if they want.
+ */
+export function loadUserFile(): LoadUserResult {
+  const userMdPath = join(getAppDataDir(), 'USER.md')
+
+  if (existsSync(userMdPath)) {
+    const raw = readFileSync(userMdPath, 'utf-8')
     const parsed = matter(raw)
-    return { body: parsed.content, data: parsed.data }
+    return { body: parsed.content, data: parsed.data, seededFromExample: false }
   }
 
-  if (existsSync(example)) {
-    const raw = readFileSync(example, 'utf-8')
-    const parsed = matter(raw)
-    return { body: parsed.content, data: parsed.data }
-  }
+  // First run: seed USER.md from the embedded example so subsequent
+  // settings writes have a real file to update. Atomic write via tmp+rename.
+  const exampleText = loadEmbeddedExample()
+  seedUserMdFromExample(userMdPath, exampleText)
+  const parsed = matter(exampleText)
+  return { body: parsed.content, data: parsed.data, seededFromExample: true }
+}
 
-  throw new Error(
-    `No USER.md or USER.md.example found in ${PROMPTS_DIR}. Create one (see prompts/USER.md.example) before running the agent.`,
-  )
+function seedUserMdFromExample(targetPath: string, exampleText: string): void {
+  mkdirSync(getAppDataDir(), { recursive: true })
+  const tmpPath = `${targetPath}.tmp.${Date.now()}`
+  writeFileSync(tmpPath, exampleText, 'utf-8')
+  // Atomic rename (NTFS supports rename-over-existing)
+  renameSync(tmpPath, targetPath)
 }
 
 const REQUIRED_USER_FIELDS = ['name', 'age', 'level', 'goals', 'interests'] as const
@@ -182,8 +231,11 @@ export function loadPhaseInstructions(): PhaseInstructions {
   return { context, reminder }
 }
 
-// v0.8.4 — atomic USER.md write for settings persistence.
+// v1.0.5.3 §1.3 — atomic USER.md write for settings persistence.
 // Uses proper-lockfile to prevent races between server and CLI processes.
+// USER.md lives in AppData (not PROMPTS_DIR) so pkg snapshot + per-instance
+// isolation both work. The seed path reuses loadUserFile() which already
+// auto-seeds from the build-time-embedded example.
 export async function updateUserSettings(
   updates: Partial<{
     voice_enabled: boolean
@@ -191,20 +243,19 @@ export async function updateUserSettings(
     voice_accent: string
     interests: string[]
     bodyAppend: string
+    // v1.0.5.4 §6.5 — /setup wizard writes core profile fields directly.
+    name: string
+    age: number
+    level: 'beginner' | 'intermediate' | 'advanced'
+    goals: string[]
   }>,
 ): Promise<void> {
-  const path = join(PROMPTS_DIR, 'USER.md')
-  const example = join(PROMPTS_DIR, 'USER.md.example')
+  const path = join(getAppDataDir(), 'USER.md')
 
-  // proper-lockfile requires the file to exist before locking.
-  // If USER.md doesn't exist yet, seed it from .example first.
-  try {
-    await readFile(path, 'utf8')
-  } catch {
-    if (existsSync(example)) {
-      const exampleRaw = await readFile(example, 'utf8')
-      await writeFile(path, exampleRaw, 'utf8')
-    }
+  // proper-lockfile requires the file to exist before locking. If USER.md
+  // doesn't exist yet, trigger the loadUserFile() seed path first.
+  if (!existsSync(path)) {
+    loadUserFile()
   }
 
   const release = await lockfile.lock(path, { retries: 3 })
@@ -217,11 +268,20 @@ export async function updateUserSettings(
     if (updates.voice_enabled !== undefined) newData.voice_enabled = updates.voice_enabled
     if (updates.voice_speed !== undefined) newData.voice_speed = updates.voice_speed
     if (updates.voice_accent !== undefined) newData.voice_accent = updates.voice_accent
+    if (updates.name !== undefined) newData.name = updates.name
+    if (updates.age !== undefined) newData.age = updates.age
+    if (updates.level !== undefined) newData.level = updates.level
 
     // Merge interests: append new ones, deduplicate
     if (updates.interests && updates.interests.length > 0) {
       const existing = Array.isArray(data.interests) ? data.interests : []
       newData.interests = [...new Set([...existing, ...updates.interests])]
+    }
+
+    // Goals are a full replacement (not a merge) — the wizard edits the
+    // whole list at once, and partial merges would leave stale goals behind.
+    if (updates.goals !== undefined) {
+      newData.goals = [...updates.goals]
     }
 
     // Append body update

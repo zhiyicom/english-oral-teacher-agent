@@ -1,4 +1,16 @@
 ---
+# v1.0.5.3 §1.3 — This file is embedded into the server bundle at build time
+# (esbuild `?raw` import in src/prompts/loader.ts) and used as the first-run
+# USER.md seed in the platform AppData directory.
+#
+# To change the default profile that new users see:
+#   1. Edit this file
+#   2. Run `pnpm build` (rebuilds the bundle with the new content)
+#   3. New installs will seed from the updated content
+#
+# This file is NOT used at runtime in dev mode (where a manually-edited
+# prompts/USER.md can take precedence) — it's only the fallback when the
+# AppData USER.md doesn't exist yet.
 name: Sample Student
 age: 13
 level: intermediate
@@ -14,6 +26,8 @@ interests:
 voice_accent: en-US
 voice_speed: 1.0
 ---
+
+# STUDENT
 
 Sample student is a 13-year-old Chinese middle schooler. They are shy at first
 but warm up after a few minutes. They know basic English grammar but rarely
