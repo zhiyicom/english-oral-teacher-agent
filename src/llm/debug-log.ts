@@ -120,6 +120,34 @@ export function logLLMRequest(
   }
 }
 
+export function logSummarizeFailure(
+  sessionId: string,
+  messageCount: number,
+  endedReason: string,
+  err: unknown,
+): void {
+  if (process.env.DEBUG_LOG_LLM !== '1') return
+  ensureDir()
+  const now = new Date().toISOString().replace(/[:.]/g, '-')
+  const file = join(DEBUG_DIR, `${now}_${sessionId.slice(0, 8)}_summarize_fail.txt`)
+
+  const lines = [
+    `=== Summarize Failure ===`,
+    `Time: ${new Date().toISOString()}`,
+    `Session: ${sessionId}`,
+    `Messages: ${messageCount}`,
+    `EndedReason: ${endedReason}`,
+    `Error: ${(err as Error).message ?? String(err)}`,
+    ``,
+    `=== END ===`,
+  ]
+  try {
+    appendFileSync(file, lines.join('\n'), 'utf-8')
+  } catch {
+    // Best-effort
+  }
+}
+
 export function logSummarize(
   sessionId: string,
   messageCount: number,
