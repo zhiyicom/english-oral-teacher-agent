@@ -14,6 +14,39 @@ const LS_VOICE_ACCENT = 'settings:voice_accent'
 const LS_MIC_HOTKEY = 'settings:mic_hotkey'
 const LS_SEND_HOTKEY = 'settings:send_hotkey'
 
+function UpdateBanner() {
+  const [info, setInfo] = useState<{
+    updateAvailable?: boolean | null
+    latestVersion?: string | null
+    releaseUrl?: string | null
+  } | null>(null)
+  useEffect(() => {
+    fetch('/api/update/check')
+      .then((r) => r.json())
+      .then(setInfo)
+      .catch(() => {})
+  }, [])
+
+  if (info?.updateAvailable === true && info.releaseUrl) {
+    return (
+      <div className="bg-blue-50 border border-blue-200 rounded p-3 mb-4 flex items-center justify-between">
+        <span className="text-sm text-blue-900">
+          New version v{info.latestVersion} is available.
+        </span>
+        <a
+          href={info.releaseUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700"
+        >
+          Download
+        </a>
+      </div>
+    )
+  }
+  return null
+}
+
 export default function SettingsPage() {
   const navigate = useNavigate()
   const [settings, setSettings] = useState<SettingsApi | null>(null)
@@ -139,6 +172,7 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-lg px-6 py-4">
+      <UpdateBanner />
       {/* Voice section */}
       <div className="mt-4 rounded border bg-white p-4 shadow-sm">
         <h3 className="text-sm font-medium text-slate-700">

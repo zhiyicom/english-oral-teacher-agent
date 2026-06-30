@@ -90,6 +90,60 @@ export async function updateTopics(topics: TopicApi[]): Promise<void> {
   )
 }
 
+// v1.0.6 §1.6 — /setup wizard helpers
+export interface SetupStatus {
+  needsApiKey: boolean
+  hasUserProfile: boolean
+  appDataDir: string
+  version: string
+}
+
+export interface ProfileDefault {
+  name: string
+  age: number
+  level: string
+  goals: string[]
+  interests: string[]
+}
+
+export async function getSetupStatus(): Promise<SetupStatus> {
+  const res = await fetch(`${BASE}/api/setup/status`)
+  if (!res.ok) throw new Error(`getSetupStatus: HTTP ${res.status}`)
+  return (await res.json()) as SetupStatus
+}
+
+export async function getProfileDefault(): Promise<ProfileDefault> {
+  const res = await fetch(`${BASE}/api/setup/profile-default`)
+  if (!res.ok) throw new Error(`getProfileDefault: HTTP ${res.status}`)
+  return (await res.json()) as ProfileDefault
+}
+
+export async function saveApiKey(apiKey: string): Promise<{ ok: boolean; persisted: string[] }> {
+  const res = await fetch(`${BASE}/api/setup/api-key`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey }),
+  })
+  if (!res.ok) throw new Error((await res.json()).error ?? `saveApiKey: HTTP ${res.status}`)
+  return (await res.json()) as { ok: boolean; persisted: string[] }
+}
+
+export async function saveProfile(profile: {
+  name: string
+  age: number
+  level: string
+  goals: string[]
+  interests: string[]
+}): Promise<{ ok: boolean }> {
+  const res = await fetch(`${BASE}/api/setup/profile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  })
+  if (!res.ok) throw new Error((await res.json()).error ?? `saveProfile: HTTP ${res.status}`)
+  return (await res.json()) as { ok: boolean }
+}
+
 // v0.8.3 — build the SSE stream URL for a session turn.
 // Each turn opens a fresh EventSource connection with query params.
 // v1.0.3 §1.3 — optionally include `warmUpHook` (LLM-curated opener

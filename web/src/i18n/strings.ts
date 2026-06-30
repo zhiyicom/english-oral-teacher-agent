@@ -59,4 +59,22 @@ export const STRINGS = {
   settingsSaving: '保存中…',
   settingsCancel: '取消',
   settingsVoiceDisabled: 'v0.9+ 可用',
+
+  // v1.0.6 §1.6 — SetupPage
+  setupWelcome: '首次设置',
+  setupApiKeyLabel: '请输入你的 API Key。可从你的 LLM 服务商获取。',
+  setupApiKeyPlaceholder: 'sk-...',
+  setupContinue: '继续',
+  setupSaving: '保存中…',
+  setupStudentProfile: '学生档案',
+  setupName: '姓名',
+  setupAge: '年龄',
+  setupLevel: '英语水平',
+  setupLevelBeginner: 'Beginner (初级)',
+  setupLevelIntermediate: 'Intermediate (中级)',
+  setupLevelAdvanced: 'Advanced (高级)',
+  setupGoals: '学习目标（逗号分隔）',
+  setupInterests: '兴趣爱好（逗号分隔）',
+  setupBack: '上一步',
+  setupFinish: '完成设置',
 } as const

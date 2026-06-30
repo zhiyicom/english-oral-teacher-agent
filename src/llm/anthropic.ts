@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { Env } from '../config/env.js'
+import { getApiKey } from '../config/secrets.js'
 import type { ChatChunk, ChatOpts, ChatResult, LLMClient, Message, UsageChunk } from './types.js'
 
 /**
@@ -88,10 +89,16 @@ function toAnthropicMessages(messages: Message[]): Anthropic.Messages.MessagePar
     return { role, content: m.content }
   })
 }
-
 export function createAnthropicProvider(env: Env): LLMClient {
+  const apiKey = getApiKey()
+  if (!apiKey) {
+    throw new Error(
+      'API_KEY not configured. Open http://localhost:<port>/setup to configure, ' +
+      'or set API_KEY in .env / process.env.',
+    )
+  }
   const client = new Anthropic({
-    apiKey: env.API_KEY,
+    apiKey,
     baseURL: env.ANTHROPIC_BASE_URL,
   })
 

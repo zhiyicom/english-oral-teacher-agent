@@ -15,6 +15,7 @@
 //   - v0.8.4 — GET/PUT /api/settings (USER.md atomic write)
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { exec } from 'node:child_process'
 import { resolve, join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pathToFileURL } from 'node:url'
@@ -39,10 +40,12 @@ import { extractStudentDiscoveries } from './agent/profile-extractor.js'
 import type { TurnOutput } from './agent/turn.js'
 import { loadEnv } from './config/env.js'
 import { getAppDataDir, getReplayFixturesDir } from './config/paths.js'
+import { getApiKey, isSetupNeeded, setApiKey as setApiKeyPersist } from './config/secrets.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
 import { logSummarize, logSummarizeFailure, logWebDiagnostic } from './llm/debug-log.js'
 import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
 import type { LLMClient, Message } from './llm/types.js'
+import { checkForUpdate } from './update-checker.js'
 import { createTransformersEmbedder } from './memory/index.js'
 import { loadSystemPrompt, loadUserFile, updateUserSettings } from './prompts/loader.js'
 import {
@@ -739,6 +742,78 @@ export function createApp(opts: {
     return c.json({ ok: true, persisted })
   })
 
+  // ---- /setup endpoints (v1.0.6 §1.6) ----
+
+  app.get('/api/setup/status', (c) => {
+    const needsApiKey = isSetupNeeded()
+    let hasUserProfile = false
+    try {
+      const { data } = loadUserFile()
+      hasUserProfile = Boolean(
+        typeof data.name === 'string' && data.name.length > 0 &&
+        typeof data.age === 'number'
+      )
+    } catch { /* missing = false */ }
+    return c.json({
+      needsApiKey,
+      hasUserProfile,
+      appDataDir: getAppDataDir(),
+      version: process.env.npm_package_version ?? '0.0.0',
+    })
+  })
+
+  app.get('/api/setup/profile-default', (c) => {
+    const { data } = loadUserFile()
+    return c.json({
+      name: data.name ?? '',
+      age: data.age ?? 13,
+      level: data.level ?? 'intermediate',
+      goals: data.goals ?? [],
+      interests: data.interests ?? [],
+    })
+  })
+
+  app.post('/api/setup/api-key', async (c) => {
+    const body = await c.req.json()
+    const key = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
+    if (!key) return c.json({ error: 'apiKey required' }, 400)
+    try {
+      const { persisted } = setApiKeyPersist(key)
+      return c.json({ ok: true, persisted })
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 500)
+    }
+  })
+
+  app.post('/api/setup/profile', async (c) => {
+    const body = await c.req.json()
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    const age = Number(body.age)
+    const level = body.level
+    if (!name) return c.json({ error: 'name required' }, 400)
+    if (!Number.isFinite(age) || age < 3 || age > 120) {
+      return c.json({ error: 'age must be 3..120' }, 400)
+    }
+    if (level !== 'beginner' && level !== 'intermediate' && level !== 'advanced') {
+      return c.json({ error: 'level must be beginner|intermediate|advanced' }, 400)
+    }
+    await updateUserSettings({
+      name,
+      age,
+      level,
+      goals: Array.isArray(body.goals) ? body.goals.map(String) : [],
+      interests: Array.isArray(body.interests) ? body.interests.map(String) : [],
+    })
+    return c.json({ ok: true })
+  })
+
+  // ---- /api/update/check (v1.0.6 §1.4) ----
+  app.get('/api/update/check', async (c) => {
+    const version = process.env.npm_package_version ?? '0.0.0'
+    const info = await checkForUpdate(version)
+    return c.json(info)
+  })
+
   // ---- Health check (extra; not in PRD) ----
   // Useful for `curl localhost:3000/api/health` to verify the server is up.
   // Returns the count of sessions as a quick smoke check.
@@ -807,12 +882,40 @@ async function startServer(): Promise<void> {
   const port = env.PORT
 
   serve({ fetch: app.fetch, port }, (info) => {
-    // v0.8.1 — minimal startup log. v0.8.5 polish may add a banner.
     console.log(`[server] listening on http://localhost:${info.port}`)
     console.log(`[server] data dir: ${dataDir}`)
     console.log(
       `[server] LLM mode: ${process.env.RUN_LIVE_LLM?.trim() === '1' ? 'live' : 'replay'}`,
     )
+
+    // v1.0.6 §1.3 — auto-open browser when installer sets the env var.
+    // Skipped in dev / CI / tests.
+    if (process.env.ENGLISH_ORAL_TEACHER_AUTO_OPEN === '1') {
+      try {
+        const url = `http://localhost:${info.port}`
+        if (process.platform === 'win32') {
+          exec(`start "" "${url}"`)
+        } else if (process.platform === 'darwin') {
+          exec(`open "${url}"`)
+        } else {
+          exec(`xdg-open "${url}"`)
+        }
+      } catch (err) {
+        console.warn(`[server] failed to auto-open browser: ${(err as Error).message}`)
+      }
+    }
+  }).on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `\n[server] FATAL: port ${port} is already in use.\n` +
+        `  To use a different port:\n` +
+        `    1. Edit ${join(getAppDataDir(), '.env')} and set PORT=<other>\n` +
+        `    2. Restart English Oral Teacher\n` +
+        `  Or close the application that is using port ${port}.\n`,
+      )
+      process.exit(1)
+    }
+    throw err
   })
 }
 
