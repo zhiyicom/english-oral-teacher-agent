@@ -20,6 +20,10 @@ Teacher server.  Output lands at `installer/build/EnglishOralTeacher.exe`.
 ```bash
 cd "<project-root>"
 
+# Step 0 — remove secrets before packaging (--public would include them!)
+mv .env .env.bak
+mv data data.bak
+
 # Step 1 — build TypeScript + web
 pnpm build
 
@@ -36,12 +40,19 @@ node scripts/patch-bundle.cjs
 pnpm exec pkg dist/server-bundle.cjs --public --targets node24-win-x64 \
   -o installer/build/EnglishOralTeacher.exe --compress GZip --fallback-to-source
 
-# Step 5 — verify
+# Restore secrets
+mv .env.bak .env
+mv data.bak data
+
+# Step 5 — verify (run from /tmp to simulate user environment — no .env in CWD)
 rm -rf /tmp/exe-test-data
-APP_DATA_DIR=/tmp/exe-test-data ./installer/build/EnglishOralTeacher.exe &
+cd /tmp
+APP_DATA_DIR=/tmp/exe-test-data <project-root>/installer/build/EnglishOralTeacher.exe &
 sleep 5
-curl http://localhost:3000/api/health
+curl http://localhost:8787/api/health
 # → {"ok":true,"sessions":0}
+curl http://localhost:8787/api/setup/status
+# → {"needsApiKey":true,...}   ← ensures API key was NOT bundled
 ```
 
 ## Key design decisions
