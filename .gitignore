@@ -61,3 +61,9 @@ web/.vite/
 test-results/
 playwright-report/
 tests/e2e/.auth/
+
+# v1.0.6 — pkg / esbuild installer artifacts
+installer/build/
+dist/server-bundle.cjs
+dist/server-bundle.mjs
+dist/entry.cjs
