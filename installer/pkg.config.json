@@ -1,17 +1,26 @@
 {
   "name": "EnglishOralTeacher",
-  "bin": "dist/server.js",
   "pkg": {
     "scripts": [
-      "dist/**/*.js"
+      "dist/**/*.js",
+      "dist/**/*.md",
+      "dist/**/*.example"
     ],
     "assets": [
       "dist/web/**/*",
-      "node_modules/better-sqlite3/build/Release/*.node"
+      "dist/prompts/**/*",
+      "dist/migrations/**/*",
+      "node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
     ],
     "targets": [
       "node22-win-x64"
     ],
     "outputPath": "installer/build"
-  }
+  },
+  "assets": [
+    "dist/web/**/*",
+    "dist/prompts/**/*",
+    "dist/migrations/**/*",
+    "node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+  ]
 }

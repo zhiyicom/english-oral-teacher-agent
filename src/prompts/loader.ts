@@ -4,14 +4,32 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import matter from 'gray-matter'
 import lockfile from 'proper-lockfile'
-// v1.0.5.3 §1.3 — the embedded example is read at runtime from
-// dist/prompts/USER.md.example (copied by `pnpm build:copy-assets`).
-// The dev path falls back to the source tree at <project>/prompts/.
-// We can't use esbuild's `?raw` import suffix because tsx (the dev +
-// L3 test loader) doesn't pass it through to esbuild — it tries to
-// resolve the file as a regular module and fails on the .example
-// extension. The build copy step is simpler and works in all runtimes.
 import { getAppDataDir } from '../config/paths.js'
+
+// v1.0.6 — when bundled with esbuild (--loader:.md=text), these imports
+// become inline strings. The .default suffix handles esbuild's text export.
+// In tsx (dev), these fail → we fall back to readFileSync.
+let EMBEDDED_SOUL: string | null = null
+let EMBEDDED_AGENTS: string | null = null
+let EMBEDDED_TOOLS: string | null = null
+let EMBEDDED_PHASES: string | null = null
+let EMBEDDED_USER_EXAMPLE: string | null = null
+
+try {
+  EMBEDDED_SOUL = require('../../prompts/SOUL.md') as string
+} catch { /* dev mode — fall back to readFileSync */ }
+try {
+  EMBEDDED_AGENTS = require('../../prompts/AGENTS.md') as string
+} catch { /* dev mode */ }
+try {
+  EMBEDDED_TOOLS = require('../../prompts/tools.md') as string
+} catch { /* dev mode */ }
+try {
+  EMBEDDED_PHASES = require('../../prompts/phases.md') as string
+} catch { /* dev mode */ }
+try {
+  EMBEDDED_USER_EXAMPLE = require('../../prompts/USER.md.example') as string
+} catch { /* dev mode */ }
 
 export interface UserProfile {
   name: string
@@ -33,7 +51,9 @@ export interface SystemPrompt {
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
-const PROMPTS_DIR = join(__dirname, '..', '..', 'prompts')
+const PROMPTS_DIR = existsSync(join(__dirname, 'prompts'))
+  ? join(__dirname, 'prompts')
+  : join(__dirname, '..', '..', 'prompts')
 // v1.0.5.3 §1.3 — pkg-bundled example. After `pnpm build:copy-assets` runs,
 // the .example file is copied to dist/prompts/USER.md.example. The dev
 // path uses the source tree at <project>/prompts/USER.md.example. The
@@ -46,6 +66,10 @@ let cachedExample: string | null = null
 
 function loadEmbeddedExample(): string {
   if (cachedExample !== null) return cachedExample
+  if (EMBEDDED_USER_EXAMPLE !== null) {
+    cachedExample = EMBEDDED_USER_EXAMPLE
+    return cachedExample
+  }
   for (const p of EMBEDDED_EXAMPLE_PATHS) {
     if (existsSync(p)) {
       cachedExample = readFileSync(p, 'utf-8')
@@ -148,9 +172,9 @@ export function assertHasH1(label: string, body: string): void {
 }
 
 export function loadSystemPrompt(): SystemPrompt {
-  const soul = readIfExists(join(PROMPTS_DIR, 'SOUL.md'))
-  const agents = readIfExists(join(PROMPTS_DIR, 'AGENTS.md'))
-  const tools = readIfExists(join(PROMPTS_DIR, 'tools.md'))
+  const soul = EMBEDDED_SOUL ?? readIfExists(join(PROMPTS_DIR, 'SOUL.md'))
+  const agents = EMBEDDED_AGENTS ?? readIfExists(join(PROMPTS_DIR, 'AGENTS.md'))
+  const tools = EMBEDDED_TOOLS ?? readIfExists(join(PROMPTS_DIR, 'tools.md'))
 
   if (!soul) {
     throw new Error(`Missing prompts/SOUL.md (looked in ${PROMPTS_DIR})`)
@@ -199,8 +223,7 @@ export interface PhaseInstructions {
 }
 
 export function loadPhaseInstructions(): PhaseInstructions {
-  const path = join(PROMPTS_DIR, 'phases.md')
-  const raw = readIfExists(path)
+  const raw = EMBEDDED_PHASES ?? readIfExists(join(PROMPTS_DIR, 'phases.md'))
   if (!raw) throw new Error(`Missing prompts/phases.md (looked in ${PROMPTS_DIR})`)
 
   const context: Record<string, string> = {}

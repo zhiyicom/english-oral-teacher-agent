@@ -9,7 +9,7 @@
     "serve": "tsx watch src/server.ts",
     "dev-web": "concurrently -k -n srv,web -c blue,magenta \"pnpm serve\" \"pnpm --dir web dev\"",
     "build": "pnpm --dir web build && tsc && pnpm build:copy-assets",
-    "build:copy-assets": "node -e \"const fs=require('fs');const cp=(s,d)=>{fs.rmSync(d,{recursive:true,force:true});fs.cpSync(s,d,{recursive:true});};cp('web/dist','dist/web');cp('src/storage/migrations','dist/storage/migrations');cp('prompts/USER.md.example','dist/prompts/USER.md.example');\"",
+    "build:copy-assets": "node -e \"const fs=require('fs');const cp=(s,d)=>{fs.rmSync(d,{recursive:true,force:true});fs.cpSync(s,d,{recursive:true});};cp('web/dist','dist/web');cp('src/storage/migrations','dist/storage/migrations');cp('src/storage/migrations','dist/migrations');cp('prompts/USER.md.example','dist/prompts/USER.md.example');cp('prompts/SOUL.md','dist/prompts/SOUL.md');cp('prompts/AGENTS.md','dist/prompts/AGENTS.md');cp('prompts/tools.md','dist/prompts/tools.md');cp('prompts/phases.md','dist/prompts/phases.md');\"",
     "build:installer": "bash scripts/build-installer.sh",
     "build:node": "bash scripts/build-node.sh",
     "start": "node dist/server.js",
