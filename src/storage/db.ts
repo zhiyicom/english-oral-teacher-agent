@@ -18,13 +18,29 @@ export interface DbHandle {
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_MIGRATIONS_DIR = resolve(__dirname, 'migrations')
 
+// v1.0.6 — resolve better-sqlite3 native binding path for Bun compile.
+// In the compiled binary, bindings' directory walk fails because the VFS
+// doesn't mirror the project tree. We compute the path at module init so
+// the .node file is found by Bun's require at runtime.
+function resolveNativeBinding(): string | undefined {
+  try {
+    // In Bun compile, the .node is bundled. require.resolve finds it.
+    return require.resolve('better-sqlite3/build/Release/better_sqlite3.node')
+  } catch {
+    return undefined
+  }
+}
+
 export function openDb(opts: DbOptions): DbHandle {
   if (!existsSync(opts.dataDir)) {
     mkdirSync(opts.dataDir, { recursive: true })
   }
   const filename = opts.dbFilename ?? 'oral-teacher.db'
   const dbPath = join(opts.dataDir, filename)
-  const raw = new Database(dbPath)
+  const nativeBinding = resolveNativeBinding()
+  const raw = nativeBinding
+    ? new Database(dbPath, { nativeBinding })
+    : new Database(dbPath)
   raw.pragma('journal_mode = WAL')
   raw.pragma('foreign_keys = ON')
   return {

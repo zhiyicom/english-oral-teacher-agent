@@ -6,30 +6,25 @@ import matter from 'gray-matter'
 import lockfile from 'proper-lockfile'
 import { getAppDataDir } from '../config/paths.js'
 
-// v1.0.6 — when bundled with esbuild (--loader:.md=text), these imports
-// become inline strings. The .default suffix handles esbuild's text export.
-// In tsx (dev), these fail → we fall back to readFileSync.
-let EMBEDDED_SOUL: string | null = null
-let EMBEDDED_AGENTS: string | null = null
-let EMBEDDED_TOOLS: string | null = null
-let EMBEDDED_PHASES: string | null = null
-let EMBEDDED_USER_EXAMPLE: string | null = null
+// v1.0.6 §1.1 — import package.json so Bun compile includes it in VFS.
+// better-sqlite3's bindings resolution walks up directories looking for
+// package.json; without this, Bun's VFS lacks a package.json at any level.
+import '../../package.json' with { type: 'json' }
 
-try {
-  EMBEDDED_SOUL = require('../../prompts/SOUL.md') as string
-} catch { /* dev mode — fall back to readFileSync */ }
-try {
-  EMBEDDED_AGENTS = require('../../prompts/AGENTS.md') as string
-} catch { /* dev mode */ }
-try {
-  EMBEDDED_TOOLS = require('../../prompts/tools.md') as string
-} catch { /* dev mode */ }
-try {
-  EMBEDDED_PHASES = require('../../prompts/phases.md') as string
-} catch { /* dev mode */ }
-try {
-  EMBEDDED_USER_EXAMPLE = require('../../prompts/USER.md.example') as string
-} catch { /* dev mode */ }
+// v1.0.6 §1.1 — embedded prompt files for Bun/pkg build.
+// Bun --compile traces static imports and includes .md text natively.
+// tsx/esbuild wrapper can use tsx's text loader or fall back to readFileSync.
+import SOUL_MD from '../../prompts/SOUL.md' with { type: 'text' }
+import AGENTS_MD from '../../prompts/AGENTS.md' with { type: 'text' }
+import TOOLS_MD from '../../prompts/tools.md' with { type: 'text' }
+import PHASES_MD from '../../prompts/phases.md' with { type: 'text' }
+import USER_EXAMPLE_MD from '../../prompts/USER.md.example' with { type: 'text' }
+
+const EMBEDDED_SOUL: string | null = typeof SOUL_MD === 'string' ? SOUL_MD : null
+const EMBEDDED_AGENTS: string | null = typeof AGENTS_MD === 'string' ? AGENTS_MD : null
+const EMBEDDED_TOOLS: string | null = typeof TOOLS_MD === 'string' ? TOOLS_MD : null
+const EMBEDDED_PHASES: string | null = typeof PHASES_MD === 'string' ? PHASES_MD : null
+const EMBEDDED_USER_EXAMPLE: string | null = typeof USER_EXAMPLE_MD === 'string' ? USER_EXAMPLE_MD : null
 
 export interface UserProfile {
   name: string
