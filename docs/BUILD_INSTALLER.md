@@ -15,6 +15,18 @@ Teacher server.  Output lands at `installer/build/EnglishOralTeacher.exe`.
 - pnpm >= 9
 - (optional) Inno Setup 6 for the final `-Setup-` wrapper
 
+## First-time setup (new machine)
+
+```bash
+git clone https://github.com/zhiyicom/english-oral-teacher-agent.git
+cd english-oral-teacher-agent
+pnpm install
+cp .env.example .env   # then edit .env with your API key
+pnpm build
+```
+After these steps the project is ready for development (`pnpm dev-web`) and
+for building the installer (see below).
+
 ## Quick start
 
 ```bash
@@ -28,9 +40,8 @@ mv data data.bak
 pnpm build
 
 # Step 2 — bundle ESM → CJS via esbuild
-node node_modules/.pnpm/esbuild@0.28.0/node_modules/esbuild/bin/esbuild \
-  dist/server.js --bundle --platform=node --target=node22 --format=cjs \
-  --outfile=dist/server-bundle.cjs --packages=external \
+pnpm exec esbuild dist/server.js --bundle --platform=node --target=node22 \
+  --format=cjs --outfile=dist/server-bundle.cjs --packages=external \
   --loader:.md=text --loader:.example=text
 
 # Step 3 — patch the CJS bundle (import.meta.url, prompts path, inline SQL)
