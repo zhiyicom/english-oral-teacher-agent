@@ -60,5 +60,64 @@ const newApplyMigrations =
 
 content = content.replace(/function applyMigrations[\s\S]*?^\}/m, newApplyMigrations)
 
+// --- 5. Inline dist/web/ as WEB_ASSETS so pkg doesn't need VFS for SPA ---
+const webAssets = {}
+function loadWebDir(dir, base) {
+  const entries = fs.readdirSync(dir, { withFileTypes: true })
+  for (const e of entries) {
+    const full = path.join(dir, e.name)
+    const rel = '/' + path.relative(base, full).replace(/\\/g, '/')
+    if (e.isDirectory()) {
+      loadWebDir(full, base)
+    } else {
+      webAssets[rel] = fs.readFileSync(full).toString('base64')
+    }
+  }
+}
+try { loadWebDir('dist/web', 'dist/web') } catch (e) { /* dist/web may not exist */ }
+const webAssetsJson = JSON.stringify(webAssets)
+const webMime = JSON.stringify({
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+})
+// Inject WEB_ASSETS at the top of the bundle
+const webAssetsCode =
+  'var WEB_ASSETS=' + webAssetsJson + ';\n' +
+  'var WEB_MIME=' + webMime + ';\n' +
+  'function serveWebAsset(path) {\n' +
+  '  var b64=WEB_ASSETS[path];\n' +
+  '  if(!b64) return null;\n' +
+  '  var ext=path.split(".").pop();\n' +
+  '  var mime=WEB_MIME["."+ext]||"application/octet-stream";\n' +
+  '  return {body:Buffer.from(b64,"base64"),mime:mime};\n' +
+  '}\n'
+const firstLine2 = content.indexOf('\n') + 1
+content = content.slice(0, firstLine2) + webAssetsCode + content.slice(firstLine2)
+
+// Replace the SPA-serving code in server.js to use embedded assets
+// Old pattern: if (!existsSync(distIndex)) return c.text('SPA not built...')
+// New pattern: try embedded WEB_ASSETS first
+content = content.replace(
+  /if \(!existsSync\(distIndex\)\) return c\.text\('SPA not built[^']*'[^)]*\)/,
+  'if (serveWebAsset("/index.html")) { /* use embedded */ } else if (!existsSync(distIndex)) return c.text("SPA not built. Run `pnpm build` first.", 500)'
+)
+
+// Replace the /assets/* handler to try embedded first
+content = content.replace(
+  /var filePath = resolve\(distDir, c\.req\.path\.slice\(1\)\);\s*if \(!filePath\.startsWith\(distDir\)\) return c\.notFound\(\);\s*if \(!existsSync\(filePath\)\) return c\.notFound\(\)/,
+  'var assetPath = c.req.path.slice(1); var embedded = serveWebAsset("/" + assetPath); if (embedded) return c.body(embedded.body, 200, {"Content-Type": embedded.mime}); var filePath = resolve(distDir, assetPath); if (!filePath.startsWith(distDir)) return c.notFound(); if (!existsSync(filePath)) return c.notFound()'
+)
+
+// Replace the SPA fallback to try embedded first
+content = content.replace(
+  /if \(!existsSync\(distIndex\)\) return c\.text\('SPA not built[^)]*\);\s*return c\.html\(readFileSync\(distIndex[^)]*\)\)/,
+  'var embeddedIndex = serveWebAsset("/index.html"); if (embeddedIndex) return c.body(embeddedIndex.body, 200, {"Content-Type": embeddedIndex.mime}); if (!existsSync(distIndex)) return c.text("SPA not built. Run `pnpm build` first.", 500); return c.html(readFileSync(distIndex, "utf-8"))'
+)
+
 fs.writeFileSync(BUNDLE, content, 'utf-8')
-console.log('[patch-bundle] done')
+console.log('[patch-bundle] done (' + Object.keys(webAssets).length + ' web files inlined)')
