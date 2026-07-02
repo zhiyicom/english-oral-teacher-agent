@@ -99,25 +99,45 @@ const webAssetsCode =
 const firstLine2 = content.indexOf('\n') + 1
 content = content.slice(0, firstLine2) + webAssetsCode + content.slice(firstLine2)
 
-// Replace the SPA-serving code in server.js to use embedded assets
-// Old pattern: if (!existsSync(distIndex)) return c.text('SPA not built...')
-// New pattern: try embedded WEB_ASSETS first
-content = content.replace(
-  /if \(!existsSync\(distIndex\)\) return c\.text\('SPA not built[^']*'[^)]*\)/,
-  'if (serveWebAsset("/index.html")) { /* use embedded */ } else if (!existsSync(distIndex)) return c.text("SPA not built. Run `pnpm build` first.", 500)'
-)
+// Replace the SPA-serving code in server.js to use embedded assets.
+// Use multiline match to find entire handler blocks — more robust than
+// pattern-matching individual lines which break when esbuild output format changes.
+const assetsOld = content.match(/  app\.get\("\/assets\/\*", \(c\) => \{[\s\S]*?\n  \}\);/)?.[0]
+if (assetsOld) {
+  content = content.replace(assetsOld, [
+    '  app.get("/assets/*", (c) => {',
+    '    var assetPath = c.req.path.slice(1);',
+    '    var embedded = serveWebAsset("/" + assetPath);',
+    '    if (embedded) return c.body(embedded.body, 200, {"Content-Type": embedded.mime});',
+    '    var filePath = (0, import_node_path.resolve)(distDir, assetPath);',
+    '    if (!filePath.startsWith(distDir)) return c.notFound();',
+    '    if (!(0, import_node_fs8.existsSync)(filePath)) return c.notFound();',
+    '    var ext = filePath.split(".").pop();',
+    '    var mime = { js: "text/javascript", css: "text/css", svg: "image/svg+xml", png: "image/png", ico: "image/x-icon", woff2: "font/woff2" };',
+    '    return c.body((0, import_node_fs8.readFileSync)(filePath), 200, {"Content-Type": mime[ext ?? ""] ?? "application/octet-stream"});',
+    '  });',
+  ].join('\n'))
+  console.log('[patch-bundle] /assets/* replaced')
+} else {
+  console.log('[patch-bundle] WARNING: /assets/* pattern not found')
+}
 
-// Replace the /assets/* handler to try embedded first
-content = content.replace(
-  /var filePath = resolve\(distDir, c\.req\.path\.slice\(1\)\);\s*if \(!filePath\.startsWith\(distDir\)\) return c\.notFound\(\);\s*if \(!existsSync\(filePath\)\) return c\.notFound\(\)/,
-  'var assetPath = c.req.path.slice(1); var embedded = serveWebAsset("/" + assetPath); if (embedded) return c.body(embedded.body, 200, {"Content-Type": embedded.mime}); var filePath = resolve(distDir, assetPath); if (!filePath.startsWith(distDir)) return c.notFound(); if (!existsSync(filePath)) return c.notFound()'
-)
-
-// Replace the SPA fallback to try embedded first
-content = content.replace(
-  /if \(!existsSync\(distIndex\)\) return c\.text\('SPA not built[^)]*\);\s*return c\.html\(readFileSync\(distIndex[^)]*\)\)/,
-  'var embeddedIndex = serveWebAsset("/index.html"); if (embeddedIndex) return c.body(embeddedIndex.body, 200, {"Content-Type": embeddedIndex.mime}); if (!existsSync(distIndex)) return c.text("SPA not built. Run `pnpm build` first.", 500); return c.html(readFileSync(distIndex, "utf-8"))'
-)
+const spaOld = content.match(/  app\.get\("\/\*", \(c\) => \{[\s\S]*?\n  \}\);/)?.[0]
+if (spaOld) {
+  content = content.replace(spaOld, [
+    '  app.get("/*", (c) => {',
+    '    if (c.req.path.startsWith("/api")) return c.notFound();',
+    '    var embeddedIndex = serveWebAsset("/index.html");',
+    '    if (embeddedIndex) return c.body(embeddedIndex.body, 200, {"Content-Type": embeddedIndex.mime});',
+    '    if (!(0, import_node_fs8.existsSync)(distIndex))',
+    '      return c.text("SPA not built. Run `pnpm build` first.", 500);',
+    '    return c.html((0, import_node_fs8.readFileSync)(distIndex, "utf-8"));',
+    '  });',
+  ].join('\n'))
+  console.log('[patch-bundle] SPA fallback replaced')
+} else {
+  console.log('[patch-bundle] WARNING: SPA pattern not found')
+}
 
 fs.writeFileSync(BUNDLE, content, 'utf-8')
 console.log('[patch-bundle] done (' + Object.keys(webAssets).length + ' web files inlined)')

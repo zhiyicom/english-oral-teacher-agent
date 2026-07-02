@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 type Step = 'apiKey' | 'profile'
@@ -8,6 +8,10 @@ export default function SetupPage() {
   const [step, setStep] = useState<Step>('apiKey')
   const [apiKey, setApiKey] = useState('')
   const [runLiveLlm, setRunLiveLlm] = useState(true)
+  const [baseUrl, setBaseUrl] = useState('')
+  const [model, setModel] = useState('')
+  const [defaultBaseUrl, setDefaultBaseUrl] = useState('https://api.minimaxi.com/anthropic')
+  const [defaultModel, setDefaultModel] = useState('MiniMax-M3')
   const [profile, setProfile] = useState<{
     name: string; age: number; level: 'beginner' | 'intermediate' | 'advanced';
     goals: string[]; interests: string[];
@@ -17,6 +21,17 @@ export default function SetupPage() {
   })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/setup/status')
+      .then((r) => r.json())
+      .then((s: { runLiveLlm?: boolean; baseUrl?: string; model?: string }) => {
+        if (typeof s.runLiveLlm === 'boolean') setRunLiveLlm(s.runLiveLlm)
+        if (typeof s.baseUrl === 'string' && s.baseUrl.trim()) setDefaultBaseUrl(s.baseUrl.trim())
+        if (typeof s.model === 'string' && s.model.trim()) setDefaultModel(s.model.trim())
+      })
+      .catch(() => {})
+  }, [])
 
   async function fetchDefaults() {
     try {
@@ -48,7 +63,12 @@ export default function SetupPage() {
               const r = await fetch('/api/setup/api-key', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ apiKey, runLiveLlm }),
+                body: JSON.stringify({
+                  apiKey,
+                  runLiveLlm,
+                  baseUrl: baseUrl.trim() || undefined,
+                  model: model.trim() || undefined,
+                }),
               })
               if (!r.ok) throw new Error((await r.json()).error ?? 'failed')
               setApiKey('')
@@ -62,17 +82,44 @@ export default function SetupPage() {
         >
           <h2 className="text-xl font-semibold">Welcome — 首次设置</h2>
           <p className="text-sm text-slate-600">
-            请输入你的 API Key。可从你的 LLM 服务商获取。
+            请输入你的 API Key 和 LLM 配置信息。
           </p>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-..."
-            className="w-full rounded border px-3 py-2"
-            autoFocus
-            required
-          />
+
+          <label className="block">
+            <span className="text-sm text-slate-700">API Key</span>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="sk-..."
+              className="mt-1 w-full rounded border px-3 py-2"
+              autoFocus
+              required
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-sm text-slate-700">Base URL</span>
+            <input
+              type="text"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder={defaultBaseUrl}
+              className="mt-1 w-full rounded border px-3 py-2 placeholder:text-slate-400"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-sm text-slate-700">模型</span>
+            <input
+              type="text"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder={defaultModel}
+              className="mt-1 w-full rounded border px-3 py-2 placeholder:text-slate-400"
+            />
+          </label>
+
           <label className="flex items-center gap-2 text-sm text-slate-600">
             <input
               type="checkbox"

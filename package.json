@@ -1,6 +1,6 @@
 {
   "name": "english-oral-teacher-agent",
-  "version": "0.1.0",
+  "version": "1.0.6",
   "private": true,
   "type": "module",
   "description": "A local AI agent for English oral practice",

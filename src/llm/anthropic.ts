@@ -108,7 +108,7 @@ export function createAnthropicProvider(env: Env): LLMClient {
     const systemParam = opts.systemBlocks ?? opts.system
 
     const stream = await client.messages.create({
-      model: env.LLM_MODEL_MAIN,
+      model: env.LLM_MODEL,
       max_tokens: opts.maxTokens ?? env.LLM_MAX_TOKENS,
       temperature: opts.temperature ?? env.LLM_TEMPERATURE,
       system: systemParam,

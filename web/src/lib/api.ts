@@ -94,6 +94,9 @@ export async function updateTopics(topics: TopicApi[]): Promise<void> {
 export interface SetupStatus {
   needsApiKey: boolean
   hasUserProfile: boolean
+  runLiveLlm: boolean
+  baseUrl: string
+  model: string
   appDataDir: string
   version: string
 }
@@ -118,11 +121,16 @@ export async function getProfileDefault(): Promise<ProfileDefault> {
   return (await res.json()) as ProfileDefault
 }
 
-export async function saveApiKey(apiKey: string): Promise<{ ok: boolean; persisted: string[] }> {
+export async function saveApiKey(opts: {
+  apiKey: string
+  runLiveLlm?: boolean
+  baseUrl?: string
+  model?: string
+}): Promise<{ ok: boolean; persisted: string[] }> {
   const res = await fetch(`${BASE}/api/setup/api-key`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ apiKey }),
+    body: JSON.stringify(opts),
   })
   if (!res.ok) throw new Error((await res.json()).error ?? `saveApiKey: HTTP ${res.status}`)
   return (await res.json()) as { ok: boolean; persisted: string[] }

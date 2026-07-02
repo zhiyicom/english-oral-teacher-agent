@@ -181,7 +181,7 @@ function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLM
     }
   }
   // RUN_LIVE_LLM=1 takes priority — user explicitly wants the live API.
-  if (process.env.RUN_LIVE_LLM?.trim() === '1') {
+  if (getEnvVar('RUN_LIVE_LLM') === '1') {
     return createAnthropicProvider(env)
   }
   // Default: replay mode. Requires fixtures to exist.
@@ -253,7 +253,7 @@ export function createApp(opts: {
   const keywordHits = createKeywordHitsDao(db)
   const mistakesDao = createMistakesDao(db)
   const systemPrompt = loadSystemPrompt()
-  const client = selectClient(env, opts.fixturesDir)
+  let client = selectClient(env, opts.fixturesDir)
   const embedder = createTransformersEmbedder()
   // v1.0.1 — UI preferences stored in a JSON file (localStorage is not
   // reliable across browser restarts). Voice settings stay in USER.md.
@@ -599,6 +599,8 @@ export function createApp(opts: {
       mic_hotkey: prefs.mic_hotkey ?? null,
       send_hotkey: prefs.send_hotkey ?? null,
       run_live_llm: getEnvVar('RUN_LIVE_LLM') === '1',
+      base_url: getEnvVar('ANTHROPIC_BASE_URL') || 'https://api.minimaxi.com/anthropic',
+      model: getEnvVar('LLM_MODEL') || 'MiniMax-M3',
     })
   })
 
@@ -741,6 +743,22 @@ export function createApp(opts: {
       try {
         setEnvVar('RUN_LIVE_LLM', body.run_live_llm ? '1' : '0')
         persisted.push('run_live_llm')
+        // Re-initialize LLM client on toggle
+        if (getEnvVar('RUN_LIVE_LLM') === '1') {
+          client = selectClient(env, opts.fixturesDir)
+        }
+      } catch { /* best-effort */ }
+    }
+    if (typeof body.base_url === 'string' && body.base_url.trim()) {
+      try {
+        setEnvVar('ANTHROPIC_BASE_URL', body.base_url.trim())
+        persisted.push('base_url')
+      } catch { /* best-effort */ }
+    }
+    if (typeof body.model === 'string' && body.model.trim()) {
+      try {
+        setEnvVar('LLM_MODEL', body.model.trim())
+        persisted.push('model')
       } catch { /* best-effort */ }
     }
 
@@ -764,10 +782,14 @@ export function createApp(opts: {
       )
     } catch { /* missing = false */ }
     const runLiveLlm = getEnvVar('RUN_LIVE_LLM') === '1'
+    const baseUrl = getEnvVar('ANTHROPIC_BASE_URL') || 'https://api.minimaxi.com/anthropic'
+    const modelMain = getEnvVar('LLM_MODEL') || 'MiniMax-M3'
     return c.json({
       needsApiKey,
       hasUserProfile,
       runLiveLlm,
+      baseUrl,
+      model: modelMain,
       appDataDir: getAppDataDir(),
       version: process.env.npm_package_version ?? '0.0.0',
     })
@@ -791,9 +813,19 @@ export function createApp(opts: {
     try {
       const persisted: string[] = []
       persisted.push(...setApiKeyPersist(key).persisted)
-      // v1.0.6 — also save RUN_LIVE_LLM from setup wizard step 1
+      // v1.0.6 — save all LLM configuration from setup wizard step 1
       if (typeof body.runLiveLlm === 'boolean') {
         persisted.push(...setEnvVar('RUN_LIVE_LLM', body.runLiveLlm ? '1' : '0').persisted)
+      }
+      if (typeof body.baseUrl === 'string' && body.baseUrl.trim()) {
+        persisted.push(...setEnvVar('ANTHROPIC_BASE_URL', body.baseUrl.trim()).persisted)
+      }
+      if (typeof body.model === 'string' && body.model.trim()) {
+        persisted.push(...setEnvVar('LLM_MODEL', body.model.trim()).persisted)
+      }
+      // Re-initialize LLM client — setup may have switched replay→live
+      if (getEnvVar('RUN_LIVE_LLM') === '1') {
+        client = selectClient(env, opts.fixturesDir)
       }
       return c.json({ ok: true, persisted })
     } catch (err) {
@@ -901,7 +933,7 @@ async function startServer(): Promise<void> {
     console.log(`[server] listening on http://localhost:${info.port}`)
     console.log(`[server] data dir: ${dataDir}`)
     console.log(
-      `[server] LLM mode: ${process.env.RUN_LIVE_LLM?.trim() === '1' ? 'live' : 'replay'}`,
+      `[server] LLM mode: ${getEnvVar('RUN_LIVE_LLM') === '1' ? 'live' : 'replay'}`,
     )
 
     // v1.0.6 §1.3 — auto-open browser when installer sets the env var.

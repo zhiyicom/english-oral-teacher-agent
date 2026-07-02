@@ -29,6 +29,8 @@ export interface SettingsApi {
   mic_hotkey: Record<string, unknown> | null
   send_hotkey: Record<string, unknown> | null
   run_live_llm: boolean
+  base_url: string
+  model: string
 }
 
 // v0.8.3 — SSE event types consumed by SessionPage.

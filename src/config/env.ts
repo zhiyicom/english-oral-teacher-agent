@@ -9,8 +9,7 @@ const EnvSchema = z.object({
   // "setup needed" mode and the web UI shows /setup.
   API_KEY: z.string().optional(),
   ANTHROPIC_BASE_URL: z.string().url().default('https://api.minimaxi.com/anthropic'),
-  LLM_MODEL_MAIN: z.string().default('MiniMax-M3'),
-  LLM_MODEL_SUMMARIZER: z.string().default('MiniMax-M3'),
+  LLM_MODEL: z.string().default('MiniMax-M3'),
   LLM_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.7),
   LLM_MAX_TOKENS: z.coerce.number().int().positive().default(2048),
   // v0.7.5 — single-turn input token cap. CLI truncates oldest history

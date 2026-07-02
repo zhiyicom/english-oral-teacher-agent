@@ -31,10 +31,10 @@ describe('loadEnv', () => {
     expect(() => loadEnv()).toThrow(/API_KEY/)
   })
 
-  it('uses default LLM_MODEL_MAIN when not set', () => {
+  it('uses default LLM_MODEL when not set', () => {
     process.env.API_KEY = 'sk-test'
     const env = loadEnv()
-    expect(env.LLM_MODEL_MAIN).toBe('MiniMax-M3')
+    expect(env.LLM_MODEL).toBe('MiniMax-M3')
   })
 
   it('rejects out-of-range LLM_TEMPERATURE', () => {

@@ -76,6 +76,8 @@ export default function SettingsPage() {
           voice_speed: voiceSpeed,
           voice_accent: voiceAccent,
           run_live_llm: srv.run_live_llm ?? false,
+          base_url: srv.base_url ?? '',
+          model: srv.model ?? '',
         })
 
         // Hotkeys: localStorage first, server fallback
@@ -112,6 +114,8 @@ export default function SettingsPage() {
         font_size: settings.font_size,
         show_debug: settings.show_debug,
         run_live_llm: settings.run_live_llm,
+        base_url: settings.base_url,
+        model: settings.model,
         mic_hotkey: micHotkey as unknown as Record<string, unknown>,
         send_hotkey: sendHotkey as unknown as Record<string, unknown>,
       })
@@ -286,6 +290,32 @@ export default function SettingsPage() {
           >
             {settings.run_live_llm ? 'ON' : 'OFF'}
           </button>
+        </div>
+        <div className="mt-3">
+          <label className="text-sm text-slate-500" htmlFor="base-url">
+            Base URL
+          </label>
+          <input
+            id="base-url"
+            type="text"
+            value={settings.base_url}
+            onChange={(e) => updateField('base_url', e.target.value)}
+            className="mt-1 block w-full rounded border border-slate-300 px-3 py-1 text-sm"
+            placeholder="https://api.minimaxi.com/anthropic"
+          />
+        </div>
+        <div className="mt-3">
+          <label className="text-sm text-slate-500" htmlFor="model-main">
+            模型
+          </label>
+          <input
+            id="model-main"
+            type="text"
+            value={settings.model}
+            onChange={(e) => updateField('model', e.target.value)}
+            className="mt-1 block w-full rounded border border-slate-300 px-3 py-1 text-sm placeholder:text-slate-400"
+            placeholder="MiniMax-M3"
+          />
         </div>
       </div>
 
