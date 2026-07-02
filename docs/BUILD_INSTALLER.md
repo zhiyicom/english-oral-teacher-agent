@@ -50,6 +50,10 @@ node scripts/patch-bundle.cjs
 # Step 4 — pkg compile
 pnpm exec pkg dist/server-bundle.cjs --public --targets node24-win-x64 \
   -o installer/build/EnglishOralTeacher.exe --compress GZip --fallback-to-source
+# NOTE: do NOT use -c installer/pkg.config.json — pkg v6 ignores the
+# "assets" key, and the "scripts" filter in the config limits what
+# files enter the VFS. --public alone includes everything including
+# dist/web/ (SPA) and package.json (better-sqlite3 bindings).
 
 # Restore secrets
 mv .env.bak .env
