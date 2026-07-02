@@ -7,6 +7,7 @@ export default function SetupPage() {
   const navigate = useNavigate()
   const [step, setStep] = useState<Step>('apiKey')
   const [apiKey, setApiKey] = useState('')
+  const [runLiveLlm, setRunLiveLlm] = useState(true)
   const [profile, setProfile] = useState<{
     name: string; age: number; level: 'beginner' | 'intermediate' | 'advanced';
     goals: string[]; interests: string[];
@@ -47,7 +48,7 @@ export default function SetupPage() {
               const r = await fetch('/api/setup/api-key', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ apiKey }),
+                body: JSON.stringify({ apiKey, runLiveLlm }),
               })
               if (!r.ok) throw new Error((await r.json()).error ?? 'failed')
               setApiKey('')
@@ -72,6 +73,15 @@ export default function SetupPage() {
             autoFocus
             required
           />
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={runLiveLlm}
+              onChange={(e) => setRunLiveLlm(e.target.checked)}
+              className="rounded"
+            />
+            启用在线 LLM（需要网络连接）
+          </label>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <button
             type="submit"

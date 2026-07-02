@@ -55,6 +55,45 @@ export function setApiKey(key: string): { persisted: string[] } {
   return { persisted }
 }
 
+export function setEnvVar(key: string, value: string): { persisted: string[] } {
+  if (!/^[A-Z_][A-Z0-9_]*$/.test(key)) throw new Error(`Invalid env key: ${key}`)
+  const envPath = join(getAppDataDir(), '.env')
+
+  let current: Record<string, string> = {}
+  if (existsSync(envPath)) current = readEnvFile(envPath)
+
+  const persisted: string[] = []
+  if (current[key] !== value) {
+    current[key] = value
+    persisted.push(key)
+  }
+
+  const content =
+    Object.entries(current)
+      .map(([k, v]) => {
+        const needsQuote = /\s|["'=#]/.test(v)
+        return needsQuote ? `${k}="${v.replace(/"/g, '\\"')}"` : `${k}=${v}`
+      })
+      .join('\n') + '\n'
+
+  const tmp = `${envPath}.tmp.${Date.now()}`
+  writeFileSync(tmp, content, 'utf-8')
+  renameSync(tmp, envPath)
+  process.env[key] = value
+  return { persisted }
+}
+
+export function getEnvVar(key: string): string {
+  const fromEnv = process.env[key]
+  if (fromEnv !== undefined) return fromEnv
+
+  const fromAppData = readEnvFile(join(getAppDataDir(), '.env'))[key]
+  if (fromAppData !== undefined) return fromAppData
+
+  const fromCwd = readEnvFile(join(process.cwd(), '.env'))[key]
+  return fromCwd ?? ''
+}
+
 function readEnvFile(path: string): Record<string, string> {
   if (!existsSync(path)) return {}
   const content = readFileSync(path, 'utf-8')

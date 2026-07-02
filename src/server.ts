@@ -40,7 +40,7 @@ import { extractStudentDiscoveries } from './agent/profile-extractor.js'
 import type { TurnOutput } from './agent/turn.js'
 import { loadEnv } from './config/env.js'
 import { getAppDataDir, getReplayFixturesDir } from './config/paths.js'
-import { getApiKey, isSetupNeeded, setApiKey as setApiKeyPersist } from './config/secrets.js'
+import { getApiKey, getEnvVar, isSetupNeeded, setApiKey as setApiKeyPersist, setEnvVar } from './config/secrets.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
 import { logSummarize, logSummarizeFailure, logWebDiagnostic } from './llm/debug-log.js'
 import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
@@ -598,6 +598,7 @@ export function createApp(opts: {
       show_debug: prefs.show_debug ?? false,
       mic_hotkey: prefs.mic_hotkey ?? null,
       send_hotkey: prefs.send_hotkey ?? null,
+      run_live_llm: getEnvVar('RUN_LIVE_LLM') === '1',
     })
   })
 
@@ -735,6 +736,14 @@ export function createApp(opts: {
       prefsUpdates.send_hotkey = body.send_hotkey
       persisted.push('send_hotkey')
     }
+    // v1.0.6 — RUN_LIVE_LLM persisted to AppData/.env
+    if (typeof body.run_live_llm === 'boolean') {
+      try {
+        setEnvVar('RUN_LIVE_LLM', body.run_live_llm ? '1' : '0')
+        persisted.push('run_live_llm')
+      } catch { /* best-effort */ }
+    }
+
     if (Object.keys(prefsUpdates).length > 0) {
       savePrefs(prefsUpdates)
     }
@@ -754,9 +763,11 @@ export function createApp(opts: {
         typeof data.age === 'number'
       )
     } catch { /* missing = false */ }
+    const runLiveLlm = getEnvVar('RUN_LIVE_LLM') === '1'
     return c.json({
       needsApiKey,
       hasUserProfile,
+      runLiveLlm,
       appDataDir: getAppDataDir(),
       version: process.env.npm_package_version ?? '0.0.0',
     })
@@ -778,7 +789,12 @@ export function createApp(opts: {
     const key = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
     if (!key) return c.json({ error: 'apiKey required' }, 400)
     try {
-      const { persisted } = setApiKeyPersist(key)
+      const persisted: string[] = []
+      persisted.push(...setApiKeyPersist(key).persisted)
+      // v1.0.6 — also save RUN_LIVE_LLM from setup wizard step 1
+      if (typeof body.runLiveLlm === 'boolean') {
+        persisted.push(...setEnvVar('RUN_LIVE_LLM', body.runLiveLlm ? '1' : '0').persisted)
+      }
       return c.json({ ok: true, persisted })
     } catch (err) {
       return c.json({ error: (err as Error).message }, 500)

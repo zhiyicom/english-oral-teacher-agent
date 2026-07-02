@@ -75,6 +75,7 @@ export default function SettingsPage() {
           voice_enabled: voiceEnabled,
           voice_speed: voiceSpeed,
           voice_accent: voiceAccent,
+          run_live_llm: srv.run_live_llm ?? false,
         })
 
         // Hotkeys: localStorage first, server fallback
@@ -110,6 +111,7 @@ export default function SettingsPage() {
         voice_accent: settings.voice_accent,
         font_size: settings.font_size,
         show_debug: settings.show_debug,
+        run_live_llm: settings.run_live_llm,
         mic_hotkey: micHotkey as unknown as Record<string, unknown>,
         send_hotkey: sendHotkey as unknown as Record<string, unknown>,
       })
@@ -262,6 +264,27 @@ export default function SettingsPage() {
             onClick={() => updateField('show_debug', !settings.show_debug)}
           >
             {settings.show_debug ? 'ON' : 'OFF'}
+          </button>
+        </div>
+      </div>
+
+      {/* LLM section */}
+      <div className="mt-4 rounded border bg-white p-4 shadow-sm">
+        <h3 className="text-sm font-medium text-slate-700">LLM</h3>
+        <div className="mt-3 flex items-center justify-between">
+          <label className="text-sm text-slate-500" htmlFor="run-live-llm">
+            Live LLM
+          </label>
+          <button
+            id="run-live-llm"
+            type="button"
+            data-testid="live-llm-toggle"
+            className={`rounded-full px-3 py-1 text-xs ${
+              settings.run_live_llm ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'
+            }`}
+            onClick={() => updateField('run_live_llm', !settings.run_live_llm)}
+          >
+            {settings.run_live_llm ? 'ON' : 'OFF'}
           </button>
         </div>
       </div>

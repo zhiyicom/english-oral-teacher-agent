@@ -9,8 +9,7 @@
     "assets": [
       "dist/web/**/*",
       "dist/prompts/**/*",
-      "dist/migrations/**/*",
-      "node_modules/.pnpm/better-sqlite3@12.10.0/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+      "dist/migrations/**/*"
     ],
     "targets": [
       "node22-win-x64"

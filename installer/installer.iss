@@ -1,3 +1,5 @@
+#define MyAppVersion "1.0.6"
+
 [Setup]
 AppName=English Oral Teacher
 AppVersion={#MyAppVersion}
@@ -5,9 +7,9 @@ AppPublisher=zhiyicom
 DefaultDirName={autopf}\EnglishOralTeacher
 DisableProgramGroupPage=yes
 DisableDirPage=no
-OutputDir=installer\build
+OutputDir=build
 OutputBaseFilename=EnglishOralTeacher-Setup-v{#MyAppVersion}
-SetupIconFile=installer\icons\app.ico
+; SetupIconFile=installer\icons\app.ico  ; placeholder: add icon to installer/icons/
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -17,8 +19,9 @@ UninstallDisplayName=English Oral Teacher
 VersionInfoVersion={#MyAppVersion}
 
 [Files]
-Source: "installer\build\EnglishOralTeacher.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "installer\build\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Source paths are relative to this .iss file (installer/ directory)
+Source: "build\EnglishOralTeacher.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "build\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autodesktop}\English Oral Teacher"; Filename: "{app}\EnglishOralTeacher.exe"; IconFilename: "{app}\EnglishOralTeacher.exe"; Tasks: desktopicon
@@ -30,7 +33,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "startmenu"; Description: "Create a Start Menu shortcut"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 
 [Run]
-Filename: "{app}\EnglishOralTeacher.exe"; Description: "Run English Oral Teacher"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\EnglishOralTeacher.exe"; Description: "Run English Oral Teacher"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\logs"
