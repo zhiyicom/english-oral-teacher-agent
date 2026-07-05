@@ -11,20 +11,31 @@ import { getAppDataDir } from '../config/paths.js'
 // package.json; without this, Bun's VFS lacks a package.json at any level.
 import '../../package.json' with { type: 'json' }
 
-// v1.0.6 §1.1 — embedded prompt files for Bun/pkg build.
-// Bun --compile traces static imports and includes .md text natively.
-// tsx/esbuild wrapper can use tsx's text loader or fall back to readFileSync.
-import SOUL_MD from '../../prompts/SOUL.md' with { type: 'text' }
-import AGENTS_MD from '../../prompts/AGENTS.md' with { type: 'text' }
-import TOOLS_MD from '../../prompts/tools.md' with { type: 'text' }
-import PHASES_MD from '../../prompts/phases.md' with { type: 'text' }
-import USER_EXAMPLE_MD from '../../prompts/USER.md.example' with { type: 'text' }
+// v1.0.6 §1.1 — prompt contents are inlined by patch-bundle.cjs into the
+// pkg bundle as globalThis.EMBEDDED_PROMPTS. Dev mode (tsx running source
+// TS) never runs patch-bundle, so this is undefined and we fall back to
+// readFileSync on disk.
+type EmbeddedPrompts = Record<string, string>
+function getEmbeddedPrompts(): EmbeddedPrompts | undefined {
+  const g = globalThis as { EMBEDDED_PROMPTS?: EmbeddedPrompts }
+  return g.EMBEDDED_PROMPTS
+}
 
-const EMBEDDED_SOUL: string | null = typeof SOUL_MD === 'string' ? SOUL_MD : null
-const EMBEDDED_AGENTS: string | null = typeof AGENTS_MD === 'string' ? AGENTS_MD : null
-const EMBEDDED_TOOLS: string | null = typeof TOOLS_MD === 'string' ? TOOLS_MD : null
-const EMBEDDED_PHASES: string | null = typeof PHASES_MD === 'string' ? PHASES_MD : null
-const EMBEDDED_USER_EXAMPLE: string | null = typeof USER_EXAMPLE_MD === 'string' ? USER_EXAMPLE_MD : null
+function readPrompt(name: string): string {
+  const embedded = getEmbeddedPrompts()?.[name]
+  if (embedded !== undefined) return embedded
+  const filePath = join(PROMPTS_DIR, name)
+  if (!existsSync(filePath)) {
+    throw new Error(`Missing prompts/${name} (looked in ${filePath})`)
+  }
+  return readFileSync(filePath, 'utf-8')
+}
+
+function tryReadPrompt(name: string): string | null {
+  const embedded = getEmbeddedPrompts()?.[name]
+  if (embedded !== undefined) return embedded
+  return readIfExists(join(PROMPTS_DIR, name))
+}
 
 export interface UserProfile {
   name: string
@@ -61,8 +72,9 @@ let cachedExample: string | null = null
 
 function loadEmbeddedExample(): string {
   if (cachedExample !== null) return cachedExample
-  if (EMBEDDED_USER_EXAMPLE !== null) {
-    cachedExample = EMBEDDED_USER_EXAMPLE
+  const embedded = getEmbeddedPrompts()?.[`USER.md.example`]
+  if (embedded !== undefined) {
+    cachedExample = embedded
     return cachedExample
   }
   for (const p of EMBEDDED_EXAMPLE_PATHS) {
@@ -167,9 +179,9 @@ export function assertHasH1(label: string, body: string): void {
 }
 
 export function loadSystemPrompt(): SystemPrompt {
-  const soul = EMBEDDED_SOUL ?? readIfExists(join(PROMPTS_DIR, 'SOUL.md'))
-  const agents = EMBEDDED_AGENTS ?? readIfExists(join(PROMPTS_DIR, 'AGENTS.md'))
-  const tools = EMBEDDED_TOOLS ?? readIfExists(join(PROMPTS_DIR, 'tools.md'))
+  const soul = readPrompt('SOUL.md')
+  const agents = readPrompt('AGENTS.md')
+  const tools = tryReadPrompt('tools.md')
 
   if (!soul) {
     throw new Error(`Missing prompts/SOUL.md (looked in ${PROMPTS_DIR})`)
@@ -218,8 +230,7 @@ export interface PhaseInstructions {
 }
 
 export function loadPhaseInstructions(): PhaseInstructions {
-  const raw = EMBEDDED_PHASES ?? readIfExists(join(PROMPTS_DIR, 'phases.md'))
-  if (!raw) throw new Error(`Missing prompts/phases.md (looked in ${PROMPTS_DIR})`)
+  const raw = readPrompt('phases.md')
 
   const context: Record<string, string> = {}
   const reminder: Record<string, string> = {}

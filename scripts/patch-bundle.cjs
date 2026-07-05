@@ -60,7 +60,30 @@ const newApplyMigrations =
 
 content = content.replace(/function applyMigrations[\s\S]*?^\}/m, newApplyMigrations)
 
-// --- 5. Inline dist/web/ as WEB_ASSETS so pkg doesn't need VFS for SPA ---
+// --- 5. Inline prompt .md files as EMBEDDED_PROMPTS so pkg doesn't need
+//          VFS reads for prompt content. src/prompts/loader.ts reads from
+//          globalThis.EMBEDDED_PROMPTS at runtime; in dev mode (tsx) it's
+//          undefined and we fall back to readFileSync. ---
+const promptFiles = ['SOUL.md', 'AGENTS.md', 'tools.md', 'phases.md', 'USER.md.example']
+const embeddedPrompts = {}
+for (const name of promptFiles) {
+  try {
+    embeddedPrompts[name] = fs.readFileSync(path.join('prompts', name), 'utf-8')
+  } catch (e) {
+    console.log(`[patch-bundle] WARNING: prompts/${name} not found, skipping`)
+  }
+}
+const embeddedPromptsJson = JSON.stringify(embeddedPrompts)
+const embeddedPromptsCode = 'globalThis.EMBEDDED_PROMPTS = ' + embeddedPromptsJson + ';\n'
+const firstLine = content.indexOf('\n') + 1
+content = content.slice(0, firstLine) + embeddedPromptsCode + content.slice(firstLine)
+console.log(
+  '[patch-bundle] EMBEDDED_PROMPTS injected (' +
+    Object.keys(embeddedPrompts).length +
+    ' files)',
+)
+
+// --- 6. Inline dist/web/ as WEB_ASSETS so pkg doesn't need VFS for SPA ---
 const webAssets = {}
 function loadWebDir(dir, base) {
   const entries = fs.readdirSync(dir, { withFileTypes: true })

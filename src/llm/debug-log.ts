@@ -2,12 +2,15 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Message, SystemBlock } from './types.js'
 
-const DEBUG_DIR = join(process.cwd(), 'data', 'llm-debug')
+// Resolve lazily — tests chdir() per case and we want the dir to follow
+// the current cwd, not the one in effect at module-import time.
+function debugDir(): string {
+  return join(process.cwd(), 'data', 'llm-debug')
+}
 
 function ensureDir(): void {
-  if (process.env.DEBUG_LOG_LLM !== '1') return
   try {
-    mkdirSync(DEBUG_DIR, { recursive: true })
+    mkdirSync(debugDir(), { recursive: true })
   } catch {
     // ignore — directory may already exist
   }
@@ -18,7 +21,7 @@ function ensureDir(): void {
 // so server-side (turn.ts) and client-side (SessionPage) logs land in the
 // same file and can be correlated by sessionId + turnIndex.
 function diagFile(sessionId: string): string {
-  return join(DEBUG_DIR, `diag-${sessionId.slice(0, 8)}.jsonl`)
+  return join(debugDir(), `diag-${sessionId.slice(0, 8)}.jsonl`)
 }
 
 function truncate(s: string, head: number, tail: number): string {
@@ -78,7 +81,7 @@ export function logLLMRequest(
   ensureDir()
 
   const now = new Date().toISOString().replace(/[:.]/g, '-')
-  const file = join(DEBUG_DIR, `${now}_${sessionId.slice(0, 8)}_turn${turnIndex}.txt`)
+  const file = join(debugDir(), `${now}_${sessionId.slice(0, 8)}_turn${turnIndex}.txt`)
 
   const lines: string[] = []
   lines.push(`=== LLM Request Log ===`)
@@ -123,24 +126,35 @@ export function logLLMRequest(
 export function logSummarizeFailure(
   sessionId: string,
   messageCount: number,
-  endedReason: string,
+  endedReason: string | null,
   err: unknown,
 ): void {
-  if (process.env.DEBUG_LOG_LLM !== '1') return
+  // v1.0.6 hotfix — always write, even when DEBUG_LOG_LLM is unset.
+  // The whole point is to capture silent summarize failures regardless of
+  // whether the user remembered to flip the env var.
   ensureDir()
   const now = new Date().toISOString().replace(/[:.]/g, '-')
-  const file = join(DEBUG_DIR, `${now}_${sessionId.slice(0, 8)}_summarize_fail.txt`)
+  const file = join(debugDir(), `${now}_${sessionId.slice(0, 8)}_summarize-failed.txt`)
+
+  const e = err as Partial<Error> & { status?: unknown; cause?: unknown }
+  const name = typeof e?.name === 'string' ? e.name : '(none)'
+  const message = typeof e?.message === 'string' ? e.message : '(none)'
+  const stack = typeof e?.stack === 'string' ? e.stack : ''
+  const status = e?.status !== undefined ? String(e.status) : ''
 
   const lines = [
     `=== Summarize Failure ===`,
     `Time: ${new Date().toISOString()}`,
     `Session: ${sessionId}`,
     `Messages: ${messageCount}`,
-    `EndedReason: ${endedReason}`,
-    `Error: ${(err as Error).message ?? String(err)}`,
+    `Ended reason: ${endedReason ?? '(unknown)'}`,
+    `Error name: ${name}`,
+    `Error message: ${message}`,
+    status ? `Error status: ${status}` : '',
+    stack ? `Error stack: ${stack}` : '',
     ``,
     `=== END ===`,
-  ]
+  ].filter((l) => l !== '')
   try {
     appendFileSync(file, lines.join('\n'), 'utf-8')
   } catch {
@@ -156,7 +170,7 @@ export function logSummarize(
   if (process.env.DEBUG_LOG_LLM !== '1') return
   ensureDir()
   const now = new Date().toISOString().replace(/[:.]/g, '-')
-  const file = join(DEBUG_DIR, `${now}_${sessionId.slice(0, 8)}_summarize.txt`)
+  const file = join(debugDir(), `${now}_${sessionId.slice(0, 8)}_summarize.txt`)
 
   const lines = [
     `=== Summarize Result ===`,

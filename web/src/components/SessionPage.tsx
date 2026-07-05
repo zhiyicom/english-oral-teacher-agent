@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
-import { getSession, getSessionStreamUrl } from '../lib/api'
+import { getSession, getSessionStreamUrl, getSettings } from '../lib/api'
 import LoadingSpinner from './shared/LoadingSpinner'
 import MessageBubble from './shared/MessageBubble'
 import VoiceInput from './VoiceInput'
@@ -59,24 +59,70 @@ export default function SessionPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const esRef = useRef<EventSource | null>(null)
 
-  // TTS — speak assistant text when voice is enabled
-  const voiceEnabled = localStorage.getItem('settings:voice_enabled') === 'true'
-  const voiceRef = useRef(voiceEnabled)
-  voiceRef.current = voiceEnabled
+  // TTS — speak assistant text when voice is enabled.
+  // Source of truth: server /api/settings (USER.md via updateSettings).
+  // SessionPage reads from server on mount; SettingsPage writes to both
+  // server and localStorage. localStorage is no longer consulted here
+  // because that path silently broke when USER.md was edited manually or
+  // restored from backup without touching localStorage (memory: "localStorage
+  // Unreliable — always add server-side fallback for settings persistence").
+  const [voiceEnabled, setVoiceEnabled] = useState(false)
+  const [voiceSpeed, setVoiceSpeed] = useState(1)
+  const [voiceAccent, setVoiceAccent] = useState('en-US')
+
+  const voiceRef = useRef({ enabled: false, speed: 1, accent: 'en-US' })
+  useEffect(() => {
+    voiceRef.current = { enabled: voiceEnabled, speed: voiceSpeed, accent: voiceAccent }
+  }, [voiceEnabled, voiceSpeed, voiceAccent])
+
+  useEffect(() => {
+    getSettings()
+      .then((s) => {
+        setVoiceEnabled(s.voice_enabled)
+        setVoiceSpeed(s.voice_speed)
+        setVoiceAccent(s.voice_accent)
+      })
+      .catch(() => {
+        // server unreachable — best effort: localStorage cache from SettingsPage
+        const lsEnabled = localStorage.getItem('settings:voice_enabled') === 'true'
+        const lsSpeed = Number(localStorage.getItem('settings:voice_speed')) || 1
+        const lsAccent = localStorage.getItem('settings:voice_accent') || 'en-US'
+        setVoiceEnabled(lsEnabled)
+        setVoiceSpeed(lsSpeed)
+        setVoiceAccent(lsAccent)
+      })
+  }, [])
 
   function speakAssistant(text: string) {
-    if (!voiceRef.current) return
+    const v = voiceRef.current
+    if (!v.enabled) return
     const clean = stripInternal(text).trim()
     if (!clean) return
-    const voiceSpeed = Number(localStorage.getItem('settings:voice_speed')) || 1.0
-    const voiceAccent = localStorage.getItem('settings:voice_accent') || 'en-US'
     speechSynthesis.cancel()
     const u = new SpeechSynthesisUtterance(clean)
-    u.rate = voiceSpeed
-    u.lang = voiceAccent
-    const voices = speechSynthesis.getVoices()
-    const voice = voices.find((v) => v.lang.startsWith(voiceAccent))
-    if (voice) u.voice = voice
+    u.rate = v.speed
+    const allVoices = speechSynthesis.getVoices()
+    const localVoices = allVoices.filter((x) => 'local' in x && (x as SpeechSynthesisVoice & { local: boolean }).local)
+    // "Multilingual" online voices (e.g. Microsoft Ada Multilingual Online)
+    // are known to fail silently on first use and sound mechanical when they
+    // do work — prefer Natural voices when falling back to online.
+    const isMultilingual = (x: SpeechSynthesisVoice) => /multilingual/i.test(x.name)
+    const onlineNonMulti = allVoices.filter((x) => !isMultilingual(x))
+    const baseLang = v.accent.split('-')[0]
+    const voice =
+      localVoices.find((x) => x.lang === v.accent) ??
+      localVoices.find((x) => x.lang.startsWith(`${baseLang}-`)) ??
+      localVoices.find((x) => x.lang === 'en-US') ??
+      localVoices.find((x) => x.lang.startsWith('en')) ??
+      onlineNonMulti.find((x) => x.lang === v.accent) ??
+      onlineNonMulti.find((x) => x.lang.startsWith(`${baseLang}-`)) ??
+      onlineNonMulti.find((x) => x.lang === 'en-US') ??
+      onlineNonMulti.find((x) => x.lang.startsWith('en')) ??
+      allVoices.find((x) => x.lang === v.accent)
+    if (voice) {
+      u.voice = voice
+      u.lang = voice.lang
+    }
     speechSynthesis.speak(u)
   }
 

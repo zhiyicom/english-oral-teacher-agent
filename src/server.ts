@@ -893,7 +893,7 @@ export function createApp(opts: {
   // copies web/dist/* to dist/web/ so distDir = __dirname/web resolves
   // correctly. Dev mode uses `pnpm dev-web` (Vite on 5173) and does not
   // hit this code path. `opts.webDistDir` lets tests inject a fixture.
-  const distDir = opts.webDistDir ?? resolve(dirname(fileURLToPath(import.meta.url)), 'web')
+  const distDir = opts.webDistDir ?? resolve(process.cwd(), 'dist', 'web')
   const distIndex = join(distDir, 'index.html')
   app.get('/assets/*', (c) => {
     const filePath = resolve(distDir, c.req.path.slice(1))
