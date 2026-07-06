@@ -11,7 +11,7 @@ Teacher server.  Output lands at `installer/build/EnglishOralTeacher.exe`.
 ## Prerequisites
 
 - Windows 10+ x64
-- Node.js 24.x
+- Node.js (see note below about matching pkg target)
 - pnpm >= 9
 - (optional) Inno Setup 6 for the final `-Setup-` wrapper
 
@@ -39,21 +39,19 @@ mv data data.bak
 # Step 1 — build TypeScript + web
 pnpm build
 
-# Step 2 — bundle ESM → CJS via esbuild
-pnpm exec esbuild dist/server.js --bundle --platform=node --target=node22 \
-  --format=cjs --outfile=dist/server-bundle.cjs --packages=external \
-  --loader:.md=text --loader:.example=text
+# Step 2 — bundle ESM → CJS via esbuild (must use --bundle)
+pnpm exec esbuild dist/server.js --bundle --format=cjs \
+  --outfile=dist/server-bundle.cjs --platform=node \
+  --external:better-sqlite3 \
+  --external:@huggingface/transformers \
+  --external:onnxruntime-node
 
-# Step 3 — patch the CJS bundle (import.meta.url, prompts path, inline SQL)
+# Step 3 — patch the CJS bundle (import.meta.url, prompts path, inline SQL, SPA handlers)
 node scripts/patch-bundle.cjs
 
-# Step 4 — pkg compile
+# Step 4 — pkg compile (target must match installed Node version)
 pnpm exec pkg dist/server-bundle.cjs --public --targets node24-win-x64 \
-  -o installer/build/EnglishOralTeacher.exe --compress GZip --fallback-to-source
-# NOTE: do NOT use -c installer/pkg.config.json — pkg v6 ignores the
-# "assets" key, and the "scripts" filter in the config limits what
-# files enter the VFS. --public alone includes everything including
-# dist/web/ (SPA) and package.json (better-sqlite3 bindings).
+  --output installer/build/EnglishOralTeacher.exe
 
 # Restore secrets
 mv .env.bak .env
@@ -72,31 +70,46 @@ curl http://localhost:8787/api/setup/status
 
 ## Key design decisions
 
-### Why ESM → CJS bundle
+### Why ESM → CJS bundle with `--bundle`
 
 `@yao-pkg/pkg` cannot resolve ESM package.json exports (e.g. `hono/streaming`).
-esbuild bundles every ESM module into a single CJS file, bypassing the issue.
+esbuild's `--bundle` flag inlines every imported JS module into a single CJS
+file. **Without `--bundle`, ESM imports become `require()` calls that fail at
+runtime** because pkg's VFS loads ESM files in a way that `module.exports` is
+not available (ReferenceError: module is not defined in ES module scope).
+
+Native modules (`better-sqlite3`, `onnxruntime-node`, `@huggingface/transformers`)
+are kept external via `--external` flags because esbuild cannot bundle `.node`
+binary files.
 
 ### import.meta.url polyfill
 
 esbuild CJS output produces `var import_meta = {}` (empty).  The patch script
 replaces it with `{ url: require('url').pathToFileURL(__filename).href }`.
 
-### Prompt files (.md) are inlined by esbuild
+### Prompt files (.md) are inlined by patch-bundle.cjs
 
-`src/prompts/loader.ts` uses native text imports:
-```ts
-import SOUL_MD from '../../prompts/SOUL.md' with { type: 'text' }
-```
-esbuild's `--loader:.md=text` inlines content at bundle time — zero filesystem
-reads needed at runtime.
+The patch script reads every prompt `.md` file and injects them as
+`globalThis.EMBEDDED_PROMPTS` at the top of the bundle.  `src/prompts/loader.ts`
+reads from this global at runtime with a disk fallback for dev mode.
 
 ### Migration files (.sql) are inlined by the patch script
 
-pkg's VFS does not include non-JS files.  The patch script reads every
-`dist/migrations/*.sql`, embeds them as a JSON object, and rewrites
-`applyMigrations()` to use the inlined data instead of `readdirSync` +
-`readFileSync`.
+pkg's VFS does not include non-JS files via directory scanning.  The patch
+script reads every `dist/migrations/*.sql`, embeds them as a JSON object, and
+rewrites `applyMigrations()` to use the inlined data.
+
+### Web assets (SPA) are inlined by the patch script
+
+All files under `dist/web/` are base64-encoded and embedded as `WEB_ASSETS`.
+The patch script rewrites the SPA-serving route handlers (`/assets/*` and `/*`)
+to serve from memory with a disk fallback.
+
+### SPA handler regex — `c\d*` pattern
+
+When esbuild runs with `--bundle`, it renames callback parameters (e.g. `c`
+→ `c2`) and module imports (e.g. `import_node_path3` → `import_node_path7`).
+The regex patterns in `patch-bundle.cjs` use `\(c\d*\)` to match both forms.
 
 ### better-sqlite3 native binding
 
@@ -105,11 +118,18 @@ The `bindings` package walks up from the module path looking for
 `package.json` in the VFS, so the walk succeeds.  `src/storage/db.ts` also
 passes `nativeBinding` via `require.resolve` as a fallback.
 
-### node24 target
+### pkg target must match installed Node ABI
 
-pkg's embedded Node version must match the locally-installed Node ABI
-(NODE_MODULE_VERSION).  Node v24 = version 137.  If you upgrade Node on
-this machine, change the `--targets` flag.
+The exe bundles a Node runtime for the specified target. The `better-sqlite3`
+native module must be compiled for the same NODE_MODULE_VERSION:
+
+| Node version | NODE_MODULE_VERSION | pkg target |
+|---|---|---|
+| Node 22 | 127 | `node22-win-x64` |
+| Node 24 | 137 | `node24-win-x64` |
+
+If the build machine has Node 24, use `node24-win-x64`. Mismatched versions
+cause `NODE_MODULE_VERSION` errors at startup.
 
 ## Optional: Inno Setup wrapper
 
@@ -129,5 +149,8 @@ and upgrade detection.
 |---|---|
 | `table sessions already exists` | Delete `data/oral-teacher.db` first |
 | `NODE_MODULE_VERSION mismatch` | Match `--targets nodeXX-win-x64` to your Node version |
-| `Cannot find module hono/streaming` | esbuild `--packages=external` is working correctly — the warning is harmless |
+| `module is not defined in ES module scope` | Add `--bundle` to esbuild command |
+| `Cannot find module hono/streaming` | esbuild warning is harmless — the CJS bundle works correctly |
 | `sharp/build/Release` warnings | Harmless — our MiniLM embedding doesn't use sharp (image processing) |
+| `SPA not built. Run pnpm build first.` | `patch-bundle.cjs` SPA handler regex didn't match; check `c\d*` pattern |
+| esbuild `.node` file error | Add `--external:onnxruntime-node` to exclude the native binding |
