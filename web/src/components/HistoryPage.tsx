@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
-import { getSession } from '../lib/api'
+import { getSession, listSessions } from '../lib/api'
 import type { SessionMessage } from '../lib/types'
 import LoadingSpinner from './shared/LoadingSpinner'
 import MessageBubble from './shared/MessageBubble'
@@ -50,6 +50,19 @@ export default function HistoryPage() {
     )
   }
 
+  async function goBack() {
+    try {
+      const sessions = await listSessions()
+      if (sessions.length > 0) {
+        navigate(`/session/${sessions[0].id}`)
+      } else {
+        navigate('/')
+      }
+    } catch {
+      navigate('/')
+    }
+  }
+
   if (!session) {
     return <LoadingSpinner text={STRINGS.loading} />
   }
@@ -61,7 +74,7 @@ export default function HistoryPage() {
     <div className="px-6 py-4">
       <button
         type="button"
-        onClick={() => navigate('/')}
+        onClick={goBack}
         className="mb-3 text-sm text-blue-500 hover:text-blue-700"
       >
         ← 返回

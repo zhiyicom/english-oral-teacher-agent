@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
-import { getSettings, updateSettings } from '../lib/api'
+import { getSettings, listSessions, updateSettings } from '../lib/api'
 import type { SettingsApi } from '../lib/types'
 import HotkeyInput, { type Hotkey, parseHotkey } from './HotkeyInput'
 import LoadingSpinner from './shared/LoadingSpinner'
@@ -27,6 +27,7 @@ export default function SettingsPage() {
     () => parseHotkey(localStorage.getItem(LS_SEND_HOTKEY)),
   )
   const [apiKey, setApiKey] = useState('')
+  const [currentKeyMasked, setCurrentKeyMasked] = useState('')
 
   useEffect(() => {
     getSettings()
@@ -46,7 +47,11 @@ export default function SettingsPage() {
           run_live_llm: srv.run_live_llm ?? false,
           base_url: srv.base_url ?? '',
           model: srv.model ?? '',
+          api_key: srv.api_key ?? '',
         })
+        if (srv.api_key) {
+          setCurrentKeyMasked(srv.api_key)
+        }
 
         // Hotkeys: localStorage first, server fallback
         const micFromLocal = parseHotkey(localStorage.getItem(LS_MIC_HOTKEY))
@@ -107,6 +112,19 @@ export default function SettingsPage() {
     }
   }
 
+  async function goBack() {
+    try {
+      const sessions = await listSessions()
+      if (sessions.length > 0) {
+        navigate(`/session/${sessions[0].id}`)
+      } else {
+        navigate('/')
+      }
+    } catch {
+      navigate('/')
+    }
+  }
+
   if (error && !settings) {
     return (
       <div className="rounded border border-red-300 bg-red-50 p-4" data-testid="error-banner">
@@ -130,13 +148,6 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-lg px-6 py-4">
-      <button
-        type="button"
-        onClick={() => navigate('/')}
-        className="mb-3 text-sm text-blue-500 hover:text-blue-700"
-      >
-        ← 返回
-      </button>
       {/* Voice section */}
       <div className="mt-4 rounded border bg-white p-4 shadow-sm">
         <h3 className="text-sm font-medium text-slate-700">
@@ -259,7 +270,7 @@ export default function SettingsPage() {
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             className="mt-1 block w-full rounded border border-slate-300 px-3 py-1 text-sm placeholder:text-slate-400"
-            placeholder="输入新 key 以替换，留空则不修改"
+            placeholder={currentKeyMasked ? `当前: ${currentKeyMasked}` : '输入 API Key'}
           />
         </div>
         <div className="mt-3">
@@ -333,7 +344,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Save / Cancel */}
+      {/* Save / Back */}
       <div className="mt-4 flex items-center gap-3">
         <button
           type="button"
@@ -346,11 +357,11 @@ export default function SettingsPage() {
         </button>
         <button
           type="button"
-          onClick={() => navigate('/')}
+          onClick={goBack}
           data-testid="cancel-button"
           className="rounded border border-slate-300 bg-white px-4 py-2 text-slate-700 hover:bg-slate-100"
         >
-          {STRINGS.settingsCancel}
+          返回
         </button>
         {saved && (
           <span className="text-sm text-green-600" data-testid="saved-toast">

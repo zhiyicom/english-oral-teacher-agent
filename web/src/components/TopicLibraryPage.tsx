@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getTopics, updateTopics } from '../lib/api'
+import { getTopics, listSessions, updateTopics } from '../lib/api'
 import type { TopicApi } from '../lib/api'
 import LoadingSpinner from './shared/LoadingSpinner'
 
@@ -48,13 +48,26 @@ export default function TopicLibraryPage() {
     setEditingTopic(null)
   }
 
+  async function goBack() {
+    try {
+      const sessions = await listSessions()
+      if (sessions.length > 0) {
+        navigate(`/session/${sessions[0].id}`)
+      } else {
+        navigate('/')
+      }
+    } catch {
+      navigate('/')
+    }
+  }
+
   if (!topics) return <LoadingSpinner text="加载话题库…" />
 
   return (
     <div className="h-full overflow-y-auto px-6 py-4">
       <button
         type="button"
-        onClick={() => navigate('/')}
+        onClick={goBack}
         className="mb-3 text-sm text-blue-500 hover:text-blue-700"
       >
         ← 返回

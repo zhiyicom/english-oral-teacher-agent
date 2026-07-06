@@ -590,6 +590,12 @@ export function createApp(opts: {
   app.get('/api/settings', (c) => {
     const { data } = loadUserFile()
     const prefs = loadPrefs()
+    const rawKey = getApiKey()
+    const maskedKey = rawKey
+      ? rawKey.length <= 7
+        ? '***'
+        : `${rawKey.slice(0, 3)}...${rawKey.slice(-4)}`
+      : ''
     return c.json({
       voice_enabled: data.voice_enabled ?? true,
       voice_speed: data.voice_speed ?? 1.0,
@@ -601,6 +607,7 @@ export function createApp(opts: {
       run_live_llm: getEnvVar('RUN_LIVE_LLM') === '1',
       base_url: getEnvVar('ANTHROPIC_BASE_URL') || 'https://api.minimaxi.com/anthropic',
       model: getEnvVar('LLM_MODEL') || 'MiniMax-M3',
+      api_key: maskedKey,
     })
   })
 

@@ -45,6 +45,7 @@ export default function VoiceInput({
     SpeechRecognitionCtor ? 'idle' : 'unsupported',
   )
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [showEdgeHint, setShowEdgeHint] = useState(false)
   const recognitionRef = useRef<ISpeechRecognition | null>(null)
 
   const stop = useCallback(() => {
@@ -81,6 +82,9 @@ export default function VoiceInput({
       setErrorMsg(err)
       setState('error')
       recognitionRef.current = null
+      if (err === 'unknown' || err === 'network') {
+        setShowEdgeHint(true)
+      }
       setTimeout(() => {
         setState('idle')
         setErrorMsg(null)
@@ -131,21 +135,28 @@ export default function VoiceInput({
   else if (state === 'error') title = errorMsg ? `Error: ${errorMsg}` : 'Voice error'
 
   return (
-    <button
-      type="button"
-      data-testid="voice-input"
-      onClick={start}
-      disabled={disabled}
-      title={title}
-      className={`rounded-full p-2 text-lg transition-all ${
-        state === 'listening'
-          ? 'animate-pulse bg-red-100 text-red-500'
-          : state === 'error'
-            ? 'bg-red-100 text-red-400'
-            : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-600'
-      } disabled:opacity-40`}
-    >
-      🎤
-    </button>
+    <>
+      <button
+        type="button"
+        data-testid="voice-input"
+        onClick={start}
+        disabled={disabled}
+        title={title}
+        className={`rounded-full p-2 text-lg transition-all ${
+          state === 'listening'
+            ? 'animate-pulse bg-red-100 text-red-500'
+            : state === 'error'
+              ? 'bg-red-100 text-red-400'
+              : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-600'
+        } disabled:opacity-40`}
+      >
+        🎤
+      </button>
+      {showEdgeHint && (
+        <span className="text-xs text-amber-600">
+          Speech unavailable in Chrome. Try Microsoft Edge.
+        </span>
+      )}
+    </>
   )
 }

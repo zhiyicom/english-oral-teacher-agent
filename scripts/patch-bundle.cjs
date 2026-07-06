@@ -6,7 +6,7 @@
 //    (in pkg snapshot __filename is the correct anchor)
 // 3. Inline SQL migration files into applyMigrations()
 //
-// Run after:  esbuild dist/server.js --format=cjs --outfile=dist/server-bundle.cjs
+// Run after:  esbuild dist/server.js --bundle --format=cjs --outfile=dist/server-bundle.cjs --platform=node --external:better-sqlite3
 // Run before: pkg dist/server-bundle.cjs --public --targets node24-win-x64
 
 const fs = require('fs')
@@ -61,7 +61,7 @@ content = content.replace(/function applyMigrations[\s\S]*?^\}/m, newApplyMigrat
 //          VFS reads for prompt content. src/prompts/loader.ts reads from
 //          globalThis.EMBEDDED_PROMPTS at runtime; in dev mode (tsx) it's
 //          undefined and we fall back to readFileSync. ---
-const promptFiles = ['SOUL.md', 'AGENTS.md', 'tools.md', 'phases.md', 'USER.md.example']
+const promptFiles = ['SOUL.md', 'AGENTS.md', 'tools.md', 'phases.md', 'USER.md.example', 'summarizer-system.md']
 const embeddedPrompts = {}
 for (const name of promptFiles) {
   try {
@@ -120,9 +120,8 @@ const firstLine2 = content.indexOf('\n') + 1
 content = content.slice(0, firstLine2) + webAssetsCode + content.slice(firstLine2)
 
 // Replace the SPA-serving code in server.js to use embedded assets.
-// Use multiline match to find entire handler blocks — more robust than
-// pattern-matching individual lines which break when esbuild output format changes.
-const assetsOld = content.match(/  app\.get\("\/assets\/\*", \(c\) => \{[\s\S]*?\n  \}\);/)?.[0]
+// Handles both bundled (c2, import_node_pathN) and non-bundled (c) output.
+const assetsOld = content.match(/  app\.get\("\/assets\/\*", \(c\d*\) => \{[\s\S]*?\n  \}\);/)?.[0]
 if (assetsOld) {
   content = content.replace(assetsOld, [
     '  app.get("/assets/*", (c) => {',
@@ -142,7 +141,7 @@ if (assetsOld) {
   console.log('[patch-bundle] WARNING: /assets/* pattern not found')
 }
 
-const spaOld = content.match(/  app\.get\("\/\*", \(c\) => \{[\s\S]*?\n  \}\);/)?.[0]
+const spaOld = content.match(/  app\.get\("\/\*", \(c\d*\) => \{[\s\S]*?\n  \}\);/)?.[0]
 if (spaOld) {
   content = content.replace(spaOld, [
     '  app.get("/*", (c) => {',
