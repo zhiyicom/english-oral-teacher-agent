@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > [docs/ARCHITECTURE.md §11](docs/ARCHITECTURE.md). This file tracks user-facing
 > changes only.
 
+## [v1.0.6] — 2026-07-06 — Windows installer + setup wizard + UX polish
+
+> Sprint details: [v1.0.6-scope.md](docs/sprint/v1.0.6-scope.md)
+
+### Added
+- **Windows one-click installer**: Inno Setup based `.exe` with desktop/start-menu shortcuts, uninstaller, upgrade detection. Zero command line, zero Node.js required.
+- **/setup wizard**: GUI two-step form (API Key + student profile) at first launch. No manual editing of `.env` or `USER.md`.
+- **API Key management in Settings**: set/change LLM API key from the Settings page. Masked display (`sk-...xxxx`) shows current key status.
+- **Voice input error feedback**: when Chrome SpeechRecognition fails (Google servers unreachable from China), the mic button shows a persistent hint to use Microsoft Edge instead.
+- **Sidebar auto-refresh**: session list updates automatically when a session ends — no manual page refresh needed.
+- **Back navigation to latest session**: back buttons on topic library, settings, and history pages navigate to the most recent session if one exists, instead of a blank welcome page.
+- **Debug logging config in `.env`**: first-run `.env` includes Chinese-commented `DEBUG_LOG_LLM` and `APP_LOG_LEVEL` entries with usage instructions.
+- **`GET /api/setup/status`** / **`POST /api/setup/api-key`** / **`POST /api/setup/profile`** / **`GET /api/setup/profile-default`** endpoints for the setup wizard.
+- **`GET /api/update/check`** endpoint (reserved for future auto-update).
+
+### Changed
+- **Port changed from 3000 to 8787**: avoids conflicts with common dev servers.
+- **Version number**: UI footer now displays `v1.0.6`.
+- **Settings page UX**: Cancel button renamed to "返回" (Back); redundant top back button removed.
+- **Voice default**: `voice_enabled` defaults to `true` for new installs.
+- **LLM model config**: unified single `LLM_MODEL` field replaces `LLM_MODEL_MAIN` / `LLM_MODEL_SUMMARIZER`.
+
+### Fixed
+- **Summary generation in packaged builds**: `summarizer-system.md` was not included in the pkg VFS because `readFileSync` calls are not traced. Fixed by embedding all prompt files via `globalThis.EMBEDDED_PROMPTS` at build time.
+- **Exe crash on startup**: missing `--bundle` flag in esbuild caused ESM modules to be loaded via CJS `require()`, failing with "module is not defined in ES module scope".
+- **SPA serving in packaged builds**: SPA handler regexes in `patch-bundle.cjs` updated to match esbuild's variable renaming (`c` → `c2`).
+
+### Build System
+- **esbuild `--bundle`** ESM → CJS with external native modules (`better-sqlite3`, `onnxruntime-node`)
+- **`scripts/patch-bundle.cjs`**: post-processes the CJS bundle — inlines prompt files, SQL migrations, and web assets; replaces SPA handlers to serve from memory
+- **`@yao-pkg/pkg`** with `node24-win-x64` target produces standalone 127MB `.exe`
+- **Inno Setup 6** produces 29MB installer
+
 ## [v1.0.5] — 2026-06-30 — Topic-selection tool widening + 30-topic default library
 
 > Sprint details: [v1.0.5-scope.md](docs/sprint/v1.0.5-scope.md) /
