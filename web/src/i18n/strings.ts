@@ -37,6 +37,16 @@ export const STRINGS = {
   voiceNotSupported: '浏览器不支持语音',
   voiceStart: '点击开始说话',
 
+  // v1.0.7 §1.1 — SpeechRecognition error code → user-facing hint
+  // (replaces the misleading "Try Microsoft Edge" toast introduced in v1.0.6 §1.13)
+  voiceErrorAudioCapture: '无法访问麦克风',
+  voiceErrorNotAllowed: '需要麦克风权限',
+  voiceErrorServiceNotAllowed: '浏览器禁用了语音识别',
+  voiceErrorNetwork: '识别服务不可达，请检查网络',
+  voiceErrorNoSpeech: '没有听到声音',
+  voiceErrorLangNotSupported: '暂不支持该语言',
+  voiceErrorUnknown: '语音输入出错，请重试',
+
   // v0.8.4 — HistoryPage
   historyDate: '日期',
   historyDuration: '时长',

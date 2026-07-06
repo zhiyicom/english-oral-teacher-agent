@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { STRINGS } from '../i18n/strings'
 
 // Browser-native SpeechRecognition (Chrome/Edge).
 // Types are not in all TS DOM libs, so we use a minimal interface.
@@ -28,9 +29,37 @@ export function isVoiceSupported(): boolean {
   return SpeechRecognitionCtor !== null
 }
 
+// v1.0.7 §1.1 — map Web Speech API error codes to user-facing hints.
+// Replaces the v1.0.6 "Try Microsoft Edge" toast (which was misleading for
+// users already on Edge — e.g. China-region Edge uses Azure CN and the real
+// failure is network, not browser choice). The switch's default branch
+// catches unknown / future codes safely.
+function hintForError(err: string): string {
+  switch (err) {
+    case 'audio-capture':
+      return STRINGS.voiceErrorAudioCapture
+    case 'not-allowed':
+      return STRINGS.voiceErrorNotAllowed
+    case 'service-not-allowed':
+      return STRINGS.voiceErrorServiceNotAllowed
+    case 'network':
+      return STRINGS.voiceErrorNetwork
+    case 'no-speech':
+      return STRINGS.voiceErrorNoSpeech
+    case 'language-not-supported':
+      return STRINGS.voiceErrorLangNotSupported
+    default:
+      return STRINGS.voiceErrorUnknown
+  }
+}
+
 interface VoiceInputProps {
   onResult: (text: string) => void
   onInterim: (text: string) => void
+  // v1.0.7 §1.2 — VoiceInput no longer renders its own hint span; the parent
+  // (SessionPage) renders it above the border-t divider so it doesn't squeeze
+  // the textarea. Pass null to clear.
+  onHint?: (msg: string | null) => void
   lang?: string
   disabled?: boolean
 }
@@ -38,6 +67,7 @@ interface VoiceInputProps {
 export default function VoiceInput({
   onResult,
   onInterim,
+  onHint,
   lang = 'en-US',
   disabled = false,
 }: VoiceInputProps) {
@@ -45,7 +75,6 @@ export default function VoiceInput({
     SpeechRecognitionCtor ? 'idle' : 'unsupported',
   )
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [showEdgeHint, setShowEdgeHint] = useState(false)
   const recognitionRef = useRef<ISpeechRecognition | null>(null)
 
   const stop = useCallback(() => {
@@ -60,6 +89,9 @@ export default function VoiceInput({
       stop()
       return
     }
+    // v1.0.7 §1.2 — clear stale hint from a previous error so the user sees
+    // immediate feedback when they retry.
+    onHint?.(null)
     const rec = new SpeechRecognitionCtor()
     rec.continuous = true
     rec.interimResults = true
@@ -82,12 +114,11 @@ export default function VoiceInput({
       setErrorMsg(err)
       setState('error')
       recognitionRef.current = null
-      if (err === 'unknown' || err === 'network') {
-        setShowEdgeHint(true)
-      }
+      onHint?.(hintForError(err))
       setTimeout(() => {
         setState('idle')
         setErrorMsg(null)
+        onHint?.(null)
       }, 2500)
     }
     rec.onend = () => {
@@ -98,7 +129,7 @@ export default function VoiceInput({
     recognitionRef.current = rec
     rec.start()
     setState('listening')
-  }, [lang, disabled, stop, onResult, onInterim])
+  }, [lang, disabled, stop, onResult, onInterim, onHint])
 
   // Global hotkey from Settings — toggles the microphone
   useEffect(() => {
@@ -135,28 +166,21 @@ export default function VoiceInput({
   else if (state === 'error') title = errorMsg ? `Error: ${errorMsg}` : 'Voice error'
 
   return (
-    <>
-      <button
-        type="button"
-        data-testid="voice-input"
-        onClick={start}
-        disabled={disabled}
-        title={title}
-        className={`rounded-full p-2 text-lg transition-all ${
-          state === 'listening'
-            ? 'animate-pulse bg-red-100 text-red-500'
-            : state === 'error'
-              ? 'bg-red-100 text-red-400'
-              : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-600'
-        } disabled:opacity-40`}
-      >
-        🎤
-      </button>
-      {showEdgeHint && (
-        <span className="text-xs text-amber-600">
-          Speech unavailable in Chrome. Try Microsoft Edge.
-        </span>
-      )}
-    </>
+    <button
+      type="button"
+      data-testid="voice-input"
+      onClick={start}
+      disabled={disabled}
+      title={title}
+      className={`rounded-full p-2 text-lg transition-all ${
+        state === 'listening'
+          ? 'animate-pulse bg-red-100 text-red-500'
+          : state === 'error'
+            ? 'bg-red-100 text-red-400'
+            : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-600'
+      } disabled:opacity-40`}
+    >
+      🎤
+    </button>
   )
 }

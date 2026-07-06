@@ -69,6 +69,7 @@ export default function SessionPage() {
   const [voiceEnabled, setVoiceEnabled] = useState(false)
   const [voiceSpeed, setVoiceSpeed] = useState(1)
   const [voiceAccent, setVoiceAccent] = useState('en-US')
+  const [voiceHint, setVoiceHint] = useState<string | null>(null)
 
   const voiceRef = useRef({ enabled: false, speed: 1, accent: 'en-US' })
   useEffect(() => {
@@ -573,35 +574,43 @@ export default function SessionPage() {
 
       {/* Input area */}
       {!ended && (
-        <div className="flex gap-2 border-t pt-3">
-          <VoiceInput
-            onResult={(t) => {
-              if (inputRef.current) {
-                inputRef.current.value = (inputRef.current.value + ' ' + t).trim()
-              }
-            }}
-            onInterim={() => {
-              // Interim results shown in input via VoiceInput component
-            }}
-          />
-          <textarea
-            ref={inputRef}
-            data-testid="input-box"
-            disabled={isTurning}
-            placeholder={isTurning ? STRINGS.turnInProgress : STRINGS.inputPlaceholder}
-            onKeyDown={handleKeyDown}
-            rows={3}
-            className="flex-1 resize-none rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
-          />
-          <button
-            type="button"
-            onClick={handleSend}
-            data-testid="send-button"
-            disabled={isTurning}
-            className="self-end rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-40"
-          >
-            {STRINGS.send}
-          </button>
+        <div className="border-t pt-3">
+          {voiceHint && (
+            <div className="text-center text-xs text-amber-600 pb-2" data-testid="voice-hint">
+              {voiceHint}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <VoiceInput
+              onResult={(t) => {
+                if (inputRef.current) {
+                  inputRef.current.value = (inputRef.current.value + ' ' + t).trim()
+                }
+              }}
+              onInterim={() => {
+                // Interim results shown in input via VoiceInput component
+              }}
+              onHint={setVoiceHint}
+            />
+            <textarea
+              ref={inputRef}
+              data-testid="input-box"
+              disabled={isTurning}
+              placeholder={isTurning ? STRINGS.turnInProgress : STRINGS.inputPlaceholder}
+              onKeyDown={handleKeyDown}
+              rows={3}
+              className="flex-1 resize-none rounded border border-slate-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
+            />
+            <button
+              type="button"
+              onClick={handleSend}
+              data-testid="send-button"
+              disabled={isTurning}
+              className="self-end rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-40"
+            >
+              {STRINGS.send}
+            </button>
+          </div>
         </div>
       )}
     </div>
