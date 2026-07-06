@@ -58,6 +58,13 @@ export default function SessionSidebar() {
     if (location.pathname === '/') refresh()
   }, [location.pathname, refresh])
 
+  // Refresh when session ends (custom event from SessionPage)
+  useEffect(() => {
+    const handler = () => refresh()
+    window.addEventListener('session-ended', handler)
+    return () => window.removeEventListener('session-ended', handler)
+  }, [refresh])
+
   async function handleDelete(e: { stopPropagation: () => void }, id: string) {
     e.stopPropagation()
     try {

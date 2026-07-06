@@ -1,6 +1,30 @@
-import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { getAppDataDir } from './paths.js'
+
+// Header block — always prepended to the .env file. Comment-only (no key=value
+// lines) so readEnvFile / formatEnvFile roundtrips are clean with no duplication.
+const ENV_HEADER = [
+  '# English Oral Teacher — 环境配置',
+  '# 修改此文件后重启应用生效',
+  '#',
+  '# === 调试日志 ===',
+  '# DEBUG_LOG_LLM — 开启 LLM 详细诊断日志',
+  '#   启用: 1  禁用: 0 或留空（默认禁用）',
+  '#   日志写入 data/llm-debug/ 目录（每轮 prompt、summary 失败原因等）',
+  '#',
+  '# APP_LOG_LEVEL — 应用日志级别',
+  '#   可选: debug | info | warn | error（默认 info）',
+  '#   debug 会输出所有调试信息（含每轮对话详情）',
+  '',
+].join('\n') + '\n'
+
+// Defaults for documented config keys. Inserted into the body on first write
+// so the user sees both the explanatory comments (header) and the active value.
+const ENV_DEFAULTS: Record<string, string> = {
+  DEBUG_LOG_LLM: '0',
+  APP_LOG_LEVEL: 'info',
+}
 
 /**
  * v1.0.6 §1.6 — API key resolution priority chain:
@@ -31,24 +55,16 @@ export function setApiKey(key: string): { persisted: string[] } {
   if (!key.trim()) throw new Error('API key cannot be empty')
   const envPath = join(getAppDataDir(), '.env')
 
-  let current: Record<string, string> = {}
-  if (existsSync(envPath)) current = readEnvFile(envPath)
-
+  const current = readEnvFile(envPath)
   const persisted: string[] = []
   if (current.API_KEY !== key) {
     current.API_KEY = key
     persisted.push('API_KEY')
   }
 
-  const content =
-    Object.entries(current)
-      .map(([k, v]) => {
-        const needsQuote = /\s|["'=#]/.test(v)
-        return needsQuote ? `${k}="${v.replace(/"/g, '\\"')}"` : `${k}=${v}`
-      })
-      .join('\n') + '\n'
-
+  const content = formatEnvFile(current)
   const tmp = `${envPath}.tmp.${Date.now()}`
+  mkdirSync(join(envPath, '..'), { recursive: true })
   writeFileSync(tmp, content, 'utf-8')
   renameSync(tmp, envPath)
   process.env.API_KEY = key
@@ -59,28 +75,32 @@ export function setEnvVar(key: string, value: string): { persisted: string[] } {
   if (!/^[A-Z_][A-Z0-9_]*$/.test(key)) throw new Error(`Invalid env key: ${key}`)
   const envPath = join(getAppDataDir(), '.env')
 
-  let current: Record<string, string> = {}
-  if (existsSync(envPath)) current = readEnvFile(envPath)
-
+  const current = readEnvFile(envPath)
   const persisted: string[] = []
   if (current[key] !== value) {
     current[key] = value
     persisted.push(key)
   }
 
-  const content =
-    Object.entries(current)
-      .map(([k, v]) => {
-        const needsQuote = /\s|["'=#]/.test(v)
-        return needsQuote ? `${k}="${v.replace(/"/g, '\\"')}"` : `${k}=${v}`
-      })
-      .join('\n') + '\n'
-
+  const content = formatEnvFile(current)
   const tmp = `${envPath}.tmp.${Date.now()}`
+  mkdirSync(join(envPath, '..'), { recursive: true })
   writeFileSync(tmp, content, 'utf-8')
   renameSync(tmp, envPath)
   process.env[key] = value
   return { persisted }
+}
+
+function formatEnvFile(vars: Record<string, string>): string {
+  // Merge defaults so documented keys always appear with an active value
+  const merged = { ...ENV_DEFAULTS, ...vars }
+  const body = Object.entries(merged)
+    .map(([k, v]) => {
+      const needsQuote = /\s|["'=#]/.test(v)
+      return needsQuote ? `${k}="${v.replace(/"/g, '\\"')}"` : `${k}=${v}`
+    })
+    .join('\n') + '\n'
+  return ENV_HEADER + body
 }
 
 export function getEnvVar(key: string): string {

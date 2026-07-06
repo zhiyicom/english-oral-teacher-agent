@@ -31,6 +31,7 @@ export interface SettingsApi {
   run_live_llm: boolean
   base_url: string
   model: string
+  api_key?: string
 }
 
 // v0.8.3 — SSE event types consumed by SessionPage.

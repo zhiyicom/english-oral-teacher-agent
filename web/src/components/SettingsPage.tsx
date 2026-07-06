@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
-import { getSettings, listSessions, updateSettings } from '../lib/api'
+import { getSettings, updateSettings } from '../lib/api'
 import type { SettingsApi } from '../lib/types'
 import HotkeyInput, { type Hotkey, parseHotkey } from './HotkeyInput'
 import LoadingSpinner from './shared/LoadingSpinner'
@@ -13,39 +13,6 @@ const LS_VOICE_SPEED = 'settings:voice_speed'
 const LS_VOICE_ACCENT = 'settings:voice_accent'
 const LS_MIC_HOTKEY = 'settings:mic_hotkey'
 const LS_SEND_HOTKEY = 'settings:send_hotkey'
-
-function UpdateBanner() {
-  const [info, setInfo] = useState<{
-    updateAvailable?: boolean | null
-    latestVersion?: string | null
-    releaseUrl?: string | null
-  } | null>(null)
-  useEffect(() => {
-    fetch('/api/update/check')
-      .then((r) => r.json())
-      .then(setInfo)
-      .catch(() => {})
-  }, [])
-
-  if (info?.updateAvailable === true && info.releaseUrl) {
-    return (
-      <div className="bg-blue-50 border border-blue-200 rounded p-3 mb-4 flex items-center justify-between">
-        <span className="text-sm text-blue-900">
-          New version v{info.latestVersion} is available.
-        </span>
-        <a
-          href={info.releaseUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700"
-        >
-          Download
-        </a>
-      </div>
-    )
-  }
-  return null
-}
 
 export default function SettingsPage() {
   const navigate = useNavigate()
@@ -59,6 +26,7 @@ export default function SettingsPage() {
   const [sendHotkey, setSendHotkey] = useState<Hotkey | null>(
     () => parseHotkey(localStorage.getItem(LS_SEND_HOTKEY)),
   )
+  const [apiKey, setApiKey] = useState('')
 
   useEffect(() => {
     getSettings()
@@ -116,6 +84,7 @@ export default function SettingsPage() {
         run_live_llm: settings.run_live_llm,
         base_url: settings.base_url,
         model: settings.model,
+        api_key: apiKey || undefined,
         mic_hotkey: micHotkey as unknown as Record<string, unknown>,
         send_hotkey: sendHotkey as unknown as Record<string, unknown>,
       })
@@ -135,23 +104,6 @@ export default function SettingsPage() {
       setError((e as Error).message)
     } finally {
       setSaving(false)
-    }
-  }
-
-  // v1.0.3 — Cancel navigates to the most recently ended session.
-  // listSessions() is already sorted by started_at DESC, so the first
-  // ended session is also the most recent. If none ended yet, fall back
-  // to the most recent session overall (started but not yet ended).
-  async function handleCancel() {
-    try {
-      const sessions = await listSessions()
-      const ended = sessions.find((s) => s.endedAt !== null)
-      const target = ended ?? sessions[0]
-      if (target) {
-        navigate(`/session/${target.id}`)
-      }
-    } catch {
-      // swallow — cancel is best-effort; stay on /settings on failure
     }
   }
 
@@ -178,7 +130,13 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-lg px-6 py-4">
-      <UpdateBanner />
+      <button
+        type="button"
+        onClick={() => navigate('/')}
+        className="mb-3 text-sm text-blue-500 hover:text-blue-700"
+      >
+        ← 返回
+      </button>
       {/* Voice section */}
       <div className="mt-4 rounded border bg-white p-4 shadow-sm">
         <h3 className="text-sm font-medium text-slate-700">
@@ -292,6 +250,19 @@ export default function SettingsPage() {
           </button>
         </div>
         <div className="mt-3">
+          <label className="text-sm text-slate-500" htmlFor="api-key">
+            API Key
+          </label>
+          <input
+            id="api-key"
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            className="mt-1 block w-full rounded border border-slate-300 px-3 py-1 text-sm placeholder:text-slate-400"
+            placeholder="输入新 key 以替换，留空则不修改"
+          />
+        </div>
+        <div className="mt-3">
           <label className="text-sm text-slate-500" htmlFor="base-url">
             Base URL
           </label>
@@ -375,7 +346,7 @@ export default function SettingsPage() {
         </button>
         <button
           type="button"
-          onClick={handleCancel}
+          onClick={() => navigate('/')}
           data-testid="cancel-button"
           className="rounded border border-slate-300 bg-white px-4 py-2 text-slate-700 hover:bg-slate-100"
         >

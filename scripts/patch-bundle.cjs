@@ -2,7 +2,8 @@
 // v1.0.6 — post-process the esbuild CJS bundle so pkg can consume it.
 //
 // 1. Replace import.meta.url with CJS __filename equivalent
-// 2. Fix PROMPTS_DIR and SUMMARIZER_PROMPT_PATH to use dirname(__filename)
+// 2. Fix PROMPTS_DIR to use dirname(__filename) instead of __dirname
+//    (in pkg snapshot __filename is the correct anchor)
 // 3. Inline SQL migration files into applyMigrations()
 //
 // Run after:  esbuild dist/server.js --format=cjs --outfile=dist/server-bundle.cjs
@@ -19,19 +20,15 @@ content = content.replace(/var import_meta(\d*) = \{\};/g, (_, n) => {
   return `var import_meta${n} = { url: require("url").pathToFileURL(__filename).href };`
 })
 
-// --- 2. PROMPTS_DIR — use dirname(__filename) instead of __dirname ---
+// --- 2. PROMPTS_DIR — preserve the existing import_node_pathN var name ---
 content = content.replace(
-  /var PROMPTS_DIR = .*?;/,
-  'var PROMPTS_DIR = (0, import_node_path3.join)((0, import_node_path3.dirname)(__filename), "prompts");'
+  /var PROMPTS_DIR = \(0, import_node_fs\d+\.existsSync\)\(\(0, (import_node_path\d+)\.join\)\(__dirname, "prompts"\)\) \? \(0, \1\.join\)\(__dirname, "prompts"\) : \(0, \1\.join\)\(__dirname, "\.\.", "\.\.", "prompts"\);/,
+  (_match, pathVar) => {
+    return `var PROMPTS_DIR = (0, ${pathVar}.join)((0, ${pathVar}.dirname)(__filename), "prompts");`
+  }
 )
 
-// --- 3. SUMMARIZER_PROMPT_PATH — same fix ---
-content = content.replace(
-  /var SUMMARIZER_PROMPT_PATH = \(0, import_node_path\.join\)\(\(0, import_node_path\.dirname\)\(\(0, import_node_url\.fileURLToPath\)\(import_meta\d*\.url\)\), '\.\.', '\.\.', 'prompts'/,
-  'var SUMMARIZER_PROMPT_PATH = (0, import_node_path.join)((0, import_node_path.dirname)(__filename), "prompts"'
-)
-
-// --- 4. Inline SQL migrations ---
+// --- 3. Inline SQL migrations ---
 const migrationsDir = 'dist/migrations'
 const sqlFiles = fs.readdirSync(migrationsDir)
   .filter((f) => f.endsWith('.sql'))

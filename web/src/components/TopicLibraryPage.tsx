@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { getTopics, updateTopics } from '../lib/api'
 import type { TopicApi } from '../lib/api'
 import LoadingSpinner from './shared/LoadingSpinner'
 
 export default function TopicLibraryPage() {
+  const navigate = useNavigate()
   const [topics, setTopics] = useState<TopicApi[] | null>(null)
   const [editingTopic, setEditingTopic] = useState<string | null>(null)
   const [keywordsText, setKeywordsText] = useState('')
@@ -50,6 +52,13 @@ export default function TopicLibraryPage() {
 
   return (
     <div className="h-full overflow-y-auto px-6 py-4">
+      <button
+        type="button"
+        onClick={() => navigate('/')}
+        className="mb-3 text-sm text-blue-500 hover:text-blue-700"
+      >
+        ← 返回
+      </button>
       <h2 className="text-lg font-semibold text-slate-800">话题库管理</h2>
       <p className="mt-1 text-sm text-slate-500">
         编辑话题关键词以匹配摘要输出。修改后自动更新 LLM 话题库和数据库。共 {topics.length} 个话题。

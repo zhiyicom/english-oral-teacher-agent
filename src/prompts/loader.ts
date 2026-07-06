@@ -37,6 +37,12 @@ function tryReadPrompt(name: string): string | null {
   return readIfExists(join(PROMPTS_DIR, name))
 }
 
+// v1.0.6 §1.7 — summarizer system prompt, loaded through readPrompt()
+// so it works in both pkg (EMBEDDED_PROMPTS) and dev (readFileSync) modes.
+export function getSummarizerSystemPrompt(): string {
+  return readPrompt('summarizer-system.md')
+}
+
 export interface UserProfile {
   name: string
   age: number

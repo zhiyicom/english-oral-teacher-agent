@@ -1,16 +1,7 @@
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 import type { LLMClient, Message } from '../llm/types.js'
+import { getSummarizerSystemPrompt } from '../prompts/loader.js'
 
-/**
- * Zod schema for the summarizer's structured output.
- *
- * - summary: 20-800 chars (≈ 5-200 tokens). The PRD §F4 says 50-150 tokens;
- *   we give a bit of slack so the LLM isn't constantly at the boundary.
- * - keywords: 3-8 entries, each 1-40 chars.
- */
 export const SummarySchema = z.object({
   summary: z.string().min(20, 'summary 太短 (< 20 chars)').max(800, 'summary 太长 (> 800 chars)'),
   keywords: z
@@ -21,14 +12,6 @@ export const SummarySchema = z.object({
 
 export type Summary = z.infer<typeof SummarySchema>
 
-const SUMMARIZER_PROMPT_PATH = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  'prompts',
-  'summarizer-system.md',
-)
-
 /**
  * Truncation policy: if there are more than 25 messages, keep the first 20
  * and the last 5. This protects against LLM token blow-up on long sessions
@@ -37,10 +20,6 @@ const SUMMARIZER_PROMPT_PATH = join(
 export function truncateMessages(messages: Message[]): Message[] {
   if (messages.length <= 25) return messages
   return [...messages.slice(0, 20), ...messages.slice(-5)]
-}
-
-function loadSummarizerSystemPrompt(): string {
-  return readFileSync(SUMMARIZER_PROMPT_PATH, 'utf-8')
 }
 
 /**
@@ -93,7 +72,7 @@ function formatTranscript(messages: Message[]): string {
  */
 export async function summarize(messages: Message[], client: LLMClient): Promise<Summary> {
   const truncated = truncateMessages(messages)
-  const system = loadSummarizerSystemPrompt()
+  const system = getSummarizerSystemPrompt()
   const summaryRequest: Message[] = [...truncated, buildSummaryInstruction()]
 
   const response = await client.chat({ system, messages: summaryRequest })

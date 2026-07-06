@@ -11,6 +11,7 @@ interface ISpeechRecognition extends EventTarget {
   onresult: ((event: SpeechRecognitionEvent) => void) | null
   onerror: (() => void) | null
   onend: (() => void) | null
+  readonly error?: string
 }
 
 interface SpeechRecognitionEvent extends Event {
@@ -40,9 +41,10 @@ export default function VoiceInput({
   lang = 'en-US',
   disabled = false,
 }: VoiceInputProps) {
-  const [state, setState] = useState<'idle' | 'listening' | 'unsupported'>(
+  const [state, setState] = useState<'idle' | 'listening' | 'error' | 'unsupported'>(
     SpeechRecognitionCtor ? 'idle' : 'unsupported',
   )
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const recognitionRef = useRef<ISpeechRecognition | null>(null)
 
   const stop = useCallback(() => {
@@ -73,7 +75,17 @@ export default function VoiceInput({
       }
     }
 
-    rec.onerror = () => stop()
+    rec.onerror = () => {
+      const err = rec.error ?? 'unknown'
+      console.error(`[VoiceInput] SpeechRecognition error: ${err}`)
+      setErrorMsg(err)
+      setState('error')
+      recognitionRef.current = null
+      setTimeout(() => {
+        setState('idle')
+        setErrorMsg(null)
+      }, 2500)
+    }
     rec.onend = () => {
       setState('idle')
       recognitionRef.current = null
@@ -114,17 +126,23 @@ export default function VoiceInput({
 
   if (state === 'unsupported') return null
 
+  let title = 'Click to speak'
+  if (state === 'listening') title = 'Listening… Click to stop'
+  else if (state === 'error') title = errorMsg ? `Error: ${errorMsg}` : 'Voice error'
+
   return (
     <button
       type="button"
       data-testid="voice-input"
       onClick={start}
       disabled={disabled}
-      title={state === 'listening' ? 'Listening… Click to stop' : 'Click to speak'}
+      title={title}
       className={`rounded-full p-2 text-lg transition-all ${
         state === 'listening'
           ? 'animate-pulse bg-red-100 text-red-500'
-          : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-600'
+          : state === 'error'
+            ? 'bg-red-100 text-red-400'
+            : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-600'
       } disabled:opacity-40`}
     >
       🎤

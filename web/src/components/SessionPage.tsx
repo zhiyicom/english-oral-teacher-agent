@@ -302,6 +302,7 @@ export default function SessionPage() {
       if (data.endedReason && data.endedReason !== 'init') {
         setEnded(true)
         setPhase('END')
+        window.dispatchEvent(new CustomEvent('session-ended'))
       }
       setIsTurning(false)
 

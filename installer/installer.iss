@@ -32,9 +32,6 @@ Name: "{autostartmenu}\Uninstall English Oral Teacher"; Filename: "{uninstallexe
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 Name: "startmenu"; Description: "Create a Start Menu shortcut"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 
-[Run]
-Filename: "{app}\EnglishOralTeacher.exe"; Description: "Run English Oral Teacher"; Flags: nowait postinstall skipifsilent runasoriginaluser
-
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\logs"
 

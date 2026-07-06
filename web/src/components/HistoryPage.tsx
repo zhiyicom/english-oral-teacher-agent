@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { STRINGS } from '../i18n/strings'
 import { getSession } from '../lib/api'
 import type { SessionMessage } from '../lib/types'
@@ -14,6 +14,7 @@ const PHASE_LABELS: Record<string, string> = {
 }
 
 export default function HistoryPage() {
+  const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
   const [session, setSession] = useState<{
     startedAt: string
@@ -58,6 +59,13 @@ export default function HistoryPage() {
 
   return (
     <div className="px-6 py-4">
+      <button
+        type="button"
+        onClick={() => navigate('/')}
+        className="mb-3 text-sm text-blue-500 hover:text-blue-700"
+      >
+        ← 返回
+      </button>
 
       {/* Metadata card */}
       <div className="mt-4 rounded border bg-white p-4 shadow-sm">

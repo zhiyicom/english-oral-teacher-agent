@@ -591,7 +591,7 @@ export function createApp(opts: {
     const { data } = loadUserFile()
     const prefs = loadPrefs()
     return c.json({
-      voice_enabled: data.voice_enabled ?? false,
+      voice_enabled: data.voice_enabled ?? true,
       voice_speed: data.voice_speed ?? 1.0,
       voice_accent: data.voice_accent ?? 'en-US',
       font_size: prefs.font_size ?? 14,
@@ -759,6 +759,15 @@ export function createApp(opts: {
       try {
         setEnvVar('LLM_MODEL', body.model.trim())
         persisted.push('model')
+      } catch { /* best-effort */ }
+    }
+    if (typeof body.api_key === 'string' && body.api_key.trim()) {
+      try {
+        setApiKeyPersist(body.api_key.trim())
+        persisted.push('api_key')
+        if (getEnvVar('RUN_LIVE_LLM') === '1') {
+          client = selectClient(env, opts.fixturesDir)
+        }
       } catch { /* best-effort */ }
     }
 
