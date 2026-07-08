@@ -145,6 +145,64 @@ describe('SessionsDao', () => {
     expect(fetched?.ended_at).toBe('2026-06-05T10:06:00.000Z')
   })
 
+  // v1.0.7 §11 — topics_used column write/read
+  it('markEnded with topicsUsed writes JSON array; get reads it back as string[]', () => {
+    sessions.create({ id: 'v107-1', startedAt: '2026-07-08T10:00:00.000Z' })
+    sessions.markEnded('v107-1', {
+      endedAt: '2026-07-08T10:30:00.000Z',
+      topicsUsed: ['school_life', 'food_drink'],
+    })
+    const fetched = sessions.get('v107-1')
+    expect(fetched?.topics_used).toEqual(['school_life', 'food_drink'])
+  })
+
+  it('markEnded without topicsUsed leaves topics_used at default [] (COALESCE preserves)', () => {
+    sessions.create({ id: 'v107-2', startedAt: '2026-07-08T10:00:00.000Z' })
+    sessions.markEnded('v107-2', { endedAt: '2026-07-08T10:05:00.000Z' })
+    const fetched = sessions.get('v107-2')
+    expect(fetched?.topics_used).toEqual([])
+  })
+
+  it('markEnded with empty topicsUsed array writes [] (not null)', () => {
+    sessions.create({ id: 'v107-3', startedAt: '2026-07-08T10:00:00.000Z' })
+    sessions.markEnded('v107-3', { endedAt: '2026-07-08T10:05:00.000Z', topicsUsed: [] })
+    const fetched = sessions.get('v107-3')
+    expect(fetched?.topics_used).toEqual([])
+  })
+
+  it('markEnded COALESCE — second call without topicsUsed does not wipe first', () => {
+    sessions.create({ id: 'v107-4', startedAt: '2026-07-08T10:00:00.000Z' })
+    sessions.markEnded('v107-4', {
+      endedAt: '2026-07-08T10:30:00.000Z',
+      topicsUsed: ['school_life'],
+    })
+    // Second call without topicsUsed (e.g. retry path)
+    sessions.markEnded('v107-4', { endedAt: '2026-07-08T10:31:00.000Z' })
+    const fetched = sessions.get('v107-4')
+    expect(fetched?.topics_used).toEqual(['school_life'])
+    expect(fetched?.ended_at).toBe('2026-07-08T10:31:00.000Z')
+  })
+
+  it('get returns topics_used as [] for legacy rows that were NULL before the patch ran', () => {
+    sessions.create({ id: 'v107-5', startedAt: '2026-07-08T10:00:00.000Z' })
+    // Simulate a row that bypassed the constructor (e.g. opened in another
+    // process before the migration). Force topics_used back to NULL.
+    db.raw.exec("UPDATE sessions SET topics_used = NULL WHERE id = 'v107-5'")
+    const fetched = sessions.get('v107-5')
+    expect(fetched?.topics_used).toEqual([])
+  })
+
+  it('startup patch is idempotent — running createSessionsDao twice does not error', () => {
+    sessions.create({ id: 'v107-6', startedAt: '2026-07-08T10:00:00.000Z' })
+    sessions.markEnded('v107-6', {
+      endedAt: '2026-07-08T10:05:00.000Z',
+      topicsUsed: ['school_life'],
+    })
+    // Second constructor invocation — should re-run the patch idempotently.
+    const sessions2 = createSessionsDao(db)
+    expect(sessions2.get('v107-6')?.topics_used).toEqual(['school_life'])
+  })
+
   // v0.7.2 — embedding BLOB persistence for cross-session semantic retrieval
   it('setEmbedding + listWithEmbeddings roundtrip preserves Float32Array bit-for-bit', () => {
     sessions.create({ id: 'v72-1', startedAt: '2026-06-05T10:00:00.000Z' })

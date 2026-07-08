@@ -17,6 +17,7 @@ import {
   matchTopic,
   mockClock,
   realClock,
+  recordAdoptedTopics,
   runTurn,
   summarize,
 } from './agent/index.js'
@@ -262,6 +263,11 @@ export async function main(): Promise<void> {
   let state: SessionState = initState(clock.now())
   phaseHistory.push({ phase: state.phase, at: 0, reason: 'time' })
   let exitReason: 'user_exit' | 'user_stop' | 'phase_end' = 'user_exit'
+  // v1.0.7 §11 — in-memory ledger of topics locked in for this session.
+  // Mutated by runTurn via Hook A (MAIN_ACTIVITY auto-inject) and Hook B
+  // (LLM topic_select success). Read by the END pipeline below to drive
+  // topic_stats / keyword_hits writes.
+  const adoptedTopics: Map<string, { suggestedKeyword: string; source: 'auto' | 'llm' }> = new Map()
   // v0.7.5 — 80%-budget warn fires once per session, not every turn (see
   // v0.7.5-scope.md §6 risk #5). Reset implicitly per process start, so a
   // fresh CLI invocation gets a fresh warn window.
@@ -431,6 +437,9 @@ export async function main(): Promise<void> {
           systemPrompt,
           // v1.0.3 §1.3 — WARM_UP opener hook read at startup above.
           warmUpHook,
+          // v1.0.7 §11 — pass the session's adopted-topics ledger so runTurn
+          // can append slugs as they're locked in.
+          adoptedTopics,
           mockTime,
         },
         {
@@ -514,12 +523,31 @@ export async function main(): Promise<void> {
           summaryKeywords = []
         }
 
+        // v1.0.7 §11 — write-on-selection. Record adopted topics (or fall back
+        // to summary-keyword match) BEFORE markEnded so topicsUsed can land
+        // in `sessions.topics_used` atomically with the rest of the row.
+        let topicsUsed: string[] = []
+        try {
+          topicsUsed = recordAdoptedTopics(
+            adoptedTopics,
+            summaryKeywords,
+            { sessionId: session.id, now: new Date() },
+            { topics: topics.list(), topicStats, keywordHits, topicsDao: topics },
+          )
+          process.stderr.write(
+            `[cli] topics recorded: [${topicsUsed.join(',')}] (adopted=${adoptedTopics.size}, fallback=${adoptedTopics.size === 0})\n`,
+          )
+        } catch (err) {
+          process.stderr.write(`[cli] topic record failed: ${(err as Error).message}\n`)
+        }
+
         process.stderr.write(`[cli] markEnded ${session.id} reason=${exitReason}\n`)
         sessions.markEnded(session.id, {
           phaseHistory,
           summary: summaryText,
           keywords: summaryKeywords,
           reason: exitReason,
+          topicsUsed,
         })
         process.stderr.write('[cli] markEnded done\n')
 
@@ -539,27 +567,6 @@ export async function main(): Promise<void> {
           } catch (err) {
             process.stderr.write(`[cli] embed summary failed: ${(err as Error).message}\n`)
           }
-        }
-
-        // v0.6 — match summaryKeywords against the topic library; if a topic
-        // hits, increment its stat row. Runs AFTER markEnded so a topic
-        // failure can never block session persistence. If summarize failed
-        // (summaryKeywords = []), matchTopic returns null and we skip.
-        const match = matchTopic(summaryKeywords, topics.list())
-        if (match) {
-          topicStats.incrementAndUpdate(match.topic, new Date())
-          // v1.0.2 — accumulate per-(topic, keyword) hits so the
-          // keyword-freshness bias in selectTopic() can prefer topics whose
-          // inner keywords are still under-used. Same shared[] already
-          // computed by matchTopic for the stderr log.
-          keywordHits.upsertMany(match.topic, match.shared, new Date())
-          process.stderr.write(
-            `[cli] topic match: ${match.topic} jaccard=${match.jaccard.toFixed(2)} shared=[${match.shared.join(',')}]\n`,
-          )
-        } else {
-          process.stderr.write(
-            `[cli] topic match: none (keywords=[${summaryKeywords.join(',')}])\n`,
-          )
         }
 
         // v1.0.3 §1.3 — extend the session-end pipeline with profile-extract

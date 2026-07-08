@@ -123,6 +123,12 @@ export type TurnEvent =
   | { type: 'text-chunk'; delta: string } // v0.8.5 — per-token delta (real streaming)
   | { type: 'student-text'; text: string } // student-facing final text (CLI → stdout, server → SSE)
   | {
+      type: 'topic-adopted' // v1.0.7 §11 — fired when a topic is locked in for the session
+      slug: string
+      suggestedKeyword: string
+      source: 'auto' | 'llm'
+    }
+  | {
       type: 'done'
       endedReason: 'user_exit' | 'user_stop' | 'phase_end' | 'llm_error' | null
     }
@@ -159,6 +165,12 @@ export interface TurnInput {
   // and clears it on consume. Optional in the interface for tests that
   // don't care about WARM_UP behaviour.
   warmUpHook?: string | null
+  // v1.0.7 §11 — adopted-topics ledger for this session. Mutated in place
+  // by runTurn when a topic is locked in (Hook A = MAIN_ACTIVITY auto-inject,
+  // Hook B = topic_select success). Caller owns the Map and reads it during
+  // endSession to drive topic_stats / keyword_hits writes. Optional so older
+  // tests still compile — defaults to an empty Map that nobody reads.
+  adoptedTopics?: Map<string, { suggestedKeyword: string; source: 'auto' | 'llm' }>
   mockTime: boolean
 }
 
@@ -393,14 +405,39 @@ export async function* runTurn(
         try {
           const topicTool = deps.toolRegistry.get('topic_select')
           if (topicTool) {
-            const topicResult = await topicTool.execute({ phase: 'MAIN_ACTIVITY', exclude_recent_days: 30 }) as { slug?: string; title?: string; error?: string }
-            if (topicResult.slug && !topicResult.error) {
+            const topicResult = (await topicTool.execute({
+              phase: 'MAIN_ACTIVITY',
+              exclude_recent_days: 30,
+            })) as
+              | {
+                  slug?: string
+                  title?: string
+                  error?: string
+                  suggested_keyword?: string
+                  keywords?: string[]
+                }
+              | { error: string }
+            if ('slug' in topicResult && topicResult.slug && !('error' in topicResult)) {
               const topicMsg = `[TOPIC: ${topicResult.slug}] We are now in the main activity phase. Introduce the topic "${topicResult.title ?? topicResult.slug}" to the student. Teach 2-3 relevant vocabulary words. Ask open-ended questions — the student should talk 70% of the time.`
               callMessages = [
                 ...history.slice(0, -1),
                 { role: 'user' as const, content: topicMsg },
                 lastMsg,
               ]
+              // v1.0.7 §11.4 — Hook A: auto-inject is a real adoption. Record
+              // the slug in the ledger so the END pipeline writes a
+              // topic_stats row and the dedup signals start to update.
+              const suggestedKw = topicResult.suggested_keyword ?? ''
+              input.adoptedTopics?.set(topicResult.slug, {
+                suggestedKeyword: suggestedKw,
+                source: 'auto',
+              })
+              yield {
+                type: 'topic-adopted',
+                slug: topicResult.slug,
+                suggestedKeyword: suggestedKw,
+                source: 'auto',
+              }
             } else {
               // Fallback: use phase context text
               const instruction = phaseContext.replace(/## /g, '')
@@ -810,6 +847,24 @@ export async function* runTurn(
           // Successful topic switch — reset counter so the new topic starts
           // fresh (0 user turns on it yet).
           resetTopicTurnCount(sessionId)
+          // v1.0.7 §11.5 — Hook B: record the LLM-chosen topic in the ledger
+          // (dedup by slug). `suggested_keyword` is the soft hint the tool
+          // returns; fall back to the first keyword if missing.
+          const successResult = result as TopicSelectResult
+          const suggestedKw =
+            successResult.suggested_keyword ?? successResult.keywords?.[0] ?? ''
+          if (!input.adoptedTopics?.has(successResult.slug)) {
+            input.adoptedTopics?.set(successResult.slug, {
+              suggestedKeyword: suggestedKw,
+              source: 'llm',
+            })
+            yield {
+              type: 'topic-adopted',
+              slug: successResult.slug,
+              suggestedKeyword: suggestedKw,
+              source: 'llm',
+            }
+          }
         }
       }
       history.push({ role: 'assistant', content: response })

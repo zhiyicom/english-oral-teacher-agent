@@ -32,6 +32,7 @@ import {
   loadLastReview,
   matchTopic,
   realClock,
+  recordAdoptedTopics,
   runTurn,
   summarize,
 } from './agent/index.js'
@@ -123,6 +124,11 @@ interface SessionRuntime {
   firstPair: Message[]
   isFirstTurn: boolean
   markedOriginals: Set<string>
+  // v1.0.7 §11 — slugs of topics actually adopted during this session,
+  // mutated in place by runTurn. Read by endSession to drive the
+  // topic_stats / keyword_hits / sessions.topics_used writes. In-memory
+  // only; server restart loses it (acceptable, falls back to matchTopic).
+  adoptedTopics: Map<string, { suggestedKeyword: string; source: 'auto' | 'llm' }>
 }
 
 function reconstructSessionState(
@@ -168,6 +174,7 @@ function reconstructSessionState(
     firstPair: [],
     isFirstTurn: phaseHistory.length <= 1,
     markedOriginals: new Set(),
+    adoptedTopics: new Map(),
   }
 }
 
@@ -457,6 +464,9 @@ export function createApp(opts: {
         // profile-extract. Only meaningful on the first turn; later turns
         // ignore it because the WARM_UP hint block is gated by wasFirstTurn.
         warmUpHook,
+        // v1.0.7 §11 — pass the session's adopted-topics ledger so runTurn
+        // can append slugs as they're locked in.
+        adoptedTopics: rt.adoptedTopics,
         mockTime: false,
       }
 
@@ -484,6 +494,7 @@ export function createApp(opts: {
               firstPair: output.firstPair,
               isFirstTurn: output.isFirstTurn,
               markedOriginals: rt.markedOriginals,
+              adoptedTopics: rt.adoptedTopics,
             })
             await stream.writeSSE({
               event: 'done',
@@ -523,26 +534,37 @@ export function createApp(opts: {
                   // Best-effort — don't block session end on profile extraction
                 }
 
+                // v1.0.7 §11 — write-on-selection. Record topics from the
+                // session's adopted ledger first so the returned slug list
+                // can land in `sessions.topics_used` via markEnded. Falls
+                // back to summary-keyword match when the ledger is empty
+                // (rare — only when the session ended before MAIN_ACTIVITY
+                // auto-inject could fire and the LLM never succeeded with
+                // topic_select).
+                let topicsUsed: string[] = []
+                try {
+                  topicsUsed = recordAdoptedTopics(
+                    rt.adoptedTopics,
+                    review.keywords,
+                    { sessionId: id, now: new Date() },
+                    { topics: topics.list(), topicStats, keywordHits, topicsDao: topics },
+                  )
+                  if (topicsUsed.length > 0) {
+                    process.stderr.write(
+                      `[server] topics recorded: [${topicsUsed.join(',')}] (adopted=${rt.adoptedTopics.size}, fallback=${rt.adoptedTopics.size === 0})\n`,
+                    )
+                  }
+                } catch {
+                  // topic recording is best-effort — empty topicsUsed is fine
+                }
+
                 sessions.markEnded(id, {
                   phaseHistory: output.phaseHistory,
                   summary: review.summary,
                   keywords: review.keywords,
                   reason: output.endedReason,
+                  topicsUsed,
                 })
-                // Update topic stats + per-keyword hits from summary keywords
-                try {
-                  const matched = matchTopic(review.keywords, topics.list())
-                  if (matched) {
-                    const now = new Date()
-                    topicStats.incrementAndUpdate(matched.topic, now)
-                    // v1.0.2 — accumulate per-(topic, keyword) hits so the
-                    // keyword-freshness bias in selectTopic() can prefer
-                    // topics whose inner keywords are still under-used.
-                    keywordHits.upsertMany(matched.topic, matched.shared, now)
-                  }
-                } catch {
-                  // topic matching is best-effort
-                }
                 // Generate embedding for cross-session retrieval
                 try {
                   const vec = await embedder.embed(review.summary)
@@ -563,11 +585,25 @@ export function createApp(opts: {
                 // data/llm-debug/ so the next silent failure is diagnosable
                 // without needing the stderr stream (web mode has no terminal).
                 logSummarizeFailure(id, msgObjs.length, output.endedReason, err)
+                // v1.0.7 §11 — also write any adopted topics even when
+                // summarize failed, so partial session state isn't lost.
+                let topicsUsed: string[] = []
+                try {
+                  topicsUsed = recordAdoptedTopics(
+                    rt.adoptedTopics,
+                    [],
+                    { sessionId: id, now: new Date() },
+                    { topics: topics.list(), topicStats, keywordHits, topicsDao: topics },
+                  )
+                } catch {
+                  // best-effort
+                }
                 sessions.markEnded(id, {
                   phaseHistory: output.phaseHistory,
                   summary: '(summarization failed)',
                   keywords: [],
                   reason: output.endedReason,
+                  topicsUsed,
                 })
               }
             }
