@@ -9,12 +9,12 @@ DisableProgramGroupPage=yes
 DisableDirPage=no
 OutputDir=build
 OutputBaseFilename=EnglishOralTeacher-Setup-v{#MyAppVersion}
-; SetupIconFile=installer\icons\app.ico  ; placeholder: add icon to installer/icons/
+SetupIconFile=icons\app.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 WizardSizePercent=120
-UninstallDisplayIcon={app}\EnglishOralTeacher.exe
+UninstallDisplayIcon={app}\app.ico
 UninstallDisplayName=English Oral Teacher
 VersionInfoVersion={#MyAppVersion}
 
@@ -22,10 +22,11 @@ VersionInfoVersion={#MyAppVersion}
 ; Source paths are relative to this .iss file (installer/ directory)
 Source: "build\EnglishOralTeacher.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "icons\app.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autodesktop}\English Oral Teacher"; Filename: "{app}\EnglishOralTeacher.exe"; IconFilename: "{app}\EnglishOralTeacher.exe"; Tasks: desktopicon
-Name: "{autostartmenu}\English Oral Teacher"; Filename: "{app}\EnglishOralTeacher.exe"; Tasks: startmenu
+Name: "{autodesktop}\English Oral Teacher"; Filename: "{app}\EnglishOralTeacher.exe"; IconFilename: "{app}\app.ico"; Tasks: desktopicon
+Name: "{autostartmenu}\English Oral Teacher"; Filename: "{app}\EnglishOralTeacher.exe"; IconFilename: "{app}\app.ico"; Tasks: startmenu
 Name: "{autostartmenu}\Uninstall English Oral Teacher"; Filename: "{uninstallexe}"
 
 [Tasks]

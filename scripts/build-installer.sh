@@ -12,12 +12,22 @@ pnpm build
 # 2. Inject version into server bundle
 VERSION="$VERSION" pnpm build:copy-assets
 
-# 3. pkg
-pnpm exec pkg installer/pkg.config.json \
-  --options "version=$VERSION" \
+# 3. Bundle ESM to CJS
+pnpm exec esbuild dist/server.js --bundle --format=cjs \
+  --outfile=dist/server-bundle.cjs --platform=node \
+  --external:better-sqlite3 \
+  --external:@huggingface/transformers \
+  --external:onnxruntime-node
+
+# 4. Patch the CJS bundle for pkg compatibility
+node scripts/patch-bundle.cjs
+
+# 5. Package into standalone exe
+pnpm exec pkg dist/server-bundle.cjs --public \
+  --targets node24-win-x64 \
   --output installer/build/EnglishOralTeacher.exe
 
-# 4. Verify
+# 6. Verify
 ls -lh installer/build/EnglishOralTeacher.exe
 
 echo "==> server .exe built: installer/build/EnglishOralTeacher.exe"
