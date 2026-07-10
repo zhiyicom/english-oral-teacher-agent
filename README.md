@@ -2,7 +2,7 @@
 
 A local AI agent for English oral practice. Runs entirely on your PC, with a dedicated UI, memory system, timed lesson phases, and voice I/O. **Now available as a one-click Windows installer.**
 
-> **Status: v1.0.6** — Windows one-click installer, zero-command setup wizard, editable topic library, per-keyword hit stats, voice I/O (STT/TTS) with Chrome/Edge detection, multi-session memory, debug logging.
+> **Status: v1.0.7** — Topic statistics fix (F1–F4), voice input error hints, installer icon, build pipeline robustness.
 >
 > See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for system design and [CHANGELOG.md](CHANGELOG.md) for release history.
 
@@ -10,7 +10,7 @@ A local AI agent for English oral practice. Runs entirely on your PC, with a ded
 
 ### Windows installer (recommended for end users)
 
-1. Download `EnglishOralTeacher-Setup-v1.0.6.exe` from [GitHub Releases](https://github.com/zhiyicom/english-oral-teacher-agent/releases)
+1. Download `EnglishOralTeacher-Setup-v1.0.7.exe` from [GitHub Releases](https://github.com/zhiyicom/english-oral-teacher-agent/releases)
 2. Double-click → install → desktop shortcut created
 3. Launch → browser opens automatically → fill in API key + student profile → start practicing
 
@@ -55,26 +55,21 @@ pnpm build && pnpm cli     # node dist/cli.js
 - Editable topic library with hit statistics (`prompts/topic-library.md` + Web UI at `/topics`)
 - LLM provider: **MiniMax** (Anthropic-SDK compatible — `ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic`); other Anthropic-API-compatible vendors work by changing that URL
 
-## What's in v1.0.6
+## What's in v1.0.7
 
 - **Windows one-click installer** — Inno Setup based, desktop/start-menu shortcuts, uninstaller, no dependencies
+- **Application icon** — custom icon embedded in installer and shortcuts (fixes installer crash on shortcut creation)
+- **Topic statistics fix (F1–F4)** — write-on-selection ledger replaces noisy summary-keyword matching; `topic_stats` and `keyword_hits` now accurately reflect actual topic usage; dedup signals finally working
+- **Voice input error hints** — 7 specific error messages per W3C error code ("No speech detected", "Microphone permission needed", etc.) instead of misleading "Try Microsoft Edge"
+- **Voice hint layout** — error messages appear above the input bar (centered) instead of squeezing the textarea
 - **/setup wizard** — GUI form for API key + student profile; no editing `.env` or `USER.md` by hand
-- **Single-port mode** — server serves both API and SPA on port 8787 (dev proxy on 5173)
 - **API Key management** — set/change in Settings page; masked display shows current key
 - **Back navigation** — back buttons on topic/settings/history pages return to the latest session
 - **Sidebar auto-refresh** — session list updates automatically when a session ends
-- **Voice input error feedback** — Chrome users see a hint to use Edge when Google Speech is unreachable
 - **Debug logging** — `DEBUG_LOG_LLM` and `APP_LOG_LEVEL` env vars with Chinese comments in `.env`
 - **Build system** — esbuild ESM→CJS bundle + pkg standalone exe + Inno Setup installer pipeline
 - **Prompt loading** — all prompt files embedded at build time; no filesystem reads needed at runtime
-
-### What was in v1.0.5
-
-- Single-process architecture (CLI + server share the same DB, no port conflicts)
-- Per-user data isolation in `%APPDATA%\EnglishOralTeacher\`
-- USER.md auto-seed on first run — no manual setup needed beyond API key
-- LLM client lazy re-init (live ↔ replay mode switching without restart)
-- Unified LLM model field (`LLM_MODEL`) with placeholder showing default
+- **Topic selection discipline** — LLM prompted to not aggressively re-select topics, respecting the feedback loop
 
 ## Project layout
 

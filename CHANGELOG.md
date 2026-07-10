@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > [docs/ARCHITECTURE.md §11](docs/ARCHITECTURE.md). This file tracks user-facing
 > changes only.
 
+## [v1.0.7] — 2026-07-10 — Topic stats fix + voice hint UX + installer icon
+
+> Sprint details: [v1.0.7-scope.md](docs/sprint/v1.0.7-scope.md) /
+> [v1.0.7-design.md](docs/sprint/v1.0.7-design.md) /
+> [v1.0.7-test-report.md](docs/sprint/v1.0.7-test-report.md)
+
+### Changed
+- **Topic stats write-on-selection (F1–F4)**: replaced the END-of-session summary-keyword matching pipeline with a write-on-selection ledger (`adoptedTopics` Map + `recordAdoptedTopics()`). Topic usage is now recorded at the moment a topic is actually selected (Hook A: phase-driven auto-inject; Hook B: LLM `topic_select` success), not from noisy summary meta-words ("engagement challenges", "topic refusal", etc.). `sessions.topics_used` column activated (was dead since v0.6). `prompts/phases.md` strengthened with "Topic selection discipline" to reduce LLM re-selection spam.
+- **Voice input error hints**: replaced the single misleading "Try Microsoft Edge" message with 7 specific W3C SpeechRecognition error-code hints (`audio-capture`, `not-allowed`, `service-not-allowed`, `network`, `no-speech`, `language-not-supported`, fallback for `unknown`).
+- **Voice hint layout**: error messages now render above the input bar (centered) instead of inline inside `<VoiceInput>`, fixing textarea squeezing.
+
+### Fixed
+- **Installer crash on "Creating shortcuts"**: pkg-built EXE had no Windows icon resources. Inno Setup's `IconFilename: "{app}\EnglishOralTeacher.exe"` triggered ACCESS Violation in `virtdisk.dll` when trying to extract the icon. Fixed by shipping a standalone `app.ico` with the installer and referencing it directly.
+- **Build script compatibility**: `build-installer.sh` now uses esbuild `--bundle` + `node scripts/patch-bundle.cjs` + pkg CLI arguments instead of the incompatible `pkg.config.json` format (deprecated by `@yao-pkg/pkg`).
+
+### Added
+- **Application icon** (`installer/icons/app.ico`): blue speech-bubble icon (256×256) bundled with installer and used for shortcuts, wizard, and uninstall display.
+- **`src/agent/topic-recorder.ts`**: shared `recordAdoptedTopics()` function (ledger-first / `matchTopic` fallback) used by both server and CLI.
+- **`topic-adopted` TurnEvent**: new SSE/CLI event emitted when a topic is adopted (source: `auto` or `llm`).
+- **14 new unit tests**: 8 `topic-recorder.test.ts` + 6 `sessions.test.ts` (topics_used column write/read/COALESCE/idempotent startup patch).
+
 ## [v1.0.6] — 2026-07-06 — Windows installer + setup wizard + UX polish
 
 > Sprint details: [v1.0.6-scope.md](docs/sprint/v1.0.6-scope.md)

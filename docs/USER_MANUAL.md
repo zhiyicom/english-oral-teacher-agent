@@ -1,7 +1,7 @@
 # English Oral Teacher — 用户手册
 
-> 最后更新：2026-06-28
-> 当前版本：v1.0.4
+> 最后更新：2026-07-10
+> 当前版本：v1.0.7
 >
 > 本文档随每次正式发布更新，是标准产品交付文档。
 
@@ -9,7 +9,15 @@
 
 ## 1. 安装部署
 
-### 1.1 基础环境要求
+### 1.1 Windows 安装包（推荐）
+
+1. 从 [GitHub Releases](https://github.com/zhiyicom/english-oral-teacher-agent/releases) 下载 `EnglishOralTeacher-Setup-v1.0.7.exe`
+2. 双击运行 → 按向导安装 → 桌面和开始菜单自动创建快捷方式
+3. 启动 → 浏览器自动打开 → 填写 API Key + 学生档案 → 开始练习
+
+**无需命令行，无需安装 Node.js。** 安装包已包含所有运行环境。
+
+### 1.2 基础环境要求（开发者）
 
 | 组件 | 最低版本 | 说明 |
 |---|---|---|
@@ -68,7 +76,7 @@ RUN_LIVE_LLM=1
 DEBUG_LOG_LLM=0
 
 # 默认端口（Hono server 监听端口）
-PORT=3000
+PORT=8787
 ```
 
 `API_KEY` 留空也能启动 server，但实际对话会失败并返回 401。
@@ -81,15 +89,15 @@ npx playwright install chromium
 
 ### 1.4 启动方式
 
-**开发模式（推荐新手）**：同时启动 Hono server (3000) + Vite dev server (5173)，前者提供 API+SSE，后者提供 Web UI 的 HMR 热重载。
+**开发模式（推荐新手）**：同时启动 Hono server (8787) + Vite dev server (5173)，前者提供 API+SSE，后者提供 Web UI 的 HMR 热重载。
 
 ```bash
 pnpm dev-web
 ```
 
-浏览器访问 `http://localhost:5173`（自动通过 Vite 代理转发 `/api/*` 和 `/assets/*` 到 3000）。
+浏览器访问 `http://localhost:5173`（自动通过 Vite 代理转发 `/api/*` 和 `/assets/*` 到 8787）。
 
-**仅启动 Hono server**：仅 3000 端口（API + SSE + 已构建的 web 静态资源）。
+**仅启动 Hono server**：仅 8787 端口（API + SSE + 已构建的 web 静态资源）。
 
 ```bash
 pnpm serve    # tsx watch src/server.ts，开发态
@@ -99,10 +107,10 @@ pnpm serve    # tsx watch src/server.ts，开发态
 
 ```bash
 pnpm build         # pnpm --dir web build && tsc && pnpm build:copy-assets → dist/web/ + dist/storage/migrations/
-pnpm start         # node dist/server.js，单进程 3000 端口 serve SPA + API
+pnpm start         # node dist/server.js，单进程 8787 端口 serve SPA + API
 ```
 
-浏览器访问 `http://localhost:3000`。
+浏览器访问 `http://localhost:8787`。
 
 **CLI 模式**（无 Web UI，直接在终端对话）：
 
@@ -116,7 +124,7 @@ pnpm build && pnpm cli     # node dist/cli.js
 
 ```bash
 # 健康检查
-curl http://localhost:3000/api/health
+curl http://localhost:8787/api/health
 # 返回: {"ok":true,"sessions":0,...}
 
 # 类型检查

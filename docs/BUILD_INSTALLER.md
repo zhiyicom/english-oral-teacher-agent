@@ -139,9 +139,20 @@ On a Windows machine with [Inno Setup 6](https://jrsoftware.org/isdl.php):
 iscc installer\installer.iss
 ```
 
-Produces `installer/build/EnglishOralTeacher-Setup-v1.0.6.exe` — a proper
+Produces `installer/build/EnglishOralTeacher-Setup-v1.0.7.exe` — a proper
 Windows installer with start-menu shortcuts, desktop icon, uninstaller,
 and upgrade detection.
+
+### Icon files
+
+Place in `installer/icons/`:
+- `app.ico` — 256×256 app icon (used for shortcuts, wizard, and uninstall display)
+
+The installer references `icons\app.ico` directly in `[Files]` and `[Icons]`
+sections. Do NOT point `IconFilename` at the pkg-built `.exe` — pkg EXEs
+have no Windows icon resources and will crash Inno Setup during shortcut
+creation with `ACCESS Violation in virtdisk.dll`. Always use the standalone
+`.ico` file.
 
 ## Troubleshooting
 
@@ -154,3 +165,4 @@ and upgrade detection.
 | `sharp/build/Release` warnings | Harmless — our MiniLM embedding doesn't use sharp (image processing) |
 | `SPA not built. Run pnpm build first.` | `patch-bundle.cjs` SPA handler regex didn't match; check `c\d*` pattern |
 | esbuild `.node` file error | Add `--external:onnxruntime-node` to exclude the native binding |
+| Installer crashes on "Creating shortcuts" (ACCESS Violation in `virtdisk.dll`) | pkg EXE has no icon resources. Do NOT use `IconFilename: "{app}\EnglishOralTeacher.exe"` in `.iss`. Ship a standalone `app.ico` and reference it instead. |
