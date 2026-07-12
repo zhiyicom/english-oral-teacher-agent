@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { recordAdoptedTopics } from '../../src/agent/topic-recorder.js'
+import { ADOPTION_MIN_TURNS, recordAdoptedTopics } from '../../src/agent/topic-recorder.js'
 import { applyMigrations, openDb } from '../../src/storage/db.js'
 import {
   createKeywordHitsDao,
@@ -13,6 +13,24 @@ import type { Topic } from '../../src/storage/topics.js'
 import { resolveMigrationsDirForTesting } from '../storage/helpers.js'
 
 const migrationsDir = resolveMigrationsDirForTesting()
+
+// v1.0.9 §1.4 — helper to build a "definitely adopted" ledger entry.
+// Existing tests of the write path don't exercise the threshold gate;
+// they just want to confirm recordAdoptedTopics increments correctly.
+// Pass any onTopicTurns ≥ ADOPTION_MIN_TURNS.
+const ABOVE = ADOPTION_MIN_TURNS + 1
+const adoptedEntry = (
+  suggestedKeyword: string,
+  source: 'auto' | 'llm',
+  topic: Topic,
+  onTopicTurns = ABOVE,
+) => ({
+  suggestedKeyword,
+  source,
+  onTopicTurns,
+  keywords: topic.keywords,
+  description: topic.description,
+})
 
 // Fixture topics — small library so we can assert exact increments.
 const TOPICS: Topic[] = [
@@ -60,8 +78,8 @@ describe('recordAdoptedTopics (v1.0.7 §11)', () => {
   describe('happy path (non-empty adopted ledger)', () => {
     it('writes one topic_stats row per adopted slug and returns the slug list', () => {
       const adopted = new Map([
-        ['school_life', { suggestedKeyword: 'homework', source: 'auto' as const }],
-        ['food_drink', { suggestedKeyword: 'hotpot', source: 'llm' as const }],
+        ['school_life', adoptedEntry('homework', 'auto', TOPICS[0]!)],
+        ['food_drink', adoptedEntry('hotpot', 'llm', TOPICS[1]!)],
       ])
       const result = recordAdoptedTopics(
         adopted,
@@ -81,7 +99,7 @@ describe('recordAdoptedTopics (v1.0.7 §11)', () => {
 
     it('writes one keyword_hits row per adopted slug with the suggested keyword', () => {
       const adopted = new Map([
-        ['school_life', { suggestedKeyword: 'homework', source: 'auto' as const }],
+        ['school_life', adoptedEntry('homework', 'auto', TOPICS[0]!)],
       ])
       recordAdoptedTopics(
         adopted,
@@ -97,7 +115,7 @@ describe('recordAdoptedTopics (v1.0.7 §11)', () => {
 
     it('handles empty suggestedKeyword by skipping keyword_hits but still incrementing topic_stats', () => {
       const adopted = new Map([
-        ['school_life', { suggestedKeyword: '', source: 'auto' as const }],
+        ['school_life', adoptedEntry('', 'auto', TOPICS[0]!)],
       ])
       const result = recordAdoptedTopics(
         adopted,
@@ -116,7 +134,7 @@ describe('recordAdoptedTopics (v1.0.7 §11)', () => {
       // Map dedup is by key, so callers cannot insert duplicates — but
       // verify the function only emits one incrementAndUpdate per slug.
       const adopted = new Map([
-        ['school_life', { suggestedKeyword: 'homework', source: 'auto' as const }],
+        ['school_life', adoptedEntry('homework', 'auto', TOPICS[0]!)],
       ])
       recordAdoptedTopics(
         adopted,
@@ -139,7 +157,7 @@ describe('recordAdoptedTopics (v1.0.7 §11)', () => {
 
   describe('fallback path (empty adopted ledger)', () => {
     it('falls back to matchTopic when adopted is empty and summary has overlapping keywords', () => {
-      const adopted = new Map<string, { suggestedKeyword: string; source: 'auto' | 'llm' }>()
+      const adopted = new Map<string, ReturnType<typeof adoptedEntry>>()
       // 'hotpot' is in food_drink — matchTopic should find it.
       const result = recordAdoptedTopics(
         adopted,
@@ -155,7 +173,7 @@ describe('recordAdoptedTopics (v1.0.7 §11)', () => {
     })
 
     it('returns empty array when fallback also finds nothing', () => {
-      const adopted = new Map<string, { suggestedKeyword: string; source: 'auto' | 'llm' }>()
+      const adopted = new Map<string, ReturnType<typeof adoptedEntry>>()
       const result = recordAdoptedTopics(
         adopted,
         ['totally', 'unrelated', 'words'],
@@ -168,7 +186,7 @@ describe('recordAdoptedTopics (v1.0.7 §11)', () => {
     })
 
     it('returns empty array when adopted is empty AND fallback keywords are empty', () => {
-      const adopted = new Map<string, { suggestedKeyword: string; source: 'auto' | 'llm' }>()
+      const adopted = new Map<string, ReturnType<typeof adoptedEntry>>()
       const result = recordAdoptedTopics(
         adopted,
         [],
@@ -182,9 +200,9 @@ describe('recordAdoptedTopics (v1.0.7 §11)', () => {
   describe('integration with multiple adopted slugs', () => {
     it('three adopted slugs → three topic_stats rows + three keyword_hits entries', () => {
       const adopted = new Map([
-        ['school_life', { suggestedKeyword: 'homework', source: 'auto' as const }],
-        ['food_drink', { suggestedKeyword: 'hotpot', source: 'llm' as const }],
-        ['daily_routine', { suggestedKeyword: 'morning', source: 'llm' as const }],
+        ['school_life', adoptedEntry('homework', 'auto', TOPICS[0]!)],
+        ['food_drink', adoptedEntry('hotpot', 'llm', TOPICS[1]!)],
+        ['daily_routine', adoptedEntry('morning', 'llm', TOPICS[2]!)],
       ])
       const result = recordAdoptedTopics(
         adopted,
@@ -203,6 +221,75 @@ describe('recordAdoptedTopics (v1.0.7 §11)', () => {
         'school_life',
       ])
       expect(keywordHits.getAll()).toHaveLength(3)
+    })
+  })
+
+  describe('v1.0.9 §1.4 — write-on-adoption (onTopicTurns threshold)', () => {
+    it('drops adopted entries below ADOPTION_MIN_TURNS, falls back to matchTopic', () => {
+      // Both adopted entries are below threshold. recordAdoptedTopics
+      // should skip them and fall back to matchTopic on the summary keywords.
+      // 'hotpot' is in food_drink — matchTopic finds it.
+      const adopted = new Map([
+        ['school_life', adoptedEntry('homework', 'auto', TOPICS[0]!, ADOPTION_MIN_TURNS - 1)],
+        ['food_drink', adoptedEntry('hotpot', 'llm', TOPICS[1]!, 0)],
+      ])
+      const result = recordAdoptedTopics(
+        adopted,
+        ['hotpot', 'spicy', 'friends'],
+        { sessionId: 'sess-1', now },
+        { topics: TOPICS, topicStats, keywordHits, topicsDao },
+      )
+      expect(result).toEqual(['food_drink']) // from matchTopic fallback
+      // Only food_drink counted (from fallback); school_life was below threshold.
+      expect(topicStats.get('school_life')).toBeNull()
+      expect(topicStats.get('food_drink')?.discussionCount).toBe(1)
+    })
+
+    it('counts entries at-or-above ADOPTION_MIN_TURNS; below are silently dropped', () => {
+      const adopted = new Map([
+        ['school_life', adoptedEntry('homework', 'auto', TOPICS[0]!, ADOPTION_MIN_TURNS)], // boundary
+        ['food_drink', adoptedEntry('hotpot', 'llm', TOPICS[1]!, ADOPTION_MIN_TURNS - 1)], // one below
+      ])
+      const result = recordAdoptedTopics(
+        adopted,
+        [],
+        { sessionId: 'sess-1', now },
+        { topics: TOPICS, topicStats, keywordHits, topicsDao },
+      )
+      expect(result).toEqual(['school_life'])
+      expect(topicStats.get('school_life')?.discussionCount).toBe(1)
+      expect(topicStats.get('food_drink')).toBeNull()
+    })
+
+    it('counts all entries when every entry is above threshold (happy mix)', () => {
+      const adopted = new Map([
+        ['school_life', adoptedEntry('homework', 'auto', TOPICS[0]!, 5)],
+        ['food_drink', adoptedEntry('hotpot', 'llm', TOPICS[1]!, 3)],
+      ])
+      const result = recordAdoptedTopics(
+        adopted,
+        ['unrelated'],
+        { sessionId: 'sess-1', now },
+        { topics: TOPICS, topicStats, keywordHits, topicsDao },
+      )
+      expect(result).toHaveLength(2)
+      expect(topicStats.get('school_life')?.discussionCount).toBe(1)
+      expect(topicStats.get('food_drink')?.discussionCount).toBe(1)
+    })
+
+    it('falls back to matchTopic when ALL adopted entries are below threshold', () => {
+      const adopted = new Map([
+        ['school_life', adoptedEntry('homework', 'auto', TOPICS[0]!, 0)],
+      ])
+      const result = recordAdoptedTopics(
+        adopted,
+        ['hotpot', 'friends'],
+        { sessionId: 'sess-1', now },
+        { topics: TOPICS, topicStats, keywordHits, topicsDao },
+      )
+      expect(result).toEqual(['food_drink'])
+      expect(topicStats.get('school_life')).toBeNull()
+      expect(topicStats.get('food_drink')?.discussionCount).toBe(1)
     })
   })
 })

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   avgKeywordHit,
+  computeContextOverlap,
   computeInterest,
   filterHardExclude,
+  isTurnOnTopic,
   selectTopic,
   sortByCountAsc,
 } from '../../src/agent/topic-engine.js'
@@ -308,6 +310,195 @@ describe('selectTopic v1.0.3 §1.3 — useInterestBoost flag', () => {
       now: NOW,
     })
     // food count=0, minecraft count=1. D2 sort → food first → wins on tie.
+    expect(result?.name).toBe('food')
+  })
+})
+
+describe('selectTopic v1.0.9 §1.2 — NOISE_RANGE=0.05', () => {
+  it('peak noise cannot flip a 3-count gap (count=0 stays on top)', () => {
+    // food: count=0 → base score 0
+    // sports: count=3 → base score -0.3
+    // Gap = 0.3. With NOISE_RANGE=0.05, peak noise (±0.05) cannot flip it.
+    // Even under the most adversarial rng:
+    //   food rng=1 (noise=+0.05) vs sports rng=0 (noise=-0.05)
+    //   food=0+0.05=0.05, sports=-0.3-0.05=-0.35 → food still wins by 0.4
+    const stats: TopicStat[] = [stat('sports', 3, 100)]
+    let n = 0
+    const result = selectTopic({
+      topics: [food, sports],
+      stats,
+      interests: [],
+      rng: () => [1, 0][n++] as number, // max swing against food
+      now: NOW,
+    })
+    expect(result?.name).toBe('food')
+  })
+
+  it('peak noise can still break a 0-count tie (regression: D4 still works)', () => {
+    // food vs school: both count=0, base score 0. Noise (peak ±0.05) breaks tie.
+    // rng=[0, 1]: food=-0.05, school=+0.05 → school wins.
+    const stats: TopicStat[] = [stat('food', 0, 100), stat('school', 0, 100)]
+    let n = 0
+    const result = selectTopic({
+      topics: [food, school],
+      stats,
+      interests: [],
+      rng: () => [0, 1][n++] as number,
+      now: NOW,
+    })
+    expect(result?.name).toBe('school')
+  })
+})
+
+describe('isTurnOnTopic (v1.0.9 §1.4)', () => {
+  const boeing: Topic = {
+    name: 'boeing_737',
+    keywords: ['boeing', '737', 'cockpit'],
+    description: '波音 737 驾驶舱',
+    createdAt: '2026-06-01T00:00:00.000Z',
+  }
+
+  it('returns true when user message contains a topic keyword', () => {
+    expect(isTurnOnTopic(boeing, 'I watched a Boeing cockpit video', '')).toBe(true)
+  })
+
+  it('returns true when assistant message contains a topic keyword', () => {
+    // User said "ok" — no keyword; assistant responds "the cockpit has three displays" → match.
+    expect(isTurnOnTopic(boeing, 'ok', 'Anyway, the cockpit has three displays.')).toBe(true)
+  })
+
+  it('returns false when neither side contains any keyword or description', () => {
+    expect(isTurnOnTopic(boeing, '嗯', 'Tell me more.')).toBe(false)
+    expect(isTurnOnTopic(boeing, 'yeah', 'Got it. What do you want to do today?')).toBe(false)
+  })
+
+  it('description (long Chinese form) acts as substring needle for fallback', () => {
+    // No exact English keyword match — but "波音 737 驾驶舱" substring matches.
+    expect(isTurnOnTopic(boeing, '我昨天看了波音 737 的视频', '哦？')).toBe(true)
+  })
+
+  it('matching is case-insensitive', () => {
+    expect(isTurnOnTopic(boeing, 'I saw a BOEING 737', '')).toBe(true)
+    expect(isTurnOnTopic(boeing, 'cockpit COCKPIT cockpit', '')).toBe(true)
+  })
+
+  it('returns false for topic with empty keywords and null description', () => {
+    const empty: Topic = {
+      name: 'empty',
+      keywords: [],
+      description: null,
+      createdAt: '2026-06-01T00:00:00.000Z',
+    }
+    expect(isTurnOnTopic(empty, 'anything', 'goes')).toBe(false)
+  })
+
+  it('returns false when keywords are whitespace-only after trim', () => {
+    const ws: Topic = {
+      name: 'ws',
+      keywords: ['   ', '  '],
+      description: null,
+      createdAt: '2026-06-01T00:00:00.000Z',
+    }
+    expect(isTurnOnTopic(ws, 'anything', 'goes')).toBe(false)
+  })
+})
+
+describe('computeContextOverlap (v1.0.9 §1.3)', () => {
+  it('returns case-insensitive keyword overlap count', () => {
+    // minecraft keywords = [minecraft, castle, creeper]. context = [Minecraft, Castle].
+    expect(computeContextOverlap(minecraft, ['Minecraft', 'Castle'])).toBe(2)
+  })
+
+  it('returns 0 when contextKeywords is empty', () => {
+    expect(computeContextOverlap(minecraft, [])).toBe(0)
+  })
+
+  it('returns 0 when topic.keywords is empty', () => {
+    const empty = topic('empty', [])
+    expect(computeContextOverlap(empty, ['anything'])).toBe(0)
+  })
+
+  it('returns 0 when no overlap', () => {
+    expect(computeContextOverlap(minecraft, ['football', 'stadium'])).toBe(0)
+  })
+})
+
+describe('selectTopic v1.0.9 §1.3 — contextKeywords boost', () => {
+  // Two topics with equal count and zero keyword hits. minecraft has 2 of its
+  // keywords in the WARM_UP context; food has none. CONTEXT_WEIGHT=0.15 so
+  // minecraft picks up +0.30 of boost, beating food on a count tie.
+  it('context-matching topic wins over same-count non-matching (rng=0.5)', () => {
+    const stats: TopicStat[] = []
+    const result = selectTopic({
+      topics: [minecraft, food],
+      stats,
+      interests: [],
+      contextKeywords: ['minecraft', 'castle'], // matches minecraft twice
+      rng: () => 0.5,
+      now: NOW,
+    })
+    expect(result?.name).toBe('minecraft')
+  })
+
+  it('dedup priority beats relevance: recently-discussed related topic is still D1-excluded', () => {
+    // minecraft matches WARM_UP context (strong boost), but was discussed
+    // 5 days ago → D1 with excludeDays=30 drops it. food has no boost but
+    // survived D1 → food wins. This proves contextBoost cannot bring a
+    // recently-discussed topic back into the pool.
+    const stats: TopicStat[] = [stat('minecraft', 1, 5)]
+    const result = selectTopic({
+      topics: [minecraft, food],
+      stats,
+      interests: [],
+      excludeDays: 30,
+      contextKeywords: ['minecraft', 'castle', 'creeper'], // 3/3 match → +0.45
+      rng: () => 0.5,
+      now: NOW,
+    })
+    expect(result?.name).toBe('food')
+  })
+
+  it('single-keyword context boost beats a 1-count difference', () => {
+    // minecraft: count=0, context=1 (minecraft) → +0.15 boost → score = +0.15
+    // sports:   count=1, context=0                → score = -0.10
+    // Without context: sports would win (-0.10 > +0). With context: minecraft wins.
+    const stats: TopicStat[] = [stat('sports', 1, 100)]
+    const result = selectTopic({
+      topics: [minecraft, sports],
+      stats,
+      interests: [],
+      contextKeywords: ['minecraft'],
+      rng: () => 0.5,
+      now: NOW,
+    })
+    expect(result?.name).toBe('minecraft')
+  })
+
+  it('contextKeywords omitted → no boost (legacy behavior preserved)', () => {
+    // Same setup as the count-tie test from the main describe block, but
+    // with contextKeywords undefined. food still wins on count=0.
+    const stats: TopicStat[] = [stat('sports', 5, 100)]
+    const result = selectTopic({
+      topics: [minecraft, school, sports, food],
+      stats,
+      interests: [],
+      rng: () => 0.5,
+      now: NOW,
+    })
+    expect(result?.name).toBe('food')
+  })
+
+  it('empty contextKeywords array → no boost (treated same as omitted)', () => {
+    // Defense: [] must produce 0 overlap, not throw or score-empty-pool.
+    const stats: TopicStat[] = [stat('sports', 5, 100)]
+    const result = selectTopic({
+      topics: [minecraft, school, sports, food],
+      stats,
+      interests: [],
+      contextKeywords: [],
+      rng: () => 0.5,
+      now: NOW,
+    })
     expect(result?.name).toBe('food')
   })
 })

@@ -36,6 +36,7 @@ import {
   runTurn,
   summarize,
 } from './agent/index.js'
+import type { AdoptedTopic } from './agent/topic-recorder.js'
 import type { PhaseTransition, SessionState } from './agent/index.js'
 import { extractStudentDiscoveries } from './agent/profile-extractor.js'
 import type { TurnOutput } from './agent/turn.js'
@@ -129,7 +130,10 @@ interface SessionRuntime {
   // mutated in place by runTurn. Read by endSession to drive the
   // topic_stats / keyword_hits / sessions.topics_used writes. In-memory
   // only; server restart loses it (acceptable, falls back to matchTopic).
-  adoptedTopics: Map<string, { suggestedKeyword: string; source: 'auto' | 'llm' }>
+  // v1.0.9 §1.4 — entries now also carry `onTopicTurns` + `keywords` +
+  // `description` so turn.ts can run `isTurnOnTopic` without re-reading
+  // the topics table, and recorder gates writes on the adoption threshold.
+  adoptedTopics: Map<string, AdoptedTopic>
 }
 
 function reconstructSessionState(
@@ -302,12 +306,13 @@ export function createApp(opts: {
   toolRegistry.register(
     createTopicSelectTool({
       topics: topics.list(),
-      stats: topicStats.all(),
+      // v1.0.9 §1.1 — getters so D1 hard-exclude / D2 count bias /
+      // D5 keyword freshness see post-session DB writes. The prior
+      // `topicStats.all()` / `keywordHits.getAll()` snapshot form froze
+      // the data at startup, silently breaking dedup until server restart.
+      stats: () => topicStats.all(),
       interests: [],
-      // v1.0.2 — keyword-freshness bias. Read once at startup; only
-      // mutated in the session-end finally block (same module-scoped DB),
-      // so reading once is correct (mirrors how `stats` is loaded above).
-      keywordStats: keywordHits.getAll(),
+      keywordStats: () => keywordHits.getAll(),
       // v1.0.3 §1.3 — D3 (interest boost) disabled. WARM_UP phase prompt
       // handles interest matching; this tool only sees call-count signals.
       useInterestBoost: false,

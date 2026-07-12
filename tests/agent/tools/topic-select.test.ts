@@ -5,7 +5,11 @@ import {
 } from '../../../src/agent/tools/topic-select.js'
 import type { KeywordHit, Topic, TopicStat } from '../../../src/storage/topics.js'
 
-const NOW = new Date('2026-06-10T12:00:00.000Z')
+// Pin to real today so `daysAgo` math stays correct regardless of when the
+// test is run. The original fixed date (2026-06-10) silently made the
+// "hard exclude removes every topic" test fail once real wall-clock time
+// drifted past fixture NOW + 30 days.
+const NOW = new Date()
 const DAY = 86_400_000
 
 function topic(name: string, keywords: string[]): Topic {
@@ -96,6 +100,92 @@ describe('createTopicSelectTool', () => {
     const tool = createTopicSelectTool({ topics: [minecraft], stats: [], interests: [] })
     expect(tool.name).toBe('topic_select')
     expect(tool.description).toContain('topic')
+  })
+})
+
+describe('createTopicSelectTool v1.0.9 §1.1 — stats / keywordStats as getter', () => {
+  it('getter form: a second execute() after mutating underlying data reflects the change', () => {
+    // Mutable stats array — simulate session-end DB write happening between
+    // tool calls. With the old snapshot form, this test would still return
+    // minecraft (the only zero-count topic in the first call).
+    const stats: TopicStat[] = [stat('minecraft', 5, 100)]
+    const tool = createTopicSelectTool({
+      topics: [minecraft, school],
+      stats: () => stats, // ← getter
+      interests: [],
+      rng: () => 0.5,
+    })
+    // First call: only minecraft has stats, but count=5 → score=-0.5.
+    // school has no stats row → count=0 → score=0 → school wins.
+    const r1 = tool.execute({ phase: 'MAIN_ACTIVITY', exclude_recent_days: 30 }) as
+      | { slug: string }
+      | { error: string }
+    if ('error' in r1) throw new Error(`unexpected error: ${r1.error}`)
+    expect(r1.slug).toBe('school')
+
+    // Mutate the underlying array as if the DB had a new write.
+    stats.push(stat('school', 5, 100))
+    // Second call: getter re-reads the array; school now has count=5 too.
+    // Tie broken alphabetically (school has lower score noise + alpha?).
+    // Both count=5 → score=-0.5 each, noise=0 → tie → alphabetical tiebreak
+    // in pool: filterHardExclude keeps both (lastDiscussedAt outside window),
+    // sortByCountAsc keeps minecraft first (a.name.localeCompare(b.name)).
+    const r2 = tool.execute({ phase: 'MAIN_ACTIVITY', exclude_recent_days: 30 }) as
+      | { slug: string }
+      | { error: string }
+    if ('error' in r2) throw new Error(`unexpected error: ${r2.error}`)
+    expect(r2.slug).toBe('minecraft')
+  })
+
+  it('getter form: keywordStats getter also reflects changes between calls', () => {
+    const hits: KeywordHit[] = [
+      { topic: 'minecraft', keyword: 'minecraft', hitCount: 10, firstHitAt: null, lastHitAt: null },
+    ]
+    const tool = createTopicSelectTool({
+      topics: [minecraft, school],
+      stats: [],
+      interests: [],
+      keywordStats: () => hits,
+      rng: () => 0.5,
+    })
+    // First call: minecraft has keyword hits (avg ≈ 3.33), school has none (avg = 0).
+    // school wins on lower kAvg penalty.
+    const r1 = tool.execute({ phase: 'MAIN_ACTIVITY', exclude_recent_days: 30 }) as
+      | { slug: string }
+      | { error: string }
+    if ('error' in r1) throw new Error(`unexpected error: ${r1.error}`)
+    expect(r1.slug).toBe('school')
+
+    // Now mutate so school also has hits → minecraft becomes fresher.
+    hits.push({ topic: 'school', keyword: 'school', hitCount: 10, firstHitAt: null, lastHitAt: null })
+    hits.push({ topic: 'school', keyword: 'class', hitCount: 10, firstHitAt: null, lastHitAt: null })
+    hits.push({ topic: 'school', keyword: 'teacher', hitCount: 10, firstHitAt: null, lastHitAt: null })
+    // Second call: minecraft avg = 10/3 = 3.33, school avg = 30/3 = 10.
+    // minecraft wins.
+    const r2 = tool.execute({ phase: 'MAIN_ACTIVITY', exclude_recent_days: 30 }) as
+      | { slug: string }
+      | { error: string }
+    if ('error' in r2) throw new Error(`unexpected error: ${r2.error}`)
+    expect(r2.slug).toBe('minecraft')
+  })
+
+  it('array form (legacy): still works without changes (backward compatibility)', () => {
+    // Plain array — no getter. This is the pre-v1.0.9 calling convention;
+    // must keep working for all existing tests.
+    const tool = createTopicSelectTool({
+      topics: [minecraft, school, sports],
+      stats: [stat('minecraft', 5, 100)],
+      interests: [],
+      keywordStats: [
+        { topic: 'school', keyword: 'school', hitCount: 10, firstHitAt: null, lastHitAt: null },
+      ],
+      rng: () => 0.5,
+    })
+    const result = tool.execute({ phase: 'MAIN_ACTIVITY', exclude_recent_days: 30 }) as
+      | { slug: string }
+      | { error: string }
+    if ('error' in result) throw new Error(`unexpected error: ${result.error}`)
+    expect(result.slug).toBeTruthy()
   })
 })
 

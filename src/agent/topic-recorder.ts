@@ -11,6 +11,17 @@ import { matchTopic } from './topic-matcher.js'
 export interface AdoptedTopic {
   suggestedKeyword: string
   source: 'auto' | 'llm'
+  // v1.0.9 §1.4 — write-on-adoption: count of normal conversation turns
+  // where `isTurnOnTopic` returned true for this topic's keywords/description.
+  // The session-end write only happens when this meets ADOPTION_MIN_TURNS,
+  // so `topic_stats.discussion_count` reflects "really discussed" not
+  // "selected by topic_select". Decoupled from keyword_hits.hit_count
+  // (cross-session accumulator driven by `suggestedKeyword` upserts).
+  onTopicTurns: number
+  // v1.0.9 §1.4 — captured at selection time so turn.ts can call
+  // `isTurnOnTopic` against this entry without re-reading the topics table.
+  keywords: string[]
+  description: string | null
 }
 
 export type AdoptedTopicsMap = Map<string, AdoptedTopic>
@@ -20,20 +31,26 @@ export interface RecordContext {
   now: Date
 }
 
+// v1.0.9 §1.4 — adoption threshold. "Injected topic must have been
+// genuinely engaged with for at least this many turns before it counts."
+// N=2 is the smallest value that distinguishes "ignored/single-word reply"
+// from "actually discussed" without over-penalizing short sessions.
+export const ADOPTION_MIN_TURNS = 2
+
 /**
  * Persist the session's adopted topics and return the slug list to write
  * into `sessions.topics_used`.
  *
- * - If `adopted` is non-empty: iterate every (slug, info) pair, call
- *   `topicStats.incrementAndUpdate(slug, now)` and
- *   `keywordHits.upsertMany(slug, [suggestedKeyword], now)` for each.
- *   Slugs are deduped by the caller (the Map's keys are unique), so the
- *   same topic never gets double-counted within one session.
- * - If `adopted` is empty (e.g. session ended before MAIN_ACTIVITY
- *   auto-inject could fire, or the LLM never successfully called
- *   `topic_select`): fall back to `matchTopic(summaryKeywords, topics)`
- *   for best-effort bookkeeping. Returns `[]` when even the fallback
- *   finds nothing — caller should write an empty `topics_used` array.
+ * v1.0.9 §1.4 — write-on-adoption: a topic only counts toward
+ * `topic_stats` / `keyword_hits` when its `onTopicTurns` ≥
+ * ADOPTION_MIN_TURNS. Topics below the threshold are dropped from
+ * `topics_used` so the ledger reflects real discussion.
+ *
+ * Fallback chain (preserved from v1.0.7 §11):
+ * - If at least one adopted topic meets the threshold → write those.
+ * - If all adopted topics are below threshold → fall back to
+ *   `matchTopic(summaryKeywords, topics)` for best-effort bookkeeping.
+ *   Returns `[]` when even the fallback finds nothing.
  *
  * Always returns an array (possibly empty) — never throws on the happy
  * path. Topic recording is best-effort; a DB error is surfaced to the
@@ -50,14 +67,21 @@ export function recordAdoptedTopics(
     topicsDao: TopicsDao
   },
 ): string[] {
+  // v1.0.9 §1.4 — partition adopted into "above threshold" and "below".
+  // Above-threshold entries are written and returned. Below-threshold
+  // are dropped from this session's `topics_used`; their suggestedKeyword
+  // does not feed keyword_hits either, so D5 isn't biased by ignored picks.
+  const adoptedSlugs: string[] = []
   if (adopted.size > 0) {
     for (const [slug, info] of adopted) {
+      if (info.onTopicTurns < ADOPTION_MIN_TURNS) continue
       deps.topicStats.incrementAndUpdate(slug, ctx.now)
       if (info.suggestedKeyword) {
         deps.keywordHits.upsertMany(slug, [info.suggestedKeyword], ctx.now)
       }
+      adoptedSlugs.push(slug)
     }
-    return [...adopted.keys()]
+    if (adoptedSlugs.length > 0) return adoptedSlugs
   }
 
   const best = matchTopic(fallbackKeywords, deps.topics)

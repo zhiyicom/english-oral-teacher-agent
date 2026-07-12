@@ -72,10 +72,64 @@ export function avgKeywordHit(topic: Topic, keywordStats: KeywordHit[]): number 
   return sum / topic.keywords.length
 }
 
+/**
+ * v1.0.9 §1.4 — A turn is "on the topic" when the user message OR the
+ * assistant message contains (case-insensitive substring) any of
+ * `topic.keywords` ∪ `topic.description`.
+ *
+ * description (human-readable long form, may be null) is added to the
+ * match pool so topics with short keywords still match naturally:
+ *   topic `boeing_737`, keywords=["boeing","737","cockpit"],
+ *   description="波音 737 驾驶舱"
+ *   user "我昨天看了波音 737 的视频" → matches "波音 737 驾驶舱" substring
+ *
+ * Pure: no I/O, no DB. Caller (turn.ts) tracks per-session
+ * `onTopicTurns` and decides adoption at session end.
+ */
+export function isTurnOnTopic(
+  topic: Topic,
+  userContent: string,
+  assistantContent: string,
+): boolean {
+  const needles = [
+    ...topic.keywords,
+    ...(topic.description ? [topic.description] : []),
+  ]
+    .map((n) => n.toLowerCase().trim())
+    .filter((n) => n.length > 0)
+  if (needles.length === 0) return false
+  const haystack = `${userContent} ${assistantContent}`.toLowerCase()
+  return needles.some((needle) => haystack.includes(needle))
+}
+
+// v1.0.9 §1.3 — independent contextBoost channel. NOT to be confused with
+// the legacy `interest` channel (D3, disabled by v1.0.3 §1.3). Interest
+// was "student's long-term interest profile"; contextBoost is "keywords
+// from the current session's WARM_UP phase" — a transient hint about
+// what was just talked about, used to soften Hook A's random pick into
+// something related to the live conversation.
+//
+// Substring overlap (case-insensitive) of `topic.keywords` with
+// `contextKeywords`. Empty `contextKeywords` → 0. Empty topic.keywords → 0.
+export function computeContextOverlap(
+  topic: Topic,
+  contextKeywords: readonly string[],
+): number {
+  if (contextKeywords.length === 0) return 0
+  const norm = new Set(contextKeywords.map((s) => s.toLowerCase()))
+  return topic.keywords.filter((k) => norm.has(k.toLowerCase())).length
+}
+
+// v1.0.9 §1.3 — chosen so one related keyword beats a single count diff
+// (0.1) but a 2-count lead (0.2) still wins. Dedup priority > relevance.
+export const CONTEXT_WEIGHT = 0.15
+
 const COUNT_WEIGHT = 0.1
 const KEYWORD_WEIGHT = 0.05
 const INTEREST_WEIGHT = 0.5
-const NOISE_RANGE = 0.2
+// v1.0.9 §1.2 — peak-to-peak (0.1) sits just above a single count diff (0.1),
+// so noise breaks ties without flipping a clear count ordering.
+const NOISE_RANGE = 0.05
 
 /**
  * Top-level — D1+D2+D3+D4(+D5) in one call.
@@ -101,6 +155,11 @@ export function selectTopic(opts: {
   now?: Date
   rng?: () => number
   useInterestBoost?: boolean
+  // v1.0.9 §1.3 — independent of `interests` (D3, disabled). Soft-boost
+  // for topics whose keywords overlap with this session's WARM_UP context.
+  // Applied AFTER hard-exclude so dedup priority beats relevance. When
+  // omitted, behaves exactly as before (no context boost).
+  contextKeywords?: readonly string[]
 }): Topic | null {
   const excludeDays = opts.excludeDays ?? 30
   const now = opts.now ?? new Date()
@@ -110,6 +169,8 @@ export function selectTopic(opts: {
   // in the signature for backwards compat but is only consulted when
   // useInterestBoost === true.
   const useInterestBoost = opts.useInterestBoost ?? false
+  // v1.0.9 §1.3 — contextKeywords is purely additive; empty/missing = 0.
+  const contextKeywords = opts.contextKeywords ?? []
 
   let pool = filterHardExclude(opts.topics, opts.stats, excludeDays, now)
   if (pool.length === 0) return null
@@ -121,13 +182,21 @@ export function selectTopic(opts: {
     const count = stat?.discussionCount ?? 0
     const interest = useInterestBoost ? computeInterest(t, opts.interests) : 0
     const kAvg = avgKeywordHit(t, keywordStats)
+    const context = computeContextOverlap(t, contextKeywords)
     const noise = (rng() * 2 - 1) * NOISE_RANGE
     return {
       topic: t,
       count,
       interest,
       avgKeywordHit: kAvg,
-      score: -count * COUNT_WEIGHT - kAvg * KEYWORD_WEIGHT + interest * INTEREST_WEIGHT + noise,
+      // v1.0.9 §1.3 — `+ context * CONTEXT_WEIGHT`. Independent of D3
+      // (interest) so the disabled-by-default interest channel stays dead.
+      score:
+        -count * COUNT_WEIGHT -
+        kAvg * KEYWORD_WEIGHT +
+        interest * INTEREST_WEIGHT +
+        context * CONTEXT_WEIGHT +
+        noise,
     }
   })
 

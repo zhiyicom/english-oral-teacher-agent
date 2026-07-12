@@ -42,6 +42,23 @@ export function deleteTopicTurnCount(sessionId: string): void {
   counters.delete(sessionId)
 }
 
+// v1.0.9 §1.4 — write-on-adoption: track the *currently active* topic per
+// session so end-of-turn logic can run `isTurnOnTopic` against it. Older
+// `topicTurnCount` above is unrelated (it gates topic-switch rate).
+const activeTopicBySession = new Map<string, string>()
+
+export function setActiveTopic(sessionId: string, slug: string): void {
+  activeTopicBySession.set(sessionId, slug)
+}
+
+export function getActiveTopic(sessionId: string): string | null {
+  return activeTopicBySession.get(sessionId) ?? null
+}
+
+export function clearActiveTopic(sessionId: string): void {
+  activeTopicBySession.delete(sessionId)
+}
+
 // Detect explicit user request to switch topic — bypasses the gate.
 // Patterns: "switch topic", "change topic", "new topic", "another
 // topic", "fresh topic", "different topic", "换个话题", "换个新话题".

@@ -22,6 +22,7 @@ import {
   summarize,
 } from './agent/index.js'
 import type { TurnEvent } from './agent/turn.js'
+import type { AdoptedTopic } from './agent/topic-recorder.js'
 import { loadEnv } from './config/env.js'
 import { getAppDataDir, getReplayFixturesDir } from './config/paths.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
@@ -271,7 +272,8 @@ export async function main(): Promise<void> {
   // Mutated by runTurn via Hook A (MAIN_ACTIVITY auto-inject) and Hook B
   // (LLM topic_select success). Read by the END pipeline below to drive
   // topic_stats / keyword_hits writes.
-  const adoptedTopics: Map<string, { suggestedKeyword: string; source: 'auto' | 'llm' }> = new Map()
+  // v1.0.7 §11 — see server.ts. v1.0.9 §1.4 added the new fields.
+const adoptedTopics: Map<string, AdoptedTopic> = new Map()
   // v0.7.5 — 80%-budget warn fires once per session, not every turn (see
   // v0.7.5-scope.md §6 risk #5). Reset implicitly per process start, so a
   // fresh CLI invocation gets a fresh warn window.
@@ -301,6 +303,10 @@ export async function main(): Promise<void> {
   // pass the same list to every turn. Re-read each turn is unnecessary:
   // topic_stats is only mutated in the finally block of THIS process, after
   // the loop ends, so within-session reading once is correct.
+  //
+  // v1.0.9 §1.1 — switch the tool to getter form anyway so Server / CLI
+  // share the same code path. Within a single CLI invocation the getter
+  // just re-reads the same row data, so there's no behavioral change.
   const activeTopics: TopicStat[] = topicStats.all()
 
   // v0.7 — register tools. mark_mistake is bound to this session's id so the
@@ -356,12 +362,12 @@ export async function main(): Promise<void> {
   toolRegistry.register(
     createTopicSelectTool({
       topics: topics.list(),
-      stats: topicStats.all(),
+      // v1.0.9 §1.1 — getters (same as server.ts). Within one CLI
+      // invocation the getter just re-reads the same row data; the
+      // change keeps Server / CLI on the same code path.
+      stats: () => topicStats.all(),
       interests: [],
-      // v1.0.2 — keyword-freshness bias. Read once at startup; only
-      // mutated in the session-end finally block (same module-scoped DB),
-      // so reading once is correct (mirrors how `stats` is loaded above).
-      keywordStats: keywordHits.getAll(),
+      keywordStats: () => keywordHits.getAll(),
       // v1.0.3 §1.3 — D3 (interest boost) disabled. WARM_UP phase prompt
       // handles interest matching; this tool only sees call-count signals.
       useInterestBoost: false,

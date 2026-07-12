@@ -25,10 +25,12 @@ import { chatStreamWithRetry, chatStreamWithRetryGen } from '../llm/retry.js'
 import { loadPhaseInstructions } from '../prompts/loader.js'
 import {
   getCurrentMinTopicAge,
+  getActiveTopic,
   getTopicTurnCount,
   incrementTopicTurnCount,
   isExplicitTopicSwitch,
   resetTopicTurnCount,
+  setActiveTopic,
 } from './topic-counter.js'
 
 const PHASES = loadPhaseInstructions()
@@ -61,6 +63,9 @@ import {
   summarize,
   truncateHistory,
 } from './index.js'
+import { isTurnOnTopic } from './topic-engine.js'
+import type { AdoptedTopic } from './topic-recorder.js'
+import type { Topic } from '../storage/topics.js'
 import type { ToolRegistry } from './tool-registry.js'
 
 // ---------- v0.4 strict whole-sentence stop regex ----------
@@ -70,6 +75,53 @@ import type { ToolRegistry } from './tool-registry.js'
 //   - "I don't want to stop." → stop preceded by space (not [.!?]), NOT matched
 //   - "stop", "Stop.", "okay. stop" → matched
 const STOP_REGEX = /(?:^|[.!?]\s+|\n)(stop|quit|end|bye|done|结束|停)\b[.!?\s]*$/i
+
+// v1.0.9 §1.3 — extract WARM_UP keywords for Hook A contextBoost.
+// Pure function: takes messages from history BEFORE the current user input
+// (all WARM_UP turns, since Hook A fires on the transition tick) and
+// returns a deduplicated list of "content word" tokens that may overlap
+// with topic.keywords.
+//
+// Tokenization is intentionally light: split on whitespace + punctuation,
+// drop tokens < 3 chars, drop pure-numeric tokens, dedup case-insensitively.
+// No LLM, no embedder — pure string ops. Empty history → empty list (which
+// is the safe "no boost" default the schema + engine already handle).
+//
+// v0.7.6 / v1.0.5 §B — the LLM was mining `# STUDENT` interests for
+// opening material because topic_select only returned a bare title; this
+// helper does NOT solve that, it just makes the auto-injected topic itself
+// more relevant to what the student just talked about.
+export function extractWarmUpKeywords(history: readonly Message[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const msg of history) {
+    if (msg.role !== 'user') continue
+    // Split on any non-letter/digit char (covers ASCII whitespace/punct
+    // AND CJK punctuation like `，。！？`). CJK characters are all
+    // `\p{L}`, so a run of CJK chars stays together as one "word"
+    // (e.g. "我昨天玩了" stays as a single token).
+    const tokens = msg.content.split(/[^\p{L}\p{N}]+/u)
+    for (const raw of tokens) {
+      const t = raw.trim().toLowerCase()
+      if (t.length === 0) continue
+      // Skip ASCII-only short words (a, an, I, to, ok, hi). CJK 1-2 char
+      // words are perfectly meaningful in Chinese (我, 的, 波音) so the
+      // length filter only applies to pure-ASCII letter runs.
+      if (/^[a-z]+$/u.test(t) && t.length < 3) continue
+      // Skip pure-numeric tokens (25, 737, 42). Mixed tokens like '3a'
+      // are kept — they may be class IDs / model numbers worth matching.
+      if (/^\d+$/u.test(t)) continue
+      if (seen.has(t)) continue
+      seen.add(t)
+      out.push(t)
+    }
+  }
+  // Cap output so we don't ship hundreds of tokens into a tool call.
+  // 30 unique tokens is plenty to overlap with topic.keywords (which
+  // typically have 3-6 entries) without bloating the prompt-side schema
+  // or the engine's per-topic Set lookups.
+  return out.slice(0, 30)
+}
 
 // ---------- Events yielded by runTurn ----------
 // CLI forwards to stderr; server forwards as SSE (v0.8.3). The exact event
@@ -170,7 +222,10 @@ export interface TurnInput {
   // Hook B = topic_select success). Caller owns the Map and reads it during
   // endSession to drive topic_stats / keyword_hits writes. Optional so older
   // tests still compile — defaults to an empty Map that nobody reads.
-  adoptedTopics?: Map<string, { suggestedKeyword: string; source: 'auto' | 'llm' }>
+  // v1.0.9 §1.4 — entries now carry onTopicTurns + keywords + description
+  // so end-of-turn logic can run `isTurnOnTopic` and recorder can gate
+  // writes on ADOPTION_MIN_TURNS.
+  adoptedTopics?: Map<string, AdoptedTopic>
   mockTime: boolean
 }
 
@@ -405,9 +460,17 @@ export async function* runTurn(
         try {
           const topicTool = deps.toolRegistry.get('topic_select')
           if (topicTool) {
+            // v1.0.9 §1.3 — extract keywords from WARM_UP history so the
+            // selection engine can soft-boost topics related to what the
+            // student just talked about. Pure string extraction, no LLM.
+            // Falls back to [] when WARM_UP was empty (server first-turn
+            // hook / fresh session) — [] is the "no boost" default.
+            const warmUpHistory = history.slice(0, -1)
+            const contextKeywords = extractWarmUpKeywords(warmUpHistory)
             const topicResult = (await topicTool.execute({
               phase: 'MAIN_ACTIVITY',
               exclude_recent_days: 30,
+              ...(contextKeywords.length > 0 ? { context_keywords: contextKeywords } : {}),
             })) as
               | {
                   slug?: string
@@ -427,11 +490,20 @@ export async function* runTurn(
               // v1.0.7 §11.4 — Hook A: auto-inject is a real adoption. Record
               // the slug in the ledger so the END pipeline writes a
               // topic_stats row and the dedup signals start to update.
+              // v1.0.9 §1.4 — capture keywords + description so end-of-turn
+              // `isTurnOnTopic` can check this entry without re-reading the
+              // topics table; onTopicTurns starts at 0 and accumulates via
+              // the bump logic below.
               const suggestedKw = topicResult.suggested_keyword ?? ''
-              input.adoptedTopics?.set(topicResult.slug, {
+              const injectedSlug = topicResult.slug
+              input.adoptedTopics?.set(injectedSlug, {
                 suggestedKeyword: suggestedKw,
                 source: 'auto',
+                onTopicTurns: 0,
+                keywords: topicResult.keywords ?? [],
+                description: topicResult.title ?? null,
               })
+              setActiveTopic(sessionId, injectedSlug)
               yield {
                 type: 'topic-adopted',
                 slug: topicResult.slug,
@@ -857,7 +929,11 @@ export async function* runTurn(
             input.adoptedTopics?.set(successResult.slug, {
               suggestedKeyword: suggestedKw,
               source: 'llm',
+              onTopicTurns: 0,
+              keywords: successResult.keywords ?? [],
+              description: successResult.title ?? null,
             })
+            setActiveTopic(sessionId, successResult.slug)
             yield {
               type: 'topic-adopted',
               slug: successResult.slug,
@@ -928,6 +1004,26 @@ export async function* runTurn(
     lastHistoryHead: (lastHist?.content ?? '').slice(0, 200),
     endedReason,
   })
+
+  // v1.0.9 §1.4 — write-on-adoption bump. Run `isTurnOnTopic` against
+  // the currently active topic (set by Hook A / Hook B above). On match,
+  // bump `onTopicTurns` in the ledger entry; on miss, freeze (do not
+  // reset — a later on-topic turn should still count).
+  const activeSlug = getActiveTopic(sessionId)
+  if (activeSlug && input.adoptedTopics) {
+    const entry = input.adoptedTopics.get(activeSlug)
+    if (entry) {
+      const activeTopic: Topic = {
+        name: activeSlug,
+        keywords: entry.keywords,
+        description: entry.description,
+        createdAt: '',
+      }
+      if (isTurnOnTopic(activeTopic, userInput, displayText)) {
+        entry.onTopicTurns += 1
+      }
+    }
+  }
 
   // v1.0.2 — increment the topic-age counter for this user turn. Counter
   // is reset to 0 when topic_select succeeds (above). V751-002 paths

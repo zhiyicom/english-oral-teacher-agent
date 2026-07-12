@@ -23,6 +23,11 @@ import { selectTopic } from '../topic-engine.js'
 export const TopicSelectArgsSchema = z.object({
   phase: z.enum(['WARM_UP', 'MAIN_ACTIVITY', 'WRAP_UP', 'END']).default('WARM_UP'),
   exclude_recent_days: z.number().int().min(0).max(365).default(30),
+  // v1.0.9 §1.3 — keywords extracted from the current session's WARM_UP
+  // phase. Soft-boost topics whose `keywords[]` overlap with these (case
+  // insensitive). Empty/missing = no boost. Applied AFTER hard-exclude so
+  // relevance cannot bring a recently-discussed topic back into the pool.
+  context_keywords: z.array(z.string()).optional(),
 })
 
 export type TopicSelectArgs = z.infer<typeof TopicSelectArgsSchema>
@@ -59,6 +64,8 @@ const DESCRIPTION =
   '(2) soft preference for topics with low discussion count, ' +
   '(3) keyword freshness: prefer topics whose inner keywords have been hit less, ' +
   '(4) weighted random selection to avoid deterministic picks. ' +
+  'Optional context_keywords: keywords extracted from the current session\'s WARM_UP phase — ' +
+  'soft-boosts topics whose keywords overlap (applied AFTER hard-exclude, so dedup wins over relevance). ' +
   'Interest matching happens in WARM_UP phase via prompt — this tool does NOT consider user.interests. ' +
   'Returns the topic slug, title, estimated minutes, a suggested_keyword ' +
   '(lowest-hit keyword, use as the opening angle), and the full keywords[] list ' +
@@ -91,15 +98,17 @@ function pickFreshestKeyword(topic: Topic, keywordStats: KeywordHit[]): string |
 
 export function createTopicSelectTool(opts: {
   topics: Topic[]
-  stats: TopicStat[]
+  // v1.0.9 §1.1 — accept either a snapshot array (legacy / tests) or a
+  // getter (live DB read on every execute()). Defaults to an empty snapshot
+  // when omitted entirely (legacy CLI paths).
+  stats: TopicStat[] | (() => TopicStat[])
   interests: string[]
-  keywordStats?: KeywordHit[]
+  keywordStats?: KeywordHit[] | (() => KeywordHit[])
   rng?: () => number
   // v1.0.3 §1.3 — defaults to false (D3 disabled). WARM_UP handles
   // interest matching; this tool only sees call-count signals.
   useInterestBoost?: boolean
 }): Tool {
-  const keywordStats = opts.keywordStats ?? []
   const useInterestBoost = opts.useInterestBoost ?? false
   return {
     name: 'topic_select',
@@ -107,14 +116,25 @@ export function createTopicSelectTool(opts: {
     schema: TopicSelectArgsSchema,
     execute(args: unknown): TopicSelectResult | { error: string } {
       const parsed = TopicSelectArgsSchema.parse(args)
+      // v1.0.9 §1.1 — resolve getters fresh on every call so D1 hard-exclude,
+      // D2 count bias, D5 keyword freshness see post-session DB writes
+      // (the prior startup-snapshot form silently froze them).
+      const stats = typeof opts.stats === 'function' ? opts.stats() : opts.stats
+      const keywordStats =
+        typeof opts.keywordStats === 'function'
+          ? opts.keywordStats()
+          : (opts.keywordStats ?? [])
       const winner = selectTopic({
         topics: opts.topics,
-        stats: opts.stats,
+        stats,
         interests: opts.interests,
         keywordStats,
         excludeDays: parsed.exclude_recent_days,
         rng: opts.rng,
         useInterestBoost,
+        // v1.0.9 §1.3 — forward WARM_UP-extracted keywords as a soft
+        // relevance hint. Empty/missing = no boost (default behavior).
+        contextKeywords: parsed.context_keywords,
       })
       if (!winner) {
         return { error: 'No topics available after hard exclude' }
