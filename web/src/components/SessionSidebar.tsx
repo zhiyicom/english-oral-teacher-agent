@@ -49,16 +49,12 @@ export default function SessionSidebar() {
       .catch(() => {})
   }, [])
 
+  // Refresh on initial mount.
   useEffect(() => {
     refresh()
   }, [refresh])
 
-  // Refresh when navigating back to root (session ended/created)
-  useEffect(() => {
-    if (location.pathname === '/') refresh()
-  }, [location.pathname, refresh])
-
-  // Refresh when session ends (custom event from SessionPage)
+  // v1.0.8 §1.6 — refresh when a session ends (custom event from SessionPage).
   useEffect(() => {
     const handler = () => refresh()
     window.addEventListener('session-ended', handler)
@@ -81,6 +77,14 @@ export default function SessionSidebar() {
       const { id, warmUpHook } = await createSession()
       // v1.0.3 §1.3 — forward warmUpHook via navigation state.
       navigate(`/session/${id}`, { state: { warmUpHook } })
+      // v1.0.8 §1.6 — refresh sidebar directly. Previous attempts:
+      //   (1) pathname-change useEffect — fired but inconsistently across
+      //       race conditions with React Router
+      //   (2) window.dispatchEvent('session-created') — listener didn't run
+      //       because Playwright + Chromium handle the dispatch differently
+      // Calling refresh() directly is unambiguous and gives us the timing
+      // we need (immediately after navigate).
+      refresh()
     } catch {
       // Keep button enabled on error
     } finally {
@@ -145,7 +149,9 @@ export default function SessionSidebar() {
                       ? s.summary.length > 35
                         ? `${s.summary.slice(0, 35)}…`
                         : s.summary
-                      : `${STRINGS.sessionTitle} #${s.id.slice(0, 8)}`}
+                      : s.endedAt
+                        ? '已结束（摘要生成中…）'
+                        : `${STRINGS.sessionTitle} #${s.id.slice(0, 8)}`}
                   </div>
                   {s.durationMin !== null && (
                     <div className="text-xs text-slate-400">
