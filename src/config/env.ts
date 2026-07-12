@@ -2,7 +2,11 @@ import 'dotenv/config'
 import { z } from 'zod'
 
 const EnvSchema = z.object({
-  LLM_PROVIDER: z.enum(['minimax']).default('minimax'),
+  // v1.0.8 §1.7 — LLM wire format. 'anthropic' uses @anthropic-ai/sdk with
+  // x-api-key header and /v1/messages path; 'openai' uses fetch with
+  // Authorization: Bearer and /chat/completions (DeepSeek / OpenAI / OpenRouter).
+  // Default 'anthropic' keeps v1.0.7 behavior intact.
+  API_STYLE: z.enum(['anthropic', 'openai']).default('anthropic'),
   // v1.0.6 §1.6 — API_KEY is now optional at zod parse time. Actual
   // resolution happens via getApiKey() (secrets.ts) with AppData/.env +
   // cwd/.env fallback. If getApiKey() returns null, the server starts in

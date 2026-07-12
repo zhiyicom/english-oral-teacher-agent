@@ -12,6 +12,8 @@ export default function SetupPage() {
   const [model, setModel] = useState('')
   const [defaultBaseUrl, setDefaultBaseUrl] = useState('https://api.minimaxi.com/anthropic')
   const [defaultModel, setDefaultModel] = useState('MiniMax-M3')
+  // v1.0.8 §1.7 — wizard exposes API 协议 as the first LLM-related dropdown.
+  const [apiStyle, setApiStyle] = useState<'anthropic' | 'openai'>('anthropic')
   const [profile, setProfile] = useState<{
     name: string; age: number; level: 'beginner' | 'intermediate' | 'advanced';
     goals: string[]; interests: string[];
@@ -25,10 +27,16 @@ export default function SetupPage() {
   useEffect(() => {
     fetch('/api/setup/status')
       .then((r) => r.json())
-      .then((s: { runLiveLlm?: boolean; baseUrl?: string; model?: string }) => {
+      .then((s: {
+        runLiveLlm?: boolean; baseUrl?: string; model?: string; apiStyle?: string
+      }) => {
         if (typeof s.runLiveLlm === 'boolean') setRunLiveLlm(s.runLiveLlm)
         if (typeof s.baseUrl === 'string' && s.baseUrl.trim()) setDefaultBaseUrl(s.baseUrl.trim())
         if (typeof s.model === 'string' && s.model.trim()) setDefaultModel(s.model.trim())
+        // v1.0.8 §1.7 — surface the persisted api_style so the wizard matches Settings.
+        if (s.apiStyle === 'anthropic' || s.apiStyle === 'openai') {
+          setApiStyle(s.apiStyle)
+        }
       })
       .catch(() => {})
   }, [])
@@ -66,6 +74,8 @@ export default function SetupPage() {
                 body: JSON.stringify({
                   apiKey,
                   runLiveLlm,
+                  // v1.0.8 §1.7 — wizard writes api_style alongside baseUrl/model.
+                  apiStyle,
                   baseUrl: baseUrl.trim() || undefined,
                   model: model.trim() || undefined,
                 }),
@@ -96,6 +106,18 @@ export default function SetupPage() {
               autoFocus
               required
             />
+          </label>
+
+          <label className="block">
+            <span className="text-sm text-slate-700">API 协议</span>
+            <select
+              value={apiStyle}
+              onChange={(e) => setApiStyle(e.target.value as 'anthropic' | 'openai')}
+              className="mt-1 w-full rounded border px-3 py-2"
+            >
+              <option value="anthropic">Anthropic 兼容 (x-api-key) — 默认</option>
+              <option value="openai">OpenAI 兼容 (Bearer) — DeepSeek / OpenAI</option>
+            </select>
           </label>
 
           <label className="block">

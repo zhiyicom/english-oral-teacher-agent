@@ -40,12 +40,20 @@ describe('createApp (v0.8.1 L1)', () => {
   // Force replay mode in tests regardless of .env settings.
   const savedLiveLlm = process.env.RUN_LIVE_LLM
   delete process.env.RUN_LIVE_LLM
+  // v1.0.8 §1.7 — setEnvVar mutates process.env, so a PUT that persists
+  // API_STYLE would leak into the next test. Save & restore around the suite.
+  const savedApiStyle = process.env.API_STYLE
+  delete process.env.API_STYLE
 
   afterAll(() => {
     if (savedLiveLlm) process.env.RUN_LIVE_LLM = savedLiveLlm
+    if (savedApiStyle !== undefined) process.env.API_STYLE = savedApiStyle
   })
 
   beforeEach(() => {
+    // v1.0.8 §1.7 — wipe any API_STYLE leaked from the prior test so each
+    // PUT test starts from the same baseline.
+    delete process.env.API_STYLE
     harness = makeHarness()
   })
 
@@ -293,6 +301,62 @@ describe('createApp (v0.8.1 L1)', () => {
     const get = await harness.app.request('/api/settings')
     const settings = (await get.json()) as { voice_source: string }
     expect(settings.voice_source).toBe('online')
+  })
+
+  // v1.0.8 §1.7 — api_style 字段透传
+  it('GET /api/settings: 默认 api_style 为 anthropic (兼容 v1.0.7)', async () => {
+    const get = await harness.app.request('/api/settings')
+    const settings = (await get.json()) as { api_style: string }
+    expect(settings.api_style).toBe('anthropic')
+  })
+
+  it('PUT /api/settings api_style=openai: persists and GET reflects', async () => {
+    const put = await harness.app.request('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_style: 'openai' }),
+    })
+    expect(put.status).toBe(200)
+    const putBody = (await put.json()) as { ok: boolean; persisted: string[] }
+    expect(putBody.persisted).toContain('api_style')
+
+    const get = await harness.app.request('/api/settings')
+    const settings = (await get.json()) as { api_style: string }
+    expect(settings.api_style).toBe('openai')
+  })
+
+  it('PUT /api/settings api_style="foo": 非法值被忽略，GET 仍是默认值 anthropic', async () => {
+    const put = await harness.app.request('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_style: 'foo' }),
+    })
+    expect(put.status).toBe(200)
+    const putBody = (await put.json()) as { ok: boolean; persisted: string[] }
+    expect(putBody.persisted).not.toContain('api_style')
+
+    const get = await harness.app.request('/api/settings')
+    const settings = (await get.json()) as { api_style: string }
+    expect(settings.api_style).toBe('anthropic')
+  })
+
+  it('PUT /api/settings api_style=anthropic: 从 openai 切回 anthropic 也工作', async () => {
+    // 先切到 openai
+    await harness.app.request('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_style: 'openai' }),
+    })
+    // 再切回 anthropic
+    const put = await harness.app.request('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_style: 'anthropic' }),
+    })
+    expect(put.status).toBe(200)
+    const get = await harness.app.request('/api/settings')
+    const settings = (await get.json()) as { api_style: string }
+    expect(settings.api_style).toBe('anthropic')
   })
 
   it('DELETE /api/sessions/:id: removes session and returns ok', async () => {

@@ -13,6 +13,8 @@ const LS_VOICE_SPEED = 'settings:voice_speed'
 const LS_VOICE_ACCENT = 'settings:voice_accent'
 // v1.0.8 §1.2 — 语音源 localStorage key（server fallback 时使用）
 const LS_VOICE_SOURCE = 'settings:voice_source'
+// v1.0.8 §1.7 — LLM API 协议 localStorage key（server fallback 时使用）
+const LS_API_STYLE = 'settings:api_style'
 const LS_MIC_HOTKEY = 'settings:mic_hotkey'
 const LS_SEND_HOTKEY = 'settings:send_hotkey'
 
@@ -47,6 +49,14 @@ export default function SettingsPage() {
             : srv.voice_source === 'local' || srv.voice_source === 'online'
               ? srv.voice_source
               : 'online'
+        // v1.0.8 §1.7 — apiStyle 加载：localStorage 优先（仅作快速回显），实际以 server 为准
+        const lsApiStyle = localStorage.getItem(LS_API_STYLE)
+        const apiStyle =
+          lsApiStyle === 'anthropic' || lsApiStyle === 'openai'
+            ? lsApiStyle
+            : srv.api_style === 'anthropic' || srv.api_style === 'openai'
+              ? srv.api_style
+              : 'anthropic'
         setSettings({
           ...srv,
           font_size: fontSize,
@@ -55,6 +65,7 @@ export default function SettingsPage() {
           voice_speed: voiceSpeed,
           voice_accent: voiceAccent,
           voice_source: voiceSource,
+          api_style: apiStyle,
           run_live_llm: srv.run_live_llm ?? false,
           base_url: srv.base_url ?? '',
           model: srv.model ?? '',
@@ -97,6 +108,8 @@ export default function SettingsPage() {
         voice_accent: settings.voice_accent,
         // v1.0.8 §1.2 — 同步语音源到 server
         voice_source: settings.voice_source,
+        // v1.0.8 §1.7 — 同步 API 协议到 server
+        api_style: settings.api_style,
         font_size: settings.font_size,
         show_debug: settings.show_debug,
         run_live_llm: settings.run_live_llm,
@@ -113,6 +126,8 @@ export default function SettingsPage() {
       localStorage.setItem(LS_VOICE_ACCENT, settings.voice_accent)
       // v1.0.8 §1.2 — 同步语音源到 localStorage（server 不可达时的 fallback）
       localStorage.setItem(LS_VOICE_SOURCE, settings.voice_source)
+      // v1.0.8 §1.7 — 同步 API 协议到 localStorage（server 不可达时的 fallback）
+      localStorage.setItem(LS_API_STYLE, settings.api_style)
       if (settings.show_debug) {
         localStorage.setItem(LS_SHOW_DEBUG, 'true')
       } else {
@@ -306,6 +321,24 @@ export default function SettingsPage() {
             className="mt-1 block w-full rounded border border-slate-300 px-3 py-1 text-sm placeholder:text-slate-400"
             placeholder={currentKeyMasked ? `当前: ${currentKeyMasked}` : '输入 API Key'}
           />
+        </div>
+        <div className="mt-3">
+          <label className="text-sm text-slate-500" htmlFor="api-style">
+            {STRINGS.settingsApiStyle}
+          </label>
+          <select
+            id="api-style"
+            data-testid="api-style-select"
+            value={settings.api_style}
+            onChange={(e) =>
+              updateField('api_style', e.target.value as 'anthropic' | 'openai')
+            }
+            className="mt-1 block w-full rounded border border-slate-300 px-3 py-1 text-sm"
+          >
+            <option value="anthropic">{STRINGS.apiStyleAnthropic}</option>
+            <option value="openai">{STRINGS.apiStyleOpenai}</option>
+          </select>
+          <p className="mt-1 text-xs text-slate-400">{STRINGS.apiStyleHint}</p>
         </div>
         <div className="mt-3">
           <label className="text-sm text-slate-500" htmlFor="base-url">

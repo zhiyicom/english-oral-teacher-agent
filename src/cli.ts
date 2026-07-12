@@ -26,6 +26,7 @@ import { loadEnv } from './config/env.js'
 import { getAppDataDir, getReplayFixturesDir } from './config/paths.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
 import { logSummarizeFailure } from './llm/debug-log.js'
+import { createOpenAIProvider } from './llm/openai.js'
 import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
 import type { LLMClient, Message } from './llm/types.js'
 import {
@@ -61,7 +62,10 @@ function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLM
     }
   }
   if (process.env.RUN_LIVE_LLM?.trim() === '1') {
-    return createAnthropicProvider(env)
+    // v1.0.8 §1.7 — pick the wire format from the same env the Settings UI writes.
+    return process.env.API_STYLE?.trim() === 'openai'
+      ? createOpenAIProvider(env)
+      : createAnthropicProvider(env)
   }
   if (!existsSync(fixturesDir)) {
     throw new Error(

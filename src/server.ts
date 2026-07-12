@@ -44,6 +44,7 @@ import { getAppDataDir, getReplayFixturesDir } from './config/paths.js'
 import { getApiKey, getEnvVar, isSetupNeeded, setApiKey as setApiKeyPersist, setEnvVar } from './config/secrets.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
 import { logSummarize, logSummarizeFailure, logWebDiagnostic } from './llm/debug-log.js'
+import { createOpenAIProvider } from './llm/openai.js'
 import { createReplayProvider, createThrowingProvider } from './llm/testing.js'
 import type { LLMClient, Message } from './llm/types.js'
 import { checkForUpdate } from './update-checker.js'
@@ -189,7 +190,11 @@ function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLM
   }
   // RUN_LIVE_LLM=1 takes priority — user explicitly wants the live API.
   if (getEnvVar('RUN_LIVE_LLM') === '1') {
-    return createAnthropicProvider(env)
+    // v1.0.8 §1.7 — pick the wire format the user chose in Settings.
+    // 'openai' covers DeepSeek, OpenAI, OpenRouter, Together, Groq, etc.
+    return getEnvVar('API_STYLE') === 'openai'
+      ? createOpenAIProvider(env)
+      : createAnthropicProvider(env)
   }
   // Default: replay mode. Requires fixtures to exist.
   if (!existsSync(fixturesDir)) {
@@ -645,6 +650,8 @@ export function createApp(opts: {
       run_live_llm: getEnvVar('RUN_LIVE_LLM') === '1',
       base_url: getEnvVar('ANTHROPIC_BASE_URL') || 'https://api.minimaxi.com/anthropic',
       model: getEnvVar('LLM_MODEL') || 'MiniMax-M3',
+      // v1.0.8 §1.7 — LLM wire format (anthropic vs openai-compatible)
+      api_style: getEnvVar('API_STYLE') === 'openai' ? 'openai' : 'anthropic',
       api_key: maskedKey,
     })
   })
@@ -810,6 +817,18 @@ export function createApp(opts: {
         persisted.push('base_url')
       } catch { /* best-effort */ }
     }
+    // v1.0.8 §1.7 — API wire format. Only 'anthropic' | 'openai' accepted;
+    // any other value (or missing) is ignored. Re-initialize the client so
+    // the new wire format takes effect immediately for the next request.
+    if (body.api_style === 'anthropic' || body.api_style === 'openai') {
+      try {
+        setEnvVar('API_STYLE', body.api_style)
+        persisted.push('api_style')
+        if (getEnvVar('RUN_LIVE_LLM') === '1') {
+          client = selectClient(env, opts.fixturesDir)
+        }
+      } catch { /* best-effort */ }
+    }
     if (typeof body.model === 'string' && body.model.trim()) {
       try {
         setEnvVar('LLM_MODEL', body.model.trim())
@@ -848,12 +867,15 @@ export function createApp(opts: {
     const runLiveLlm = getEnvVar('RUN_LIVE_LLM') === '1'
     const baseUrl = getEnvVar('ANTHROPIC_BASE_URL') || 'https://api.minimaxi.com/anthropic'
     const modelMain = getEnvVar('LLM_MODEL') || 'MiniMax-M3'
+    // v1.0.8 §1.7 — surface api_style so the wizard shows the right default.
+    const apiStyle = getEnvVar('API_STYLE') === 'openai' ? 'openai' : 'anthropic'
     return c.json({
       needsApiKey,
       hasUserProfile,
       runLiveLlm,
       baseUrl,
       model: modelMain,
+      apiStyle,
       appDataDir: getAppDataDir(),
       version: process.env.npm_package_version ?? '0.0.0',
     })
@@ -886,6 +908,10 @@ export function createApp(opts: {
       }
       if (typeof body.model === 'string' && body.model.trim()) {
         persisted.push(...setEnvVar('LLM_MODEL', body.model.trim()).persisted)
+      }
+      // v1.0.8 §1.7 — wizard writes api_style alongside the other LLM fields.
+      if (body.apiStyle === 'anthropic' || body.apiStyle === 'openai') {
+        persisted.push(...setEnvVar('API_STYLE', body.apiStyle).persisted)
       }
       // Re-initialize LLM client — setup may have switched replay→live
       if (getEnvVar('RUN_LIVE_LLM') === '1') {

@@ -79,6 +79,12 @@ export const STRINGS = {
   voiceSourceNoMatchLocal: '本机没有 "{accent}" 的本地语音，请切换语音源或调整口音',
   voiceSourceNoMatchOnline: '没有可用的在线 "{accent}" 语音，请切换语音源或调整口音',
 
+  // v1.0.8 §1.7 — LLM API 协议下拉
+  settingsApiStyle: 'API 协议',
+  apiStyleAnthropic: 'Anthropic 兼容 (x-api-key)',
+  apiStyleOpenai: 'OpenAI 兼容 (Bearer)',
+  apiStyleHint: 'Anthropic 兼容：Anthropic / OpenRouter / MiniMax；OpenAI 兼容：DeepSeek / OpenAI / OpenRouter / Together / Groq',
+
   // v1.0.6 §1.6 — SetupPage
   setupWelcome: '首次设置',
   setupApiKeyLabel: '请输入你的 API Key。可从你的 LLM 服务商获取。',

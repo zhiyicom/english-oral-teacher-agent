@@ -26,6 +26,8 @@ export interface SettingsApi {
   voice_accent: string
   // v1.0.8 §1.1 — TTS 语音源：本地 OneCore vs 在线云端
   voice_source: 'local' | 'online'
+  // v1.0.8 §1.7 — LLM 协议：Anthropic 兼容 vs OpenAI 兼容
+  api_style: 'anthropic' | 'openai'
   font_size: number
   show_debug: boolean
   mic_hotkey: Record<string, unknown> | null
