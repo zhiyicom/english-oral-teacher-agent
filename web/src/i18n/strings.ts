@@ -83,7 +83,8 @@ export const STRINGS = {
   settingsApiStyle: 'API 协议',
   apiStyleAnthropic: 'Anthropic 兼容 (x-api-key)',
   apiStyleOpenai: 'OpenAI 兼容 (Bearer)',
-  apiStyleHint: 'Anthropic 兼容：Anthropic / OpenRouter / MiniMax；OpenAI 兼容：DeepSeek / OpenAI / OpenRouter / Together / Groq',
+  // 提示中给典型 base_url，让用户不必再翻各家文档
+  apiStyleHint: 'Anthropic 兼容（/v1/messages + x-api-key）：Anthropic / OpenRouter / MiniMax；OpenAI 兼容（/chat/completions + Bearer）：DeepSeek (https://api.deepseek.com) / OpenAI (https://api.openai.com/v1) / OpenRouter / Together / Groq',
 
   // v1.0.6 §1.6 — SetupPage
   setupWelcome: '首次设置',

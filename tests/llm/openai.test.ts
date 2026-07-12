@@ -78,6 +78,20 @@ describe('createOpenAIProvider (v1.0.8 §1.7)', () => {
     expect(url).toBe('https://api.openai.com/v1/chat/completions')
   })
 
+  it('uses DeepSeek documented base URL https://api.deepseek.com (no /v1) without double-prefixing', async () => {
+    // DeepSeek's official OpenAI-compatible base URL is just the apex
+    // (https://api.deepseek.com), NOT https://api.deepseek.com/v1. Verify
+    // we don't accidentally insert a /v1/ between the host and the path.
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response('data: [DONE]\n\n', { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchSpy)
+    const provider = createOpenAIProvider(makeEnv({ ANTHROPIC_BASE_URL: 'https://api.deepseek.com' }))
+    await provider.chat({ messages: [{ role: 'user', content: 'q' }] })
+    const [url] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://api.deepseek.com/chat/completions')
+  })
+
   it('attaches .status to thrown errors so classifyLLMError sees the bucket', async () => {
     vi.stubGlobal(
       'fetch',
