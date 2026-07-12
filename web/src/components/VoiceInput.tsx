@@ -10,14 +10,22 @@ interface ISpeechRecognition extends EventTarget {
   start(): void
   stop(): void
   onresult: ((event: SpeechRecognitionEvent) => void) | null
-  onerror: (() => void) | null
+  // v1.0.8 §13.3 — 改为接收 event 参数；error 在 event 上而非 instance 上
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null
   onend: (() => void) | null
-  readonly error?: string
 }
 
 interface SpeechRecognitionEvent extends Event {
   resultIndex: number
   results: SpeechRecognitionResultList
+}
+
+// v1.0.8 §13.3 — 新增：W3C SpeechRecognitionErrorEvent 接口
+// W3C spec: error 在 event 对象上，instance 上的 error 是 Chromium 私有扩展
+// 且在 Edge 150 / Chromium 150 上通常为空
+interface SpeechRecognitionErrorEvent extends Event {
+  readonly error: string
+  readonly message: string
 }
 
 const SpeechRecognitionCtor: (new () => ISpeechRecognition) | null =
@@ -76,6 +84,8 @@ export default function VoiceInput({
   )
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const recognitionRef = useRef<ISpeechRecognition | null>(null)
+  // v1.0.8 §13.4 — 追踪本轮识别是否出过错，让 onend 不覆盖错误态
+  const erroredRef = useRef(false)
 
   const stop = useCallback(() => {
     recognitionRef.current?.stop()
@@ -108,22 +118,39 @@ export default function VoiceInput({
       }
     }
 
-    rec.onerror = () => {
-      const err = rec.error ?? 'unknown'
-      console.error(`[VoiceInput] SpeechRecognition error: ${err}`)
+    rec.onerror = (event: SpeechRecognitionErrorEvent) => {
+      // v1.0.8 §13.4 — Bug #1 修复：从 event.error 读取真实错误码（不再读 rec.error）
+      const err = event.error ?? 'unknown'
+      console.error(`[VoiceInput] SpeechRecognition error: ${err}`, event.message ?? '')
+
+      // v1.0.8 §13.4 — aborted = 用户主动 stop（rec.stop() 触发），不弹错误
+      if (err === 'aborted') {
+        setState('idle')
+        setErrorMsg(null)
+        recognitionRef.current = null
+        return
+      }
+
       setErrorMsg(err)
       setState('error')
-      recognitionRef.current = null
+      // v1.0.8 §13.4 — 标记本轮已出错，让 onend 不要覆盖错误态
+      erroredRef.current = true
       onHint?.(hintForError(err))
       setTimeout(() => {
         setState('idle')
         setErrorMsg(null)
         onHint?.(null)
+        // 重置标记，让下一轮识别干净
+        erroredRef.current = false
       }, 2500)
     }
     rec.onend = () => {
-      setState('idle')
       recognitionRef.current = null
+      // v1.0.8 §13.4 — Bug #4 修复：仅在无错时才清状态
+      // 出错时错误态由 onerror 的 2.5s timer 统一清空
+      if (!erroredRef.current) {
+        setState('idle')
+      }
     }
 
     recognitionRef.current = rec
