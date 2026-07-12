@@ -11,6 +11,8 @@ const LS_SHOW_DEBUG = 'settings:show_debug'
 const LS_VOICE_ENABLED = 'settings:voice_enabled'
 const LS_VOICE_SPEED = 'settings:voice_speed'
 const LS_VOICE_ACCENT = 'settings:voice_accent'
+// v1.0.8 §1.2 — 语音源 localStorage key（server fallback 时使用）
+const LS_VOICE_SOURCE = 'settings:voice_source'
 const LS_MIC_HOTKEY = 'settings:mic_hotkey'
 const LS_SEND_HOTKEY = 'settings:send_hotkey'
 
@@ -37,6 +39,14 @@ export default function SettingsPage() {
         const voiceEnabled = localStorage.getItem(LS_VOICE_ENABLED) === 'true' || srv.voice_enabled
         const voiceSpeed = Number(localStorage.getItem(LS_VOICE_SPEED)) || srv.voice_speed
         const voiceAccent = localStorage.getItem(LS_VOICE_ACCENT) || srv.voice_accent
+        // v1.0.8 §1.2 — voiceSource 加载：localStorage 优先（仅作快速回显），实际以 server 为准
+        const lsSource = localStorage.getItem(LS_VOICE_SOURCE)
+        const voiceSource =
+          lsSource === 'local' || lsSource === 'online'
+            ? lsSource
+            : srv.voice_source === 'local' || srv.voice_source === 'online'
+              ? srv.voice_source
+              : 'online'
         setSettings({
           ...srv,
           font_size: fontSize,
@@ -44,6 +54,7 @@ export default function SettingsPage() {
           voice_enabled: voiceEnabled,
           voice_speed: voiceSpeed,
           voice_accent: voiceAccent,
+          voice_source: voiceSource,
           run_live_llm: srv.run_live_llm ?? false,
           base_url: srv.base_url ?? '',
           model: srv.model ?? '',
@@ -84,6 +95,8 @@ export default function SettingsPage() {
         voice_enabled: settings.voice_enabled,
         voice_speed: settings.voice_speed,
         voice_accent: settings.voice_accent,
+        // v1.0.8 §1.2 — 同步语音源到 server
+        voice_source: settings.voice_source,
         font_size: settings.font_size,
         show_debug: settings.show_debug,
         run_live_llm: settings.run_live_llm,
@@ -98,6 +111,8 @@ export default function SettingsPage() {
       localStorage.setItem(LS_VOICE_ENABLED, String(settings.voice_enabled))
       localStorage.setItem(LS_VOICE_SPEED, String(settings.voice_speed))
       localStorage.setItem(LS_VOICE_ACCENT, settings.voice_accent)
+      // v1.0.8 §1.2 — 同步语音源到 localStorage（server 不可达时的 fallback）
+      localStorage.setItem(LS_VOICE_SOURCE, settings.voice_source)
       if (settings.show_debug) {
         localStorage.setItem(LS_SHOW_DEBUG, 'true')
       } else {
@@ -197,8 +212,27 @@ export default function SettingsPage() {
             onChange={(e) => updateField('voice_accent', e.target.value)}
             className="mt-1 block w-full rounded border border-slate-300 px-3 py-1 text-sm disabled:bg-slate-50"
           >
-            <option value="en-US">en-US</option>
-            <option value="en-GB">en-GB</option>
+            <option value="en-US">{STRINGS.voiceAccentEnUS}</option>
+            <option value="en-GB">{STRINGS.voiceAccentEnGB}</option>
+          </select>
+        </div>
+
+        {/* v1.0.8 §1.2 — 语音源（本地 / 在线）下拉 */}
+        <div className="mt-3">
+          <label className="text-sm text-slate-500" htmlFor="voice-source">
+            {STRINGS.settingsVoiceSource}
+          </label>
+          <select
+            id="voice-source"
+            data-testid="voice-source-select"
+            value={settings.voice_source}
+            onChange={(e) =>
+              updateField('voice_source', e.target.value as 'local' | 'online')
+            }
+            className="mt-1 block w-full rounded border border-slate-300 px-3 py-1 text-sm disabled:bg-slate-50"
+          >
+            <option value="local">{STRINGS.voiceSourceLocal}</option>
+            <option value="online">{STRINGS.voiceSourceOnline}</option>
           </select>
         </div>
       </div>

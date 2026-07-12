@@ -51,6 +51,8 @@ export interface UserProfile {
   interests: string[]
   voice_accent?: 'en-US' | 'en-GB'
   voice_speed?: number
+  // v1.0.8 §1.1 — TTS 语音源：本地 OneCore vs 在线云端
+  voice_source?: 'local' | 'online'
 }
 
 export interface SystemPrompt {
@@ -165,6 +167,11 @@ function parseUserProfile(data: Record<string, unknown>): UserProfile {
         ? data.voice_accent
         : undefined,
     voice_speed: typeof data.voice_speed === 'number' ? data.voice_speed : undefined,
+    // v1.0.8 §1.1 — 校验 voice_source，非法值回落 undefined（server GET 时 ?? 'online'）
+    voice_source:
+      data.voice_source === 'local' || data.voice_source === 'online'
+        ? data.voice_source
+        : undefined,
   }
 }
 
@@ -276,6 +283,8 @@ export async function updateUserSettings(
     voice_enabled: boolean
     voice_speed: number
     voice_accent: string
+    // v1.0.8 §1.1 — TTS 语音源
+    voice_source: 'local' | 'online'
     interests: string[]
     bodyAppend: string
     // v1.0.5.4 §6.5 — /setup wizard writes core profile fields directly.
@@ -303,6 +312,8 @@ export async function updateUserSettings(
     if (updates.voice_enabled !== undefined) newData.voice_enabled = updates.voice_enabled
     if (updates.voice_speed !== undefined) newData.voice_speed = updates.voice_speed
     if (updates.voice_accent !== undefined) newData.voice_accent = updates.voice_accent
+    // v1.0.8 §1.1 — TTS 语音源持久化
+    if (updates.voice_source !== undefined) newData.voice_source = updates.voice_source
     if (updates.name !== undefined) newData.name = updates.name
     if (updates.age !== undefined) newData.age = updates.age
     if (updates.level !== undefined) newData.level = updates.level

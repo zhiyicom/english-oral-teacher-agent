@@ -235,12 +235,15 @@ describe('createApp (v0.8.1 L1)', () => {
       voice_enabled: boolean
       voice_speed: number
       voice_accent: string
+      voice_source: string
       font_size: number
       show_debug: boolean
     }
     expect(typeof body.voice_enabled).toBe('boolean')
     expect(typeof body.voice_speed).toBe('number')
     expect(typeof body.font_size).toBe('number')
+    // v1.0.8 §1.1 — voice_source 默认 'online'（与 v1.0.7 行为一致）
+    expect(body.voice_source).toBe('online')
   })
 
   it('PUT /api/settings: persists voice_enabled and returns ok', async () => {
@@ -258,6 +261,38 @@ describe('createApp (v0.8.1 L1)', () => {
     const get = await harness.app.request('/api/settings')
     const settings = (await get.json()) as { voice_enabled: boolean }
     expect(settings.voice_enabled).toBe(true)
+  })
+
+  // v1.0.8 §1.1 — voice_source 字段透传
+  it('PUT /api/settings voice_source=local: persists and GET reflects', async () => {
+    const put = await harness.app.request('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice_source: 'local' }),
+    })
+    expect(put.status).toBe(200)
+    const putBody = (await put.json()) as { ok: boolean; persisted: string[] }
+    expect(putBody.persisted).toContain('voice_source')
+
+    const get = await harness.app.request('/api/settings')
+    const settings = (await get.json()) as { voice_source: string }
+    expect(settings.voice_source).toBe('local')
+  })
+
+  it('PUT /api/settings voice_source="foo": 非法值被忽略，GET 仍是默认值 online', async () => {
+    const put = await harness.app.request('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice_source: 'foo' }),
+    })
+    expect(put.status).toBe(200)
+    const putBody = (await put.json()) as { ok: boolean; persisted: string[] }
+    // 非法值不应进 persisted 列表
+    expect(putBody.persisted).not.toContain('voice_source')
+
+    const get = await harness.app.request('/api/settings')
+    const settings = (await get.json()) as { voice_source: string }
+    expect(settings.voice_source).toBe('online')
   })
 
   it('DELETE /api/sessions/:id: removes session and returns ok', async () => {

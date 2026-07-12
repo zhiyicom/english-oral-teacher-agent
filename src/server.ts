@@ -636,6 +636,8 @@ export function createApp(opts: {
       voice_enabled: data.voice_enabled ?? true,
       voice_speed: data.voice_speed ?? 1.0,
       voice_accent: data.voice_accent ?? 'en-US',
+      // v1.0.8 §1.1 — TTS 语音源；缺字段回落 'online'（与 v1.0.7 行为一致）
+      voice_source: data.voice_source ?? 'online',
       font_size: prefs.font_size ?? 14,
       show_debug: prefs.show_debug ?? false,
       mic_hotkey: prefs.mic_hotkey ?? null,
@@ -756,10 +758,20 @@ export function createApp(opts: {
       updates.voice_accent = body.voice_accent
       persisted.push('voice_accent')
     }
+    // v1.0.8 §1.1 — TTS 语音源：只接受 'local' | 'online'，其他值忽略
+    if (body.voice_source === 'local' || body.voice_source === 'online') {
+      updates.voice_source = body.voice_source
+      persisted.push('voice_source')
+    }
 
     if (persisted.length > 0) {
       await updateUserSettings(
-        updates as { voice_enabled?: boolean; voice_speed?: number; voice_accent?: string },
+        updates as {
+          voice_enabled?: boolean
+          voice_speed?: number
+          voice_accent?: string
+          voice_source?: 'local' | 'online'
+        },
       )
     }
 
@@ -964,6 +976,7 @@ export function createApp(opts: {
       'Content-Type': mime[ext ?? ''] ?? 'application/octet-stream',
     })
   })
+
   app.get('/*', (c) => {
     if (c.req.path.startsWith('/api')) return c.notFound()
     if (!existsSync(distIndex)) return c.text('SPA not built. Run `pnpm build` first.', 500)

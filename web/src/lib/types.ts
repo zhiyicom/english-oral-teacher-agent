@@ -24,6 +24,8 @@ export interface SettingsApi {
   voice_enabled: boolean
   voice_speed: number
   voice_accent: string
+  // v1.0.8 §1.1 — TTS 语音源：本地 OneCore vs 在线云端
+  voice_source: 'local' | 'online'
   font_size: number
   show_debug: boolean
   mic_hotkey: Record<string, unknown> | null

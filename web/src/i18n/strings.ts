@@ -61,6 +61,8 @@ export const STRINGS = {
   settingsVoiceEnabled: '语音开关',
   settingsVoiceSpeed: '语速',
   settingsVoiceAccent: '口音',
+  voiceAccentEnUS: '英语（美）',
+  voiceAccentEnGB: '英语（英）',
   settingsDisplay: '显示',
   settingsFontSize: '字体大小',
   settingsShowDebug: '显示调试信息',
@@ -69,6 +71,13 @@ export const STRINGS = {
   settingsSaving: '保存中…',
   settingsCancel: '取消',
   settingsVoiceDisabled: 'v0.9+ 可用',
+
+  // v1.0.8 §1.2 — Settings 语音源下拉 + §1.3 无匹配提示
+  settingsVoiceSource: '语音源',
+  voiceSourceLocal: '本地语音',
+  voiceSourceOnline: '在线语音',
+  voiceSourceNoMatchLocal: '本机没有 "{accent}" 的本地语音，请切换语音源或调整口音',
+  voiceSourceNoMatchOnline: '没有可用的在线 "{accent}" 语音，请切换语音源或调整口音',
 
   // v1.0.6 §1.6 — SetupPage
   setupWelcome: '首次设置',

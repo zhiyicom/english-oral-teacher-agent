@@ -69,12 +69,24 @@ export default function SessionPage() {
   const [voiceEnabled, setVoiceEnabled] = useState(false)
   const [voiceSpeed, setVoiceSpeed] = useState(1)
   const [voiceAccent, setVoiceAccent] = useState('en-US')
+  // v1.0.8 §1.3 — TTS 语音源；缺字段回落 'online'（与 v1.0.7 行为一致）
+  const [voiceSource, setVoiceSource] = useState<'local' | 'online'>('online')
   const [voiceHint, setVoiceHint] = useState<string | null>(null)
 
-  const voiceRef = useRef({ enabled: false, speed: 1, accent: 'en-US' })
+  const voiceRef = useRef({
+    enabled: false,
+    speed: 1,
+    accent: 'en-US',
+    source: 'online' as 'local' | 'online',
+  })
   useEffect(() => {
-    voiceRef.current = { enabled: voiceEnabled, speed: voiceSpeed, accent: voiceAccent }
-  }, [voiceEnabled, voiceSpeed, voiceAccent])
+    voiceRef.current = {
+      enabled: voiceEnabled,
+      speed: voiceSpeed,
+      accent: voiceAccent,
+      source: voiceSource,
+    }
+  }, [voiceEnabled, voiceSpeed, voiceAccent, voiceSource])
 
   useEffect(() => {
     getSettings()
@@ -82,15 +94,22 @@ export default function SessionPage() {
         setVoiceEnabled(s.voice_enabled)
         setVoiceSpeed(s.voice_speed)
         setVoiceAccent(s.voice_accent)
+        // v1.0.8 §1.3 — server 返回值校验，非法值回落 'online'
+        setVoiceSource(s.voice_source === 'local' ? 'local' : 'online')
       })
       .catch(() => {
         // server unreachable — best effort: localStorage cache from SettingsPage
         const lsEnabled = localStorage.getItem('settings:voice_enabled') === 'true'
         const lsSpeed = Number(localStorage.getItem('settings:voice_speed')) || 1
         const lsAccent = localStorage.getItem('settings:voice_accent') || 'en-US'
+        // v1.0.8 §1.3 — localStorage 校验，非法值回落 'online'
+        const lsSource = localStorage.getItem('settings:voice_source')
+        const source: 'local' | 'online' =
+          lsSource === 'local' || lsSource === 'online' ? lsSource : 'online'
         setVoiceEnabled(lsEnabled)
         setVoiceSpeed(lsSpeed)
         setVoiceAccent(lsAccent)
+        setVoiceSource(source)
       })
   }, [])
 
@@ -100,32 +119,49 @@ export default function SessionPage() {
     const clean = stripInternal(text).trim()
     if (!clean) return
     speechSynthesis.cancel()
+
+    // v1.0.8 §1.3 — 严格按 voiceSource 过滤，跨 source 不降级
+    // Bug #2 修复：使用 W3C 标准字段 localService 而非非标 'local' 属性
+    // "Multilingual" 在线语音（Microsoft Ada Multilingual Online 等）
+    // 首次使用已知会静默失败，能出声时声音机械感强 —— 排除
+    const allVoices = speechSynthesis.getVoices()
+    const isMultilingual = (x: SpeechSynthesisVoice) => /multilingual/i.test(x.name)
+    const pool: SpeechSynthesisVoice[] =
+      v.source === 'local'
+        ? allVoices.filter((x) => x.localService === true)
+        : allVoices.filter((x) => !x.localService && !isMultilingual(x))
+
+    const baseLang = v.accent.split('-')[0]
+
+    // 单一 source 内 4 档回退（精确 → base lang → en-US → 任意 en）
+    const voice =
+      pool.find((x) => x.lang === v.accent) ??
+      pool.find((x) => x.lang.startsWith(`${baseLang}-`)) ??
+      pool.find((x) => x.lang === 'en-US') ??
+      pool.find((x) => x.lang.startsWith('en'))
+
+    if (!voice) {
+      // 严格不降级：找不到匹配 voice 时显示提示，不切到另一种 source
+      const template =
+        v.source === 'local'
+          ? STRINGS.voiceSourceNoMatchLocal
+          : STRINGS.voiceSourceNoMatchOnline
+      setVoiceHint(template.replace('{accent}', v.accent))
+      setTimeout(() => setVoiceHint(null), 3000)
+      return
+    }
+
     const u = new SpeechSynthesisUtterance(clean)
     u.rate = v.speed
-    const allVoices = speechSynthesis.getVoices()
-    const localVoices = allVoices.filter((x) => 'local' in x && (x as SpeechSynthesisVoice & { local: boolean }).local)
-    // "Multilingual" online voices (e.g. Microsoft Ada Multilingual Online)
-    // are known to fail silently on first use and sound mechanical when they
-    // do work — prefer Natural voices when falling back to online.
-    const isMultilingual = (x: SpeechSynthesisVoice) => /multilingual/i.test(x.name)
-    const onlineNonMulti = allVoices.filter((x) => !isMultilingual(x))
-    const baseLang = v.accent.split('-')[0]
-    const voice =
-      localVoices.find((x) => x.lang === v.accent) ??
-      localVoices.find((x) => x.lang.startsWith(`${baseLang}-`)) ??
-      localVoices.find((x) => x.lang === 'en-US') ??
-      localVoices.find((x) => x.lang.startsWith('en')) ??
-      onlineNonMulti.find((x) => x.lang === v.accent) ??
-      onlineNonMulti.find((x) => x.lang.startsWith(`${baseLang}-`)) ??
-      onlineNonMulti.find((x) => x.lang === 'en-US') ??
-      onlineNonMulti.find((x) => x.lang.startsWith('en')) ??
-      allVoices.find((x) => x.lang === v.accent)
-    if (voice) {
-      u.voice = voice
-      u.lang = voice.lang
+    u.voice = voice
+    u.lang = voice.lang
+    u.onerror = (ev: Event) => {
+      console.error('[Voice] utterance error', (ev as SpeechSynthesisErrorEvent).error ?? 'unknown')
     }
     speechSynthesis.speak(u)
   }
+
+
 
   // Auto-scroll to bottom when messages change
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on message change
