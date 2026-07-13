@@ -50,7 +50,7 @@ import {
   openDb,
 } from './storage/index.js'
 
-function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLMClient {
+function selectClient(env: ReturnType<typeof loadEnv>, _fixturesDir: string): LLMClient {
   // v0.7.6 (V751-002) — test-only path: if LLM_TEST_FAIL is set, return a
   // provider that throws an error with the configured HTTP status on every
   // call. Used by L3 tests to exercise the catch-all + auto-save path. Not
@@ -62,18 +62,10 @@ function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLM
       return createThrowingProvider(status, `LLM_TEST_FAIL=${status}`)
     }
   }
-  if (process.env.RUN_LIVE_LLM?.trim() === '1') {
-    // v1.0.8 §1.7 — pick the wire format from the same env the Settings UI writes.
-    return process.env.API_STYLE?.trim() === 'openai'
-      ? createOpenAIProvider(env)
-      : createAnthropicProvider(env)
-  }
-  if (!existsSync(fixturesDir)) {
-    throw new Error(
-      `Replay mode (default) needs fixtures at ${fixturesDir}. Either create fixtures, or set RUN_LIVE_LLM=1 to use the live API.`,
-    )
-  }
-  return createReplayProvider(fixturesDir)
+  // Always live.
+  return process.env.API_STYLE?.trim() === 'openai'
+    ? createOpenAIProvider(env)
+    : createAnthropicProvider(env)
 }
 
 function selectClock(): Clock {

@@ -7,7 +7,6 @@ export default function SetupPage() {
   const navigate = useNavigate()
   const [step, setStep] = useState<Step>('apiKey')
   const [apiKey, setApiKey] = useState('')
-  const [runLiveLlm, setRunLiveLlm] = useState(true)
   const [baseUrl, setBaseUrl] = useState('')
   const [model, setModel] = useState('')
   const [defaultBaseUrl, setDefaultBaseUrl] = useState('https://api.minimaxi.com/anthropic')
@@ -28,9 +27,8 @@ export default function SetupPage() {
     fetch('/api/setup/status')
       .then((r) => r.json())
       .then((s: {
-        runLiveLlm?: boolean; baseUrl?: string; model?: string; apiStyle?: string
+        baseUrl?: string; model?: string; apiStyle?: string
       }) => {
-        if (typeof s.runLiveLlm === 'boolean') setRunLiveLlm(s.runLiveLlm)
         if (typeof s.baseUrl === 'string' && s.baseUrl.trim()) setDefaultBaseUrl(s.baseUrl.trim())
         if (typeof s.model === 'string' && s.model.trim()) setDefaultModel(s.model.trim())
         // v1.0.8 §1.7 — surface the persisted api_style so the wizard matches Settings.
@@ -73,8 +71,6 @@ export default function SetupPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   apiKey,
-                  runLiveLlm,
-                  // v1.0.8 §1.7 — wizard writes api_style alongside baseUrl/model.
                   apiStyle,
                   baseUrl: baseUrl.trim() || undefined,
                   model: model.trim() || undefined,
@@ -142,15 +138,6 @@ export default function SetupPage() {
             />
           </label>
 
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input
-              type="checkbox"
-              checked={runLiveLlm}
-              onChange={(e) => setRunLiveLlm(e.target.checked)}
-              className="rounded"
-            />
-            启用在线 LLM（需要网络连接）
-          </label>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <button
             type="submit"

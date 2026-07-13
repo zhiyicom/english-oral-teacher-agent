@@ -94,7 +94,6 @@ export async function updateTopics(topics: TopicApi[]): Promise<void> {
 export interface SetupStatus {
   needsApiKey: boolean
   hasUserProfile: boolean
-  runLiveLlm: boolean
   baseUrl: string
   model: string
   appDataDir: string
@@ -123,7 +122,6 @@ export async function getProfileDefault(): Promise<ProfileDefault> {
 
 export async function saveApiKey(opts: {
   apiKey: string
-  runLiveLlm?: boolean
   baseUrl?: string
   model?: string
 }): Promise<{ ok: boolean; persisted: string[] }> {

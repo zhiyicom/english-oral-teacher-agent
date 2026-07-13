@@ -32,7 +32,6 @@ export interface SettingsApi {
   show_debug: boolean
   mic_hotkey: Record<string, unknown> | null
   send_hotkey: Record<string, unknown> | null
-  run_live_llm: boolean
   base_url: string
   model: string
   api_key?: string

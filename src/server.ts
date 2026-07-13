@@ -183,8 +183,8 @@ function reconstructSessionState(
   }
 }
 
-// ---------- LLM client selection (mirrors src/cli.ts selectClient) ----------
-function selectClient(fixturesDir: string): LLMClient {
+// ---------- LLM client selection ----------
+function selectClient(_fixturesDir: string): LLMClient {
   const testFail = process.env.LLM_TEST_FAIL
   if (testFail) {
     const status = Number.parseInt(testFail, 10)
@@ -192,24 +192,12 @@ function selectClient(fixturesDir: string): LLMClient {
       return createThrowingProvider(status, `LLM_TEST_FAIL=${status}`)
     }
   }
-  // RUN_LIVE_LLM=1 takes priority — user explicitly wants the live API.
-  if (getEnvVar('RUN_LIVE_LLM') === '1') {
-    // v1.0.8 §1.7 — pick the wire format the user chose in Settings.
-    // 'openai' covers DeepSeek, OpenAI, OpenRouter, Together, Groq, etc.
-    // Re-read env on every call so Web UI settings take effect immediately
-    // (setEnvVar updates process.env; loadEnv() re-parses it).
-    const env = loadEnv()
-    return getEnvVar('API_STYLE') === 'openai'
-      ? createOpenAIProvider(env)
-      : createAnthropicProvider(env)
-  }
-  // Default: replay mode. Requires fixtures to exist.
-  if (!existsSync(fixturesDir)) {
-    throw new Error(
-      `Replay mode (default) needs fixtures at ${fixturesDir}. Either create fixtures, or set RUN_LIVE_LLM=1 to use the live API.`,
-    )
-  }
-  return createReplayProvider(fixturesDir)
+  // Always live. Re-read env on every call so Web UI settings take effect
+  // immediately (setEnvVar updates process.env; loadEnv() re-parses it).
+  const env = loadEnv()
+  return getEnvVar('API_STYLE') === 'openai'
+    ? createOpenAIProvider(env)
+    : createAnthropicProvider(env)
 }
 
 function regenerateTopicLibrary(topicList: Array<{ name: string; keywords: string[]; description: string | null }>): void {
@@ -655,7 +643,6 @@ export function createApp(opts: {
       show_debug: prefs.show_debug ?? false,
       mic_hotkey: prefs.mic_hotkey ?? null,
       send_hotkey: prefs.send_hotkey ?? null,
-      run_live_llm: getEnvVar('RUN_LIVE_LLM') === '1',
       base_url: getEnvVar('ANTHROPIC_BASE_URL') || 'https://api.minimaxi.com/anthropic',
       model: getEnvVar('LLM_MODEL') || 'MiniMax-M3',
       // v1.0.8 §1.7 — LLM wire format (anthropic vs openai-compatible)
@@ -808,15 +795,7 @@ export function createApp(opts: {
       prefsUpdates.send_hotkey = body.send_hotkey
       persisted.push('send_hotkey')
     }
-    // v1.0.6 — RUN_LIVE_LLM persisted to AppData/.env
     let llmConfigChanged = false
-    if (typeof body.run_live_llm === 'boolean') {
-      try {
-        setEnvVar('RUN_LIVE_LLM', body.run_live_llm ? '1' : '0')
-        persisted.push('run_live_llm')
-        llmConfigChanged = true
-      } catch { /* best-effort */ }
-    }
     if (typeof body.base_url === 'string' && body.base_url.trim()) {
       try {
         setEnvVar('ANTHROPIC_BASE_URL', body.base_url.trim())
@@ -848,8 +827,8 @@ export function createApp(opts: {
         llmConfigChanged = true
       } catch { /* best-effort */ }
     }
-    // Rebuild LLM client whenever any LLM config changes (not just key/style)
-    if (llmConfigChanged && getEnvVar('RUN_LIVE_LLM') === '1') {
+    // Rebuild LLM client whenever any LLM config changes
+    if (llmConfigChanged) {
       client = selectClient(opts.fixturesDir)
     }
 
@@ -872,7 +851,6 @@ export function createApp(opts: {
         typeof data.age === 'number'
       )
     } catch { /* missing = false */ }
-    const runLiveLlm = getEnvVar('RUN_LIVE_LLM') === '1'
     const baseUrl = getEnvVar('ANTHROPIC_BASE_URL') || 'https://api.minimaxi.com/anthropic'
     const modelMain = getEnvVar('LLM_MODEL') || 'MiniMax-M3'
     // v1.0.8 §1.7 — surface api_style so the wizard shows the right default.
@@ -880,7 +858,6 @@ export function createApp(opts: {
     return c.json({
       needsApiKey,
       hasUserProfile,
-      runLiveLlm,
       baseUrl,
       model: modelMain,
       apiStyle,
@@ -908,9 +885,6 @@ export function createApp(opts: {
       const persisted: string[] = []
       persisted.push(...setApiKeyPersist(key).persisted)
       // v1.0.6 — save all LLM configuration from setup wizard step 1
-      if (typeof body.runLiveLlm === 'boolean') {
-        persisted.push(...setEnvVar('RUN_LIVE_LLM', body.runLiveLlm ? '1' : '0').persisted)
-      }
       if (typeof body.baseUrl === 'string' && body.baseUrl.trim()) {
         persisted.push(...setEnvVar('ANTHROPIC_BASE_URL', body.baseUrl.trim()).persisted)
       }
@@ -921,10 +895,8 @@ export function createApp(opts: {
       if (body.apiStyle === 'anthropic' || body.apiStyle === 'openai') {
         persisted.push(...setEnvVar('API_STYLE', body.apiStyle).persisted)
       }
-      // Re-initialize LLM client — setup may have switched replay→live
-      if (getEnvVar('RUN_LIVE_LLM') === '1') {
-        client = selectClient(opts.fixturesDir)
-      }
+      // Re-initialize LLM client with new settings
+      client = selectClient(opts.fixturesDir)
       return c.json({ ok: true, persisted })
     } catch (err) {
       return c.json({ error: (err as Error).message }, 500)
@@ -1032,7 +1004,7 @@ async function startServer(): Promise<void> {
     console.log(`[server] listening on http://localhost:${info.port}`)
     console.log(`[server] data dir: ${dataDir}`)
     console.log(
-      `[server] LLM mode: ${getEnvVar('RUN_LIVE_LLM') === '1' ? 'live' : 'replay'}`,
+      `[server] LLM alive`,
     )
 
     // v1.0.6 §1.3 — auto-open browser when installer sets the env var.

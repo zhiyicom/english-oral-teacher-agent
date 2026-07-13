@@ -1,4 +1,4 @@
-#define MyAppVersion "1.0.7"
+#define MyAppVersion "1.0.9"
 
 [Setup]
 AppName=English Oral Teacher

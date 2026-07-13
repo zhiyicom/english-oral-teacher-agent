@@ -66,7 +66,6 @@ export default function SettingsPage() {
           voice_accent: voiceAccent,
           voice_source: voiceSource,
           api_style: apiStyle,
-          run_live_llm: srv.run_live_llm ?? false,
           base_url: srv.base_url ?? '',
           model: srv.model ?? '',
           api_key: srv.api_key ?? '',
@@ -112,7 +111,6 @@ export default function SettingsPage() {
         api_style: settings.api_style,
         font_size: settings.font_size,
         show_debug: settings.show_debug,
-        run_live_llm: settings.run_live_llm,
         base_url: settings.base_url,
         model: settings.model,
         api_key: apiKey || undefined,
@@ -293,22 +291,6 @@ export default function SettingsPage() {
       {/* LLM section */}
       <div className="mt-4 rounded border bg-white p-4 shadow-sm">
         <h3 className="text-sm font-medium text-slate-700">LLM</h3>
-        <div className="mt-3 flex items-center justify-between">
-          <label className="text-sm text-slate-500" htmlFor="run-live-llm">
-            Live LLM
-          </label>
-          <button
-            id="run-live-llm"
-            type="button"
-            data-testid="live-llm-toggle"
-            className={`rounded-full px-3 py-1 text-xs ${
-              settings.run_live_llm ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'
-            }`}
-            onClick={() => updateField('run_live_llm', !settings.run_live_llm)}
-          >
-            {settings.run_live_llm ? 'ON' : 'OFF'}
-          </button>
-        </div>
         <div className="mt-3">
           <label className="text-sm text-slate-500" htmlFor="api-key">
             API Key
