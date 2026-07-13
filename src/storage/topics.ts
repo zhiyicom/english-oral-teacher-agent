@@ -17,6 +17,18 @@ export interface TopicStat {
 export interface TopicsDao {
   list(): Topic[]
   get(name: string): Topic | null
+  /**
+   * v1.1.0 §1.2 — INSERT OR IGNORE a new topic. Returns true when the
+   * row was actually inserted, false when the name already exists (the
+   * OR IGNORE clause silently skipped the duplicate). Used by
+   * `autoExpandTopicLibrary` to add LLM-curated topics at runtime.
+   */
+  create(input: {
+    name: string
+    keywords: string[]
+    description: string | null
+    createdAt: string
+  }): boolean
 }
 
 export interface TopicStatsDao {
@@ -97,6 +109,13 @@ export function createTopicsDao(handle: DbHandle): TopicsDao {
   const selectOne = raw.prepare(
     'SELECT name, keywords_json, description, created_at FROM topics WHERE name = ?',
   )
+  // v1.1.0 §1.2 — INSERT OR IGNORE keeps the auto-expand path idempotent:
+  // if the LLM proposes a slug that already exists (e.g. raced with another
+  // session or the baseline), the call returns changes=0 and we treat it
+  // as "skip, not error". Same pattern as migration 007's seed.
+  const insertOne = raw.prepare(
+    'INSERT OR IGNORE INTO topics (name, keywords_json, description, created_at) VALUES (?, ?, ?, ?)',
+  )
   return {
     list() {
       return (selectAll.all() as TopicRow[]).map(rowToTopic)
@@ -104,6 +123,15 @@ export function createTopicsDao(handle: DbHandle): TopicsDao {
     get(name) {
       const row = selectOne.get(name) as TopicRow | undefined
       return row ? rowToTopic(row) : null
+    },
+    create(input) {
+      const r = insertOne.run(
+        input.name,
+        JSON.stringify(input.keywords),
+        input.description,
+        input.createdAt,
+      )
+      return r.changes > 0
     },
   }
 }

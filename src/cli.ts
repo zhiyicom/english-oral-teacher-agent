@@ -25,6 +25,7 @@ import type { TurnEvent } from './agent/turn.js'
 import type { AdoptedTopic } from './agent/topic-recorder.js'
 import { loadEnv } from './config/env.js'
 import { getAppDataDir, getReplayFixturesDir } from './config/paths.js'
+import { isAutoExpandTopicsEnabled } from './config/preferences.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
 import { logSummarizeFailure } from './llm/debug-log.js'
 import { createOpenAIProvider } from './llm/openai.js'
@@ -36,6 +37,7 @@ import {
   retrieveRelevant,
 } from './memory/index.js'
 import { extractStudentDiscoveries } from './agent/profile-extractor.js'
+import { autoExpandTopicLibrary } from './agent/auto-expand.js'
 import { type SystemPrompt, loadSystemPrompt } from './prompts/loader.js'
 import {
   type Mistake,
@@ -249,6 +251,10 @@ export async function main(): Promise<void> {
   const topicStats = createTopicStatsDao(db)
   const keywordHits = createKeywordHitsDao(db)
   const session = sessions.create()
+  // v1.1.0 §1.1 — read the auto-expand toggle at startup. CLI is a
+  // single-process session so a per-run snapshot is sufficient; runtime
+  // edits via Web UI don't propagate to a CLI session in flight.
+  const autoExpandEnabled = isAutoExpandTopicsEnabled(getAppDataDir())
 
   const systemPrompt = loadSystemPrompt()
 
@@ -541,6 +547,22 @@ const adoptedTopics: Map<string, AdoptedTopic> = new Map()
           )
         } catch (err) {
           process.stderr.write(`[cli] topic record failed: ${(err as Error).message}\n`)
+        }
+
+        // v1.1.0 §1.3 — auto-expand topic library (opt-in via preferences.json).
+        // Same try/catch envelope as recordAdoptedTopics: best-effort, doesn't
+        // block markEnded. Reads the toggle once at startup (CLI is single-
+        // process per session).
+        try {
+          await autoExpandTopicLibrary(
+            summaryKeywords,
+            topicsUsed,
+            { topics: topics.list(), topicStats, keywordHits, topicsDao: topics, client },
+            { now: new Date() },
+            { enabled: autoExpandEnabled },
+          )
+        } catch (err) {
+          process.stderr.write(`[cli] auto-expand failed: ${(err as Error).message}\n`)
         }
 
         process.stderr.write(`[cli] markEnded ${session.id} reason=${exitReason}\n`)

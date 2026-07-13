@@ -17,6 +17,8 @@ const LS_VOICE_SOURCE = 'settings:voice_source'
 const LS_API_STYLE = 'settings:api_style'
 const LS_MIC_HOTKEY = 'settings:mic_hotkey'
 const LS_SEND_HOTKEY = 'settings:send_hotkey'
+// v1.1.0 §1.1 — auto-expand toggle localStorage key
+const LS_AUTO_EXPAND_TOPICS = 'settings:auto_expand_topics'
 
 export default function SettingsPage() {
   const navigate = useNavigate()
@@ -57,6 +59,11 @@ export default function SettingsPage() {
             : srv.api_style === 'anthropic' || srv.api_style === 'openai'
               ? srv.api_style
               : 'anthropic'
+        // v1.1.0 §1.1 — auto-expand: server is authoritative, localStorage only
+        // mirrors it for fast first paint. Default false.
+        const lsAutoExpand = localStorage.getItem(LS_AUTO_EXPAND_TOPICS)
+        const autoExpandTopics =
+          lsAutoExpand === 'true' || (lsAutoExpand === null && (srv.auto_expand_topics ?? false))
         setSettings({
           ...srv,
           font_size: fontSize,
@@ -66,6 +73,7 @@ export default function SettingsPage() {
           voice_accent: voiceAccent,
           voice_source: voiceSource,
           api_style: apiStyle,
+          auto_expand_topics: autoExpandTopics,
           base_url: srv.base_url ?? '',
           model: srv.model ?? '',
           api_key: srv.api_key ?? '',
@@ -111,6 +119,8 @@ export default function SettingsPage() {
         api_style: settings.api_style,
         font_size: settings.font_size,
         show_debug: settings.show_debug,
+        // v1.1.0 §1.1 — auto-expand toggle
+        auto_expand_topics: settings.auto_expand_topics,
         base_url: settings.base_url,
         model: settings.model,
         api_key: apiKey || undefined,
@@ -131,6 +141,8 @@ export default function SettingsPage() {
       } else {
         localStorage.removeItem(LS_SHOW_DEBUG)
       }
+      // v1.1.0 §1.1 — mirror auto-expand to localStorage for fast first paint
+      localStorage.setItem(LS_AUTO_EXPAND_TOPICS, String(settings.auto_expand_topics))
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e) {
@@ -284,6 +296,29 @@ export default function SettingsPage() {
             onClick={() => updateField('show_debug', !settings.show_debug)}
           >
             {settings.show_debug ? 'ON' : 'OFF'}
+          </button>
+        </div>
+      </div>
+
+      {/* v1.1.0 §1.1 — Topic library auto-expand toggle */}
+      <div className="mt-4 rounded border bg-white p-4 shadow-sm">
+        <h3 className="text-sm font-medium text-slate-700">Topic library</h3>
+        <div className="mt-3 flex items-center justify-between">
+          <label className="text-sm text-slate-500" htmlFor="auto-expand-topics">
+            {STRINGS.settingsAutoExpandTopics}
+          </label>
+          <button
+            id="auto-expand-topics"
+            type="button"
+            data-testid="auto-expand-toggle"
+            className={`rounded-full px-3 py-1 text-xs ${
+              settings.auto_expand_topics
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-200 text-slate-500'
+            }`}
+            onClick={() => updateField('auto_expand_topics', !settings.auto_expand_topics)}
+          >
+            {settings.auto_expand_topics ? 'ON' : 'OFF'}
           </button>
         </div>
       </div>

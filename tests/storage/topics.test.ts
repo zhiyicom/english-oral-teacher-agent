@@ -76,6 +76,42 @@ describe('TopicsDao + TopicStatsDao (v1.0.5 §C migrations 003 + 007)', () => {
     })
   })
 
+  describe('TopicsDao.create() (v1.1.0 §1.2)', () => {
+    it('T1: inserts a new topic and returns true', () => {
+      const before = topics.list().length
+      const ok = topics.create({
+        name: 'ceramics',
+        keywords: ['pottery', 'ceramics', 'kiln', 'glaze', 'clay'],
+        description: 'Ceramics & pottery — making, firing, glazing (A2-B1)',
+        createdAt: '2026-07-13T10:00:00.000Z',
+      })
+      expect(ok).toBe(true)
+      expect(topics.list()).toHaveLength(before + 1)
+      const row = topics.get('ceramics')
+      expect(row).not.toBeNull()
+      expect(row?.keywords).toEqual(['pottery', 'ceramics', 'kiln', 'glaze', 'clay'])
+      expect(row?.description).toBe('Ceramics & pottery — making, firing, glazing (A2-B1)')
+    })
+
+    it('T2: duplicate name returns false and does not mutate DB (OR IGNORE)', () => {
+      const before = topics.list().length
+      const originalFoodDrink = topics.get('food_drink')
+      // Attempt to overwrite food_drink with different keywords — must be
+      // silently rejected by OR IGNORE, baseline keywords preserved.
+      const ok = topics.create({
+        name: 'food_drink',
+        keywords: ['totally', 'different'],
+        description: 'should not stick',
+        createdAt: '2026-07-13T10:00:00.000Z',
+      })
+      expect(ok).toBe(false)
+      expect(topics.list()).toHaveLength(before)
+      const after = topics.get('food_drink')
+      expect(after?.keywords).toEqual(originalFoodDrink?.keywords)
+      expect(after?.description).toBe(originalFoodDrink?.description)
+    })
+  })
+
   describe('TopicStatsDao', () => {
     it('get returns null for never-discussed topic', () => {
       expect(stats.get('food_drink')).toBeNull()

@@ -30,6 +30,8 @@ export interface SettingsApi {
   api_style: 'anthropic' | 'openai'
   font_size: number
   show_debug: boolean
+  // v1.1.0 §1.1 — auto-expand topic library at session end (defaults to false)
+  auto_expand_topics: boolean
   mic_hotkey: Record<string, unknown> | null
   send_hotkey: Record<string, unknown> | null
   base_url: string

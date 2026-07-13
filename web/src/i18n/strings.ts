@@ -66,6 +66,8 @@ export const STRINGS = {
   settingsDisplay: '显示',
   settingsFontSize: '字体大小',
   settingsShowDebug: '显示调试信息',
+  // v1.1.0 §1.1 — auto-expand topic library at session end
+  settingsAutoExpandTopics: '自动扩展话题库',
   settingsSave: '保存',
   settingsSaved: '已保存',
   settingsSaving: '保存中…',

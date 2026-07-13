@@ -42,6 +42,8 @@ import { extractStudentDiscoveries } from './agent/profile-extractor.js'
 import type { TurnOutput } from './agent/turn.js'
 import { loadEnv } from './config/env.js'
 import { getAppDataDir, getReplayFixturesDir } from './config/paths.js'
+import { isAutoExpandTopicsEnabled, loadPreferences, savePreferences } from './config/preferences.js'
+import { autoExpandTopicLibrary } from './agent/auto-expand.js'
 import { getApiKey, getEnvVar, isSetupNeeded, setApiKey as setApiKeyPersist, setEnvVar } from './config/secrets.js'
 import { createAnthropicProvider } from './llm/anthropic.js'
 import { logSummarize, logSummarizeFailure, logWebDiagnostic } from './llm/debug-log.js'
@@ -272,20 +274,11 @@ export function createApp(opts: {
   const embedder = createTransformersEmbedder()
   // v1.0.1 — UI preferences stored in a JSON file (localStorage is not
   // reliable across browser restarts). Voice settings stay in USER.md.
-  const prefsPath = resolve(opts.dataDir, 'preferences.json')
-  function loadPrefs(): Record<string, unknown> {
-    try {
-      if (existsSync(prefsPath)) {
-        return JSON.parse(readFileSync(prefsPath, 'utf-8'))
-      }
-    } catch { /* ignore */ }
-    return {}
-  }
-  function savePrefs(updates: Record<string, unknown>): void {
-    const current = loadPrefs()
-    const merged = { ...current, ...updates }
-    writeFileSync(prefsPath, JSON.stringify(merged), 'utf-8')
-  }
+  // v1.1.0 §1.1 — moved to src/config/preferences.ts so CLI can read the
+  // same file. We keep thin local wrappers for the call-site brevity.
+  const loadPrefs = (): Record<string, unknown> => loadPreferences(opts.dataDir)
+  const savePrefs = (updates: Record<string, unknown>): void =>
+    savePreferences(opts.dataDir, updates as Parameters<typeof savePreferences>[1])
 
   const sessionStore = new Map<string, SessionRuntime>()
 
@@ -567,6 +560,31 @@ export function createApp(opts: {
                   // topic recording is best-effort — empty topicsUsed is fine
                 }
 
+                // v1.1.0 §1.3 — auto-expand topic library (opt-in via
+                // preferences.json). Reads the toggle on every session end
+                // so toggling in the Web UI takes effect on the very next
+                // session-end. The function never throws — failures are
+                // logged to stderr and the session-end pipeline is not
+                // blocked.
+                try {
+                  await autoExpandTopicLibrary(
+                    review.keywords,
+                    topicsUsed,
+                    {
+                      topics: topics.list(),
+                      topicStats,
+                      keywordHits,
+                      topicsDao: topics,
+                      client,
+                    },
+                    { now: new Date() },
+                    { enabled: isAutoExpandTopicsEnabled(opts.dataDir) },
+                  )
+                } catch {
+                  // autoExpandTopicLibrary is supposed to swallow its own
+                  // errors, but defend the outer pipeline anyway.
+                }
+
                 sessions.markEnded(id, {
                   phaseHistory: output.phaseHistory,
                   summary: review.summary,
@@ -651,6 +669,8 @@ export function createApp(opts: {
       show_debug: prefs.show_debug ?? false,
       mic_hotkey: prefs.mic_hotkey ?? null,
       send_hotkey: prefs.send_hotkey ?? null,
+      // v1.1.0 §1.1 — auto-expand toggle (defaults to false)
+      auto_expand_topics: prefs.auto_expand_topics ?? false,
       base_url: getEnvVar('ANTHROPIC_BASE_URL') || 'https://api.minimaxi.com/anthropic',
       model: getEnvVar('LLM_MODEL') || 'MiniMax-M3',
       // v1.0.8 §1.7 — LLM wire format (anthropic vs openai-compatible)
@@ -802,6 +822,11 @@ export function createApp(opts: {
     if (body.send_hotkey && typeof body.send_hotkey === 'object') {
       prefsUpdates.send_hotkey = body.send_hotkey
       persisted.push('send_hotkey')
+    }
+    // v1.1.0 §1.1 — auto-expand topic library toggle
+    if (typeof body.auto_expand_topics === 'boolean') {
+      prefsUpdates.auto_expand_topics = body.auto_expand_topics
+      persisted.push('auto_expand_topics')
     }
     let llmConfigChanged = false
     if (typeof body.base_url === 'string' && body.base_url.trim()) {
