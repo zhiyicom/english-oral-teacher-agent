@@ -1,417 +1,250 @@
-# English Oral Teacher — 用户手册
+# English Oral Teacher — User Manual
 
-> 最后更新：2026-07-10
-> 当前版本：v1.0.7
->
-> 本文档随每次正式发布更新，是标准产品交付文档。
+## 1. Installation
 
----
+### Windows installer (recommended)
 
-## 1. 安装部署
+1. Download `EnglishOralTeacher-Setup-v1.0.9.exe` from [GitHub Releases](https://github.com/zhiyicom/english-oral-teacher-agent/releases)
+2. Double-click → follow the wizard → shortcuts created automatically
+3. Launch → browser opens → setup wizard appears
 
-### 1.1 Windows 安装包（推荐）
+**No command line. No Node.js. No configuration files.** The installer bundles everything.
 
-1. 从 [GitHub Releases](https://github.com/zhiyicom/english-oral-teacher-agent/releases) 下载 `EnglishOralTeacher-Setup-v1.0.7.exe`
-2. 双击运行 → 按向导安装 → 桌面和开始菜单自动创建快捷方式
-3. 启动 → 浏览器自动打开 → 填写 API Key + 学生档案 → 开始练习
-
-**无需命令行，无需安装 Node.js。** 安装包已包含所有运行环境。
-
-### 1.2 基础环境要求（开发者）
-
-| 组件 | 最低版本 | 说明 |
-|---|---|---|
-| Node.js | ≥ 22.0 | JavaScript 运行时 |
-| pnpm | ≥ 9.0 | 包管理器（推荐通过 `corepack enable` 启用）|
-| Git | ≥ 2.40 | 版本控制（可选，仅开发需要）|
-| 操作系统 | Windows 10+ / macOS 12+ / Linux | — |
-| 磁盘空间 | ≥ 2 GB | 含 node_modules 和模型文件（首次启动时下载）|
-
-### 1.2 浏览器要求
-
-| 浏览器 | 最低版本 | 语音输入 (STT) | 语音输出 (TTS) |
-|---|---|---|---|
-| Chrome | ≥ 120 | 支持（中国区可能受限）| 全支持 |
-| Edge | ≥ 120 | 全支持 | 全支持 |
-| Firefox | ≥ 120 | 不支持 | 全支持 |
-| Safari | ≥ 17 | 部分支持 | 全支持 |
-
-- 语音输入依赖浏览器 `SpeechRecognition` API（Chrome/Edge 完全支持，Firefox 不支持）
-- 语音输出依赖 `SpeechSynthesis` API（所有现代浏览器支持）
-- **推荐使用 Edge 浏览器**以体验完整语音功能
-- **重要**：`SpeechRecognition` API 的后端服务由浏览器厂商提供，不同浏览器走不同云端：
-  - **Chrome** → Google Cloud Speech（中国区可能无法访问）
-  - **Edge** → Microsoft Azure Speech（中国区可访问）
-  - **Safari** → Apple Siri 引擎
-  - 代码不绑定任何后端——浏览器自己决定调用哪个服务。如果你在中国，建议使用 Edge 来获得稳定的语音识别
-
-### 1.3 安装步骤
-
-**Step 1：克隆项目**
+### Developer installation
 
 ```bash
-git clone <repo-url>
-cd English-oral-teacher-Agent
-```
-
-**Step 2：安装依赖**
-
-```bash
+git clone https://github.com/zhiyicom/english-oral-teacher-agent.git
+cd english-oral-teacher-agent
 pnpm install
 pnpm --dir web install
+cp .env.example .env   # edit API_KEY + provider settings
+pnpm dev-web            # Hono (8787) + Vite (5173)
 ```
 
-**Step 3：配置环境变量**
+Open `http://localhost:5173`.
 
-复制 `.env.example` 为 `.env`，至少填入 API Key（其他项可保持默认）：
+### Browser compatibility
 
-```env
-# 必填：LLM 厂商 API 密钥
-API_KEY=你的API密钥
+| Browser | STT (voice input) | TTS (voice output) |
+|---------|-------------------|---------------------|
+| Edge ≥ 120 | Full support | Full support |
+| Chrome ≥ 120 | Limited (China region issues) | Full support |
+| Firefox ≥ 120 | Not supported | Full support |
+| Safari ≥ 17 | Partial | Full support |
 
-# 可选：设为 1 使用真实 LLM（不设默认 replay 模式，无需 API 调用）
-RUN_LIVE_LLM=1
+**Recommendation**: Microsoft Edge for reliable voice input in China.
 
-# 可选：设为 1 记录完整 LLM 请求日志到 data/llm-debug/
-DEBUG_LOG_LLM=0
+## 2. First-Time Setup
 
-# 默认端口（Hono server 监听端口）
-PORT=8787
-```
+On first launch, the setup wizard guides you through two steps:
 
-`API_KEY` 留空也能启动 server，但实际对话会失败并返回 401。
+### Step 1 — LLM Configuration
 
-**Step 4：安装 Playwright 浏览器（仅 E2E 测试需要）**
+| Field | Description | Example |
+|-------|-------------|---------|
+| API Key | Your LLM provider's API key | `sk-...` |
+| API Protocol | `Anthropic Compatible` (MiniMax, default) or `OpenAI Compatible` (DeepSeek, OpenAI) | — |
+| Base URL | API endpoint | `https://api.deepseek.com/anthropic` |
+| Model | Model name | `deepseek-v4-flash` |
 
-```bash
-npx playwright install chromium
-```
+**Default provider**: MiniMax (`https://api.minimaxi.com/anthropic`, model `MiniMax-M3`).
 
-### 1.4 启动方式
+**To use DeepSeek**: switch protocol to "OpenAI Compatible", set Base URL to `https://api.deepseek.com/v1`, and model to e.g. `deepseek-chat`.
 
-**开发模式（推荐新手）**：同时启动 Hono server (8787) + Vite dev server (5173)，前者提供 API+SSE，后者提供 Web UI 的 HMR 热重载。
+### Step 2 — Student Profile
 
-```bash
-pnpm dev-web
-```
+- **Name**: How the AI teacher addresses you
+- **Age**: For difficulty adjustment
+- **Level**: Beginner / Intermediate / Advanced
+- **Goals**: Learning objectives (comma-separated)
+- **Interests**: Topics you enjoy (comma-separated), used for warm-up personalization
 
-浏览器访问 `http://localhost:5173`（自动通过 Vite 代理转发 `/api/*` 和 `/assets/*` 到 8787）。
+All settings can be changed later via the Settings page.
 
-**仅启动 Hono server**：仅 8787 端口（API + SSE + 已构建的 web 静态资源）。
+## 3. Interface
 
-```bash
-pnpm serve    # tsx watch src/server.ts，开发态
-```
+The UI has two panels:
 
-**生产模式（单端口）**：先构建前端，再启动 server（v1.0.5.1 §1.1 起 `pnpm start` 直接起 server；CLI 改用 `pnpm cli`）。
+- **Left sidebar**: session list (sorted by date, newest first), [New Session] button, navigation to Topics and Settings
+- **Right main area**: current session chat, history viewer, or settings/topics editor
 
-```bash
-pnpm build         # pnpm --dir web build && tsc && pnpm build:copy-assets → dist/web/ + dist/storage/migrations/
-pnpm start         # node dist/server.js，单进程 8787 端口 serve SPA + API
-```
+### Session list
 
-浏览器访问 `http://localhost:8787`。
+- Each row shows: session number, date, duration, topic summary
+- Hover → red × button appears → click to delete (no confirmation dialog)
+- Click any row to view its full transcript (read-only)
+- Current session is highlighted with a dark background
 
-**CLI 模式**（无 Web UI，直接在终端对话）：
+## 4. Conversation
 
-```bash
-pnpm dev           # tsx watch src/cli.ts
-# 或
-pnpm build && pnpm cli     # node dist/cli.js
-```
+### Starting a session
 
-### 1.5 验证安装
+Click [New Session] → server creates a session → AI teacher greets you.
 
-```bash
-# 健康检查
-curl http://localhost:8787/api/health
-# 返回: {"ok":true,"sessions":0,...}
+The session flows through four phases automatically:
 
-# 类型检查
-pnpm typecheck
+| Phase | Time | Behavior |
+|-------|------|----------|
+| Warm Up | 0-5 min | Light chat, references last session's topic |
+| Main Activity | 5-25 min | Topic discussion, error correction, vocabulary teaching |
+| Wrap Up | 25-30 min | Summarizes progress, highlights 1-2 errors |
+| End | 30+ min | Goodbye, writes summary + embedding to database |
 
-# 运行测试
-pnpm test          # vitest 单测
-pnpm test:e2e      # Playwright 端到端（需先 install chromium）
-```
+### Sending messages
 
----
+- Press **Enter** anywhere on the page to send
+- **Shift+Enter** for newline in the input box
+- Custom send hotkey configurable in Settings
 
-## 2. 界面与对话
+### Voice input (STT)
 
-### 2.1 界面布局
+Click the microphone button (🎤) → speak → click again to stop. The recognized text appears in the input box.
 
-界面分为左右两栏：
+Error messages appear above the input bar (centered) and auto-dismiss after 2.5 seconds:
 
-- **左侧（侧边栏）**：标题"English Oral Teacher" + [开始新练习] 按钮 + 按日期分组的会话列表 + 底部导航（话题库 / 设置）。当前查看的会话行用**强灰底**（`bg-slate-300`）高亮（v1.0.4 §1.5）；底部导航按钮用**浅蓝底**（`bg-blue-50`）高亮以示区分。鼠标悬停在某条会话上会出现红色 **×** 按钮，点击**直接删除**该会话（v1.0.3 §1.1，无二次确认）。
-- **右侧（主内容区）**：根据当前路由显示对话窗口、历史记录、设置或话题库编辑器。
+| Error | Message |
+|-------|---------|
+| No speech detected | "No speech detected" |
+| Microphone denied | "Microphone permission needed" |
+| Network unreachable | "Speech service unreachable, check network" |
+| Browser disabled | "Browser disabled speech recognition" |
 
-### 2.2 开始新对话
+### Voice output (TTS)
 
-点击左侧 [开始新练习] 按钮：
+Enable in Settings → AI teacher's replies are read aloud. Speed (0.5-2.0) and accent (en-US/en-GB) adjustable.
 
-1. 前端调用 `POST /api/sessions` 创建空会话
-2. server 响应 `{ id, warmUpHook }`（`warmUpHook` 是上一会话结束时 LLM 抽取的暖场关键词，可能为 `null`）
-3. 浏览器跳转到 `/session/:id`，首轮自动开始 WARM_UP 阶段，老师会基于 `warmUpHook`（或上次会话摘要）开场
-4. 当 LLM 回复你消息时，对话正常流转
+### Ending a session
 
-### 2.3 继续已有对话
+- Click [End Session] in the top bar
+- Or type "stop" / "bye" / "end"
+- After 30 minutes the session auto-ends
 
-在左侧会话列表中点击**未结束**的会话（没有结束时间的），右侧显示对话窗口，可以继续聊天。
+## 5. Settings
 
-### 2.4 查看历史记录
+Access via the bottom-left navigation. All changes take effect immediately — no restart needed.
 
-点击**已结束**的会话，右侧显示该会话的完整 transcript（只读），包含会话摘要、关键词、阶段历程和所有对话消息。
+### Voice
 
-### 2.5 删除会话
+| Setting | Values | Default |
+|---------|--------|---------|
+| Voice on/off | toggle | Off |
+| Speed | 0.5 – 2.0 | 1.0 |
+| Accent | en-US / en-GB | en-US |
+| Voice source | online / local | online |
 
-将鼠标移到左侧会话项上，出现红色的 **×** 按钮。点击**直接删除**该会话（v1.0.3 起无确认对话框），session 行 + 所有 messages 记录 + 关联 mistakes + 缓存的 WARM_UP 种子（若该 session 是最近一次有摘要的）一并清空。
+### Display
 
----
+| Setting | Values | Default |
+|---------|--------|---------|
+| Font size | 12-20 px | 14 px |
+| Show debug info | toggle | Off |
 
-## 3. 对话功能
+### Hotkeys
 
-### 3.1 发送消息
+| Hotkey | Action | Suggested |
+|--------|--------|-----------|
+| Microphone | Toggle voice input | Ctrl+Shift+M |
+| Send | Send message | Ctrl+Enter |
 
-- **点击 [发送] 按钮** 发送消息
-- **按 Enter 键**：在对话页面任意位置按 Enter 即可发送（无需先点击输入框）
-- **Shift + Enter**：在输入框中换行
-- **自定义发送快捷键**：在设置中配置（见 §4.3）
+### LLM
 
-### 3.2 语音输入（STT）
+| Setting | Description |
+|---------|-------------|
+| API Key | Your LLM provider API key. Displayed masked (`sk-...xxxx`). |
+| API Protocol | Anthropic-compatible or OpenAI-compatible wire format. |
+| Base URL | API endpoint URL. |
+| Model | Model name. |
 
-- 输入框左侧有 🎤 按钮
-- 点击开始录音，再次点击停止
-- 说话内容自动转为文字填入输入框
-- 需要 Chrome 浏览器（使用浏览器内置 SpeechRecognition API）
-- **快捷键**（可自定义）：在设置中配置麦克风快捷键
+### Form behavior
 
-### 3.3 语音朗读（TTS）
+- **Save**: writes to AppData and updates the running LLM client immediately
+- **Cancel**: discards unsaved changes, reverts to last saved values
+- Leaving the page with unsaved changes prompts a confirmation
 
-- 在设置中开启"语音开关"后，老师的每条回复会自动朗读
-- 语速（0.5-2.0）和口音（en-US / en-GB）可在设置中调整
-- 发送新消息时自动停止当前朗读
+## 6. Topic Library
 
-### 3.4 实时流式显示
+Access via the bottom-left navigation. 30 default topics across three levels (A1-A2, B1, B2).
 
-老师的回复会逐字显示（打字机效果，输入框旁显示"老师正在回复…"并锁定），通过 SSE 的 `text-chunk` 事件实现真正的逐字流式（v0.8.5 落地）。
+### Topic list
 
-### 3.5 结束对话
+- Each topic shows its name, level, keywords, and discussion count `(N)`
+- Each keyword chip shows its individual hit count `keyword (N)`
+- Click [Edit] to enter edit mode → modify name, keywords, description → [Save]
 
-- 点击顶栏 [结束本次] 按钮 → server 触发 `stop` → 老师回复告别 → 会话立即结束（v1.0.1 起 END 阶段立即 return，避免无限告别循环）
-- 或输入 "stop" / "end" / "bye" / "结束" / "停" 等关键词手动结束（严格的整句正则，匹配 `^stop.` / `OK. stop` 等整句，不匹配 `let's stop and continue`）
-- 30 分钟到 → 系统自动触发 WRAP_UP → 老师做总结 → END 告别
-- 会话结束后显示"本次练习已结束"，可点击 [返回主界面]
+### Selection algorithm
 
-### 3.6 会话阶段
+The system prioritizes:
 
-系统自动管理 4 个阶段，对话顶栏显示当前阶段标签和计时器：
+1. **Hard exclusion**: topics discussed in the last 30 days are excluded
+2. **Soft preference**: less-discussed topics are preferred
+3. **Keyword freshness**: topics whose keywords haven't appeared recently get a slight boost
+4. **Random noise**: small random factor prevents identical selections every time
 
-| 阶段 | 时间 | 行为 |
-|---|---|---|
-| 热身 (WARM_UP) | 0-5 分钟 | 轻松寒暄、引用上一会话的 `warmUpHook` 关键词开场（v1.0.3）|
-| 主体练习 (MAIN_ACTIVITY) | 5-25 分钟 | 进入阶段时强制调用 `topic_select` 工具选题；`W_KEYWORD=0.05` keyword-freshness 偏置优先选关键词命中少的 topic（v1.0.2）|
-| 总结 (WRAP_UP) | 25-30 分钟 | 总结进步、鼓励、布置练习；`profile-extractor` 自动抽取兴趣 + `nextWarmUpSeed`（v1.0.3）|
-| 结束 (END) | 30+ 分钟 | 温暖告别；`endSession` 流水线：summarize → markEnded → embedding → keyword_hits 统计 → profile-extract → USER.md 更新（v1.0.1）|
+The AI teacher is prompted to respect the selected topic and not re-select aggressively.
 
-阶段切换时会向前缀注入完整 `[System Context]` 块和阶段 Reminder 文本，**打断 LLM 惯性**（v1.0.1）。
+## 7. Session Memory
 
----
+At the end of each session, the system automatically:
 
-## 4. 设置功能
+1. **Summarizes**: calls a dedicated summarizer LLM → 1-3 sentence summary + 3-8 keywords
+2. **Embeds**: converts the summary to a 384-dim vector (MiniLM-L6-v2) → stores as BLOB
+3. **Records topics**: writes adopted topics to `topic_stats` and `keyword_hits`
+4. **Extracts profile**: updates student interests and warm-up seed in USER.md
 
-点击左侧底部 [设置] 进入。
+When you start a new session, the system injects:
+- **Last session review**: date, duration, keywords, summary text
+- **Relevant past sessions**: top 2 via cosine similarity search (optional)
 
-### 4.1 语音设置
+**Session boundaries are strict** — previous conversation text is never carried into a new session. Only summaries are shared across sessions.
 
-| 设置 | 说明 | 默认值 |
-|---|---|---|
-| 语音开关 | ON = 老师回复自动朗读 | OFF |
-| 语速 | 0.5（慢）~ 2.0（快）| 1.0 |
-| 口音 | en-US（美式）/ en-GB（英式）| en-US |
+### Mistake tracking
 
-修改后点击 [保存]，即时生效（写入 `prompts/USER.md` frontmatter + localStorage + `data/preferences.json` 服务端备份，浏览器重启不丢）。
+The AI teacher tags errors during conversation (grammar, vocabulary, word choice). All mistakes are stored and viewable in the session history.
 
-### 4.2 显示设置
+## 8. Data Storage
 
-| 设置 | 说明 | 默认值 |
-|---|---|---|
-| 字体大小 | 12-20px 滑块 | 14px |
-| 显示调试信息 | ON = 显示 v1.0.2 引入的 turn-level 诊断日志 | OFF |
+All user data is stored in `%APPDATA%\EnglishOralTeacher\` (Windows):
 
-字体大小保存后实时生效（通过 CSS 变量 `--font-size-base` 控制）。
+| Path | Content |
+|------|---------|
+| `.env` | LLM configuration (API key, base URL, model, protocol) |
+| `oral-teacher.db` | SQLite database (sessions, messages, mistakes, topics, stats) |
+| `preferences.json` | UI preferences (font size, voice settings, hotkeys) |
+| `USER.md` | Student profile |
+| `llm-debug/` | Debug logs (when enabled) |
 
-### 4.3 快捷键设置
+To **reset everything**: uninstall and choose "Delete conversation history, settings, and student profile" when prompted.
 
-| 快捷键 | 功能 | 默认 |
-|---|---|---|
-| 麦克风 | 开关语音输入 | 未设置（建议 Ctrl+Shift+M）|
-| 发送消息 | 发送当前输入 | 未设置（默认 Enter 直接发送）|
+## 9. Troubleshooting
 
-点击快捷键输入框 → 按下想要的组合键 → 自动捕获。设置后点击 [保存]。
+### "API key not configured"
 
-### 4.4 表单行为（v1.0.3 §1.2）
+The setup wizard hasn't been completed. Navigate to the app (it should redirect to `/setup` automatically).
 
-- 点击 [保存] → PUT `/api/settings` → 字段写入 USER.md + preferences.json
-- 点击 [取消] → 丢弃未保存的改动，表单回滚到上次保存的值
-- 离开页面时若有未保存改动，提示"是否放弃更改"
+### "Connection error" after configuring provider
 
----
+- Check your API key is correct
+- Check the Base URL — ensure it matches your provider's API endpoint
+- Check network connectivity to the API endpoint (`curl https://api.example.com`)
+- For Anthropic-compatible: URL should end with the base path (e.g. `/anthropic` not `/anthropic/v1/messages`)
+- For OpenAI-compatible: URL should end with `/v1`
 
-## 5. 话题库管理
+### Voice input doesn't work
 
-点击左侧底部 [话题库] 进入。
+- Chrome users in China: try Microsoft Edge instead
+- Check microphone permissions in browser settings
+- Try speaking within 5 seconds of clicking the mic button
 
-- 显示所有话题（默认 30 个，按 text-library.md 分类）及其关键词标签
-- **每个话题名右侧显示 `(N)`** —— 该话题已被讨论过的次数（v1.0.2 引入）
-- **每个关键词 chip 内显示 `(N)`** —— 该 keyword 在历史会话中被命中过的次数（v1.0.2 引入）
-- 点击 [编辑] 进入编辑模式，可修改 `name` / `keywords` / `description`
-- 点击 [保存] → PUT `/api/topics` → 字段白名单过滤（`hitCount` / `keywordHits` 等只读统计字段被丢弃，防止误覆盖数据库）
-- 话题按 A1-A2（初学者）/ B1（中级）/ B2（中高级）三级分类
+### Switching providers
 
-**选题算法（v1.0.2 + v1.0.3）**：
+Change settings in the Settings page → Save. The LLM client is recreated immediately with the new configuration. No restart needed.
 
-系统在 MAIN_ACTIVITY 阶段会**优先选择讨论次数最少的话题**，评分函数：
+### Debug logging
 
-```
-score = -count*0.1  -  avgKeywordHit*0.05  +  interest*0.5  +  noise
-       \_________/      \________________/    \_________/    \____/
-        讨论次数惩罚      关键词命中新鲜度         兴趣匹配      抖动
-```
-
-- v1.0.3 §1.3 起，`interest` 项**默认禁用**（`useInterestBoost: false`）—— 兴趣匹配改由 WARM_UP 阶段 prompt 引导，不再参与算法评分
-- 工具返回 `suggested_keyword`（命中次数最低的关键词）作为开场的软提示
-
----
-
-## 6. 会话记忆
-
-### 6.1 跨会话摘要
-
-每个会话结束时，系统自动（endSession 流水线）：
-
-1. **summarize** —— 调用 summarizer agent 生成 `{summary, keywords}`，写入 `sessions` 表
-2. **markEnded** —— 写入 `ended_at` 时间戳
-3. **embedding** —— `summary` → 384 维向量（本地 MiniLM-L6-v2 q8）→ 写入 `sessions.embedding` BLOB
-4. **keyword_hits 统计** —— 把本会话的 `keywords` per-(topic, keyword) 累加到 `keyword_hits` 表
-5. **topic_stats 更新** —— 匹配的话题 `discussion_count += 1`、`last_discussed_at = now`
-6. **profile-extract** —— 从 `summary` 自动提取学生新信息（技能、兴趣）+ `nextWarmUpSeed`（1-3 词开场关键词），更新 `USER.md` frontmatter
-7. **pendingWarmUpSeed 缓存** —— `nextWarmUpSeed` 缓存在 server 模块级变量，下次 `POST /api/sessions` 时返回
-
-### 6.2 下次会话
-
-新建会话时，`POST /api/sessions` 返回 `{id, warmUpHook}`，Web 在首次 `GET /api/sessions/:id/stream?action=turn&warmUpHook=...` 时把它作为 WARM_UP 阶段 hint 注入。Context 注入器（`src/agent/context-injector.ts`）生成 Block 1 上一会话：
-
-```
-[Last Session — pointer only]
-date: 2026-06-28  duration: 28 min
-keywords: basketball, anime, school, Roblox, pizza, weekend
-(full summary in opening user message)
-```
-
-摘要全文保留在 WARM_UP 首轮合成的 user message（`Messages[0]`）—— 是 LLM 唯一阅读入口（v1.0.4 §1.2 单一来源）。
-
-### 6.3 错误收集
-
-- `mark_mistake` 工具：LLM 标记的语法/用词错误，存 `mistakes` 表，可在历史详情页看到
-- `MIN_TOPIC_AGE=5` 强制约束：当前 topic 累计 ≥ 5 轮用户发言才允许切换（v1.0.2 Bug A 修复）；显式"换话题"/"switch topic"请求旁路
-- `TOPIC_AGE_MIN=0` env var 可禁用该 gate（仅测试用）
-
----
-
-## 7. 调试功能
-
-### 7.1 LLM 请求日志
-
-在 `.env` 文件中添加：
+Create a `.env` file in the installation directory (next to `EnglishOralTeacher.exe`):
 
 ```env
 DEBUG_LOG_LLM=1
 ```
 
-重启服务后，每次发给 LLM 的完整请求（system prompt + 消息历史）写入 `data/llm-debug/` 目录。每个文件以时间戳 + 会话 ID + 轮次命名。
-
-### 7.2 摘要日志
-
-同样需要 `DEBUG_LOG_LLM=1`，每次会话结束后的摘要结果写入 `data/llm-debug/*_summarize.txt`。
-
-### 7.3 Turn 级诊断（v1.0.2 起）
-
-`src/llm/debug-log.ts` 的 `logTurnDiagnostic()` 在以下 4 个事件点写 JSONL per-turn snapshot 到 `data/llm-debug/<sessionId>_diag.jsonl`：
-
-1. 1st-call done（LLM 首次响应后）
-2. 2nd-call done（tool call 后跟进的二次调用后）
-3. topic-select blocked（topic_select 工具被 MIN_TOPIC_AGE gate 拒绝）
-4. turn done（整个 turn 完成）
-
-Web 端可选 opt-in：localStorage 写入 `debug:web_diag=1` 后，SSE 事件追踪会 `POST /api/diagnostic/log` 上报到 server。
-
-### 7.4 Live LLM 模式
-
-在 `.env` 文件中设置：
-
-```env
-RUN_LIVE_LLM=1
-API_KEY=你的API密钥
-```
-
-默认使用 replay 模式（无须 API key，用于测试）。Live 模式调用真实 LLM。
-
----
-
-## 8. 提示词编辑
-
-所有系统提示词都可以直接编辑 `.md` 文件（在 `prompts/` 目录），重启服务端后生效。
-
-**进入主系统 prompt 的文件**（`buildSystemString()` 拼装顺序，参见 `src/prompts/loader.ts:135-144`）：
-
-| 文件 | 加载后 | 作用 |
-|---|---|---|
-| `prompts/SOUL.md` | `# SOUL` 块（自带头部）| AI 角色身份、铁律、语气 |
-| `prompts/AGENTS.md` | `# AGENTS` 块（自带头部）| 操作手册（怎么选话题、怎么记错）|
-| `prompts/USER.md` | `# STUDENT` 块（自带头部）| 学生档案（系统自动补充）|
-| `prompts/tools.md` | `# TOOLS` 块（自带头部，可选）| 工具使用规范（供 LLM 参考）|
-
-> **v1.0.4 §1.1 变更**：loader 不再硬拼 `# SOUL` / `# AGENTS` / `# STUDENT` / `# TOOLS` 前缀。每个文件的 H1 必须在文件**自身**的第一行。如果手工编辑导致任一文件丢 H1，启动时 `assertHasH1()` 失败并明确报错（避免静默生成畸形 system prompt）。
-
-**不进入主系统 prompt 的文件**（独立加载）：
-
-| 文件 | 加载方式 | 作用 |
-|---|---|---|
-| `prompts/phases.md` | `loadPhaseInstructions()` → 注入 `[System Context]` 动态块 + 用户消息前缀 | 每个阶段的详细行为指令（Context + Reminder）|
-| `prompts/topic-library.md` | 仅供参考（**不再注入** system prompt，v1.0.1 B4）| 话题列表（可通过 Web UI 编辑；`PUT /api/topics` 触发 `prompts/topic-library.md` 重生成）|
-| `prompts/summarizer-system.md` | 摘要 agent 专用 system prompt | 会话结束 `summarize()` 时使用 |
-| `prompts/USER.md.example` | 模板（`prompts/USER.md` 缺失时回退）| 不进 system prompt；git tracked |
-
----
-
-## 9. 开发者参考
-
-### 9.1 HTTP API 端点
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/health` | 健康检查（返回 `{ok: true, sessions: <count>}`）|
-| GET | `/api/sessions` | 会话列表（不含 messages）|
-| POST | `/api/sessions` | 创建会话，返回 `{id, warmUpHook}` |
-| GET | `/api/sessions/:id` | 会话详情 + `messages[]` |
-| GET | `/api/sessions/:id/stream?action=init` | SSE：返回当前 phase + done |
-| GET | `/api/sessions/:id/stream?action=turn&input=...&warmUpHook=...` | SSE：单轮 turn 完整事件流 |
-| DELETE | `/api/sessions/:id` | 删除会话（级联清理 messages + 可能清空 orphaned WARM_UP 种子）|
-| GET | `/api/settings` | 当前设置（USER.md + preferences.json）|
-| PUT | `/api/settings` | 保存设置 |
-| GET | `/api/topics` | 话题列表（含 `hitCount` + `keywordHits`）|
-| PUT | `/api/topics` | 保存话题（白名单过滤）|
-| POST | `/api/diagnostic/log` | Web 端 SSE 事件追踪上报（v1.0.2）|
-
-### 9.2 SSE TurnEvent 类型
-
-`text-chunk` / `phase` / `ctx` / `ctx-segment` / `ctx-block` / `student-text` / `tokens` / `tool-call` / `warn` / `error` / `done`。详细定义见 `src/agent/turn.ts`。
-
-### 9.3 测试
-
-- **L1（单元）**：`pnpm test`，覆盖 `src/agent/*` `src/prompts/*` `src/storage/*` 等
-- **L3（CLI 集成）**：`pnpm test` 同上，依赖 `tests/fixtures/replay/` 的 fixture 字符串
-- **E2E（Playwright）**：`pnpm test:e2e`，覆盖 6 个 spec（main / session / settings / sidebar / topic editor / ...）
-
-详细测试金字塔见 `docs/DEVELOPMENT_PLAN.md`。
+Restart the app. Per-turn LLM request logs will be written to `%APPDATA%\EnglishOralTeacher\llm-debug\`.
