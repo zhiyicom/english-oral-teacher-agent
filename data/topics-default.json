@@ -21,7 +21,7 @@
       "performance",
       "design"
     ],
-    "description": "艺术与文化 (B2)",
+    "description": "Art & culture (B2)",
     "createdAt": "2026-06-14T16:39:34.703Z"
   },
   {
@@ -47,19 +47,15 @@
       "airport",
       "airline",
       "airspace",
-      "飞机",
-      "飞行",
-      "飞行员",
-      "波音",
-      "驾驶舱",
-      "客机",
+      "airliner",
+      "passenger",
       "737",
       "a380",
       "dvorak",
       "737max",
       "737max8"
     ],
-    "description": "航空与飞行 — 飞机、驾驶舱、飞行员、波音/空客 (B2)",
+    "description": "Aviation & flight — airplane, cockpit, pilot, Boeing/Airbus (B2)",
     "createdAt": "2026-07-13T13:55:00.000Z"
   },
   {
@@ -86,7 +82,7 @@
       "food",
       "gift"
     ],
-    "description": "风俗与文化 (B1)",
+    "description": "Customs & culture (B1)",
     "createdAt": "2026-06-14T16:39:34.702Z"
   },
   {
@@ -115,7 +111,7 @@
       "usually",
       "often"
     ],
-    "description": "日常生活习惯 (A1-A2)",
+    "description": "Daily routine (A1-A2)",
     "createdAt": "2026-06-14T16:39:34.699Z"
   },
   {
@@ -141,7 +137,7 @@
       "advantage",
       "disadvantage"
     ],
-    "description": "教育与发展 (B2)",
+    "description": "Education & development (B2)",
     "createdAt": "2026-06-14T16:39:34.703Z"
   },
   {
@@ -168,7 +164,7 @@
       "subject",
       "extracurricular"
     ],
-    "description": "教育与学习 (B1)",
+    "description": "Education & learning (B1)",
     "createdAt": "2026-06-14T16:39:34.702Z"
   },
   {
@@ -198,7 +194,7 @@
       "theater",
       "netflix"
     ],
-    "description": "娱乐与媒体 (A1-A2 / B1)",
+    "description": "Entertainment & media (A1-A2 / B1)",
     "createdAt": "2026-06-14T16:39:34.702Z"
   },
   {
@@ -227,7 +223,7 @@
       "sustainable",
       "eco"
     ],
-    "description": "环境与自然 (B1)",
+    "description": "Environment & nature (B1)",
     "createdAt": "2026-06-14T16:39:34.703Z"
   },
   {
@@ -253,7 +249,7 @@
       "once",
       "ever"
     ],
-    "description": "个人经历与观点 (B1)",
+    "description": "Personal experience & opinion (B1)",
     "createdAt": "2026-06-14T16:39:34.702Z"
   },
   {
@@ -288,7 +284,7 @@
       "hot",
       "cold"
     ],
-    "description": "饮食 (A1-A2)",
+    "description": "Food & drink (A1-A2)",
     "createdAt": "2026-06-14T16:39:34.700Z"
   },
   {
@@ -314,7 +310,7 @@
       "choice",
       "habit"
     ],
-    "description": "食物与生活方式 (B2)",
+    "description": "Food & lifestyle (B2)",
     "createdAt": "2026-06-14T16:39:34.703Z"
   },
   {
@@ -338,7 +334,7 @@
       "hang",
       "talk"
     ],
-    "description": "朋友与社交 (A1-A2)",
+    "description": "Friends & social life (A1-A2)",
     "createdAt": "2026-06-14T16:39:34.700Z"
   },
   {
@@ -364,7 +360,7 @@
       "someday",
       "later"
     ],
-    "description": "未来计划 (B1)",
+    "description": "Future plans (B1)",
     "createdAt": "2026-06-14T16:39:34.702Z"
   },
   {
@@ -390,15 +386,11 @@
       "strategy",
       "headset",
       "bilibili",
-      "游戏",
-      "射击",
-      "战术",
-      "联机",
-      "三角洲",
-      "主机",
-      "电竞"
+      "videogame",
+      "esports",
+      "streamer"
     ],
-    "description": "电子游戏 — 射击/Minecraft/B 站游戏主播 (A1-A2 / B1)",
+    "description": "Video games — shooters, Minecraft, Bilibili gaming streamers (A1-A2 / B1)",
     "createdAt": "2026-07-13T13:55:00.000Z"
   },
   {
@@ -423,7 +415,7 @@
       "practice",
       "habit"
     ],
-    "description": "健康 (A1-A2)",
+    "description": "Health & exercise (A1-A2)",
     "createdAt": "2026-06-14T16:39:34.702Z"
   },
   {
@@ -454,7 +446,7 @@
       "swim",
       "run"
     ],
-    "description": "爱好与休闲 (A1-A2)",
+    "description": "Hobbies & leisure (A1-A2)",
     "createdAt": "2026-06-14T16:39:34.700Z"
   },
   {
@@ -483,7 +475,7 @@
       "together",
       "with"
     ],
-    "description": "家庭与住所 (A1-A2)",
+    "description": "Home & family (A1-A2)",
     "createdAt": "2026-06-14T16:39:34.699Z"
   },
   {
@@ -509,7 +501,7 @@
       "news",
       "information"
     ],
-    "description": "娱乐与媒体 (B2)",
+    "description": "Media impact (B2)",
     "createdAt": "2026-06-14T16:39:34.703Z"
   },
   {
@@ -538,23 +530,15 @@
       "composer",
       "conductor",
       "rehearsal",
-      "音乐",
-      "乐队",
-      "古典",
-      "民谣",
-      "摇滚",
-      "大提琴",
-      "钢琴",
-      "乐团",
-      "演唱会",
-      "赵雷",
-      "程艾影",
-      "新裤子",
-      "痛仰",
       "concert_hall",
-      "recital"
+      "recital",
+      "zhaolei",
+      "chengaiying",
+      "newpants",
+      "tongyang",
+      "livemusic"
     ],
-    "description": "音乐 — 古典/民谣/摇滚、乐器、乐队、演唱会 (A1-A2 / B1 / B2)",
+    "description": "Music — classical, folk, rock, instruments, bands, concerts (A1-A2 / B1 / B2)",
     "createdAt": "2026-07-13T13:55:00.000Z"
   },
   {
@@ -576,7 +560,7 @@
       "old",
       "year"
     ],
-    "description": "个人信息 (A1-A2)",
+    "description": "Personal info (A1-A2)",
     "createdAt": "2026-06-14T16:39:34.697Z"
   },
   {
@@ -603,7 +587,7 @@
       "spend",
       "time"
     ],
-    "description": "人际关系 (B1)",
+    "description": "Relationships (B1)",
     "createdAt": "2026-06-14T16:39:34.702Z"
   },
   {
@@ -631,7 +615,7 @@
       "break",
       "recess"
     ],
-    "description": "学校与学习 (A1-A2)",
+    "description": "School life (A1-A2)",
     "createdAt": "2026-06-14T16:39:34.699Z"
   },
   {
@@ -653,7 +637,7 @@
       "weekend",
       "new"
     ],
-    "description": "购物 (A1-A2)",
+    "description": "Shopping (A1-A2)",
     "createdAt": "2026-06-14T16:39:34.702Z"
   },
   {
@@ -678,7 +662,7 @@
       "compare",
       "difference"
     ],
-    "description": "人际关系与社会 (B2)",
+    "description": "Society & relationships (B2)",
     "createdAt": "2026-06-14T16:39:34.703Z"
   },
   {
@@ -706,14 +690,10 @@
       "telescope",
       "mission",
       "orbit",
-      "太空",
-      "月球",
-      "火箭",
-      "宇宙",
-      "生物",
-      "科学"
+      "cosmos",
+      "sciencemag"
     ],
-    "description": "太空与科学 — Artemis、月球、生物、科普杂志 (B1 / B2)",
+    "description": "Space & science — Artemis, Moon, biology, science magazines (B1 / B2)",
     "createdAt": "2026-07-13T13:55:00.000Z"
   },
   {
@@ -738,7 +718,7 @@
       "tournament",
       "olympic"
     ],
-    "description": "体育与健康 (B2)",
+    "description": "Sports & health (B2)",
     "createdAt": "2026-06-14T16:39:34.703Z"
   },
   {
@@ -764,7 +744,7 @@
       "warming",
       "future"
     ],
-    "description": "环境与可持续发展 (B2)",
+    "description": "Environment & sustainability (B2)",
     "createdAt": "2026-06-14T16:39:34.703Z"
   },
   {
@@ -790,7 +770,7 @@
       "virtual",
       "reality"
     ],
-    "description": "科技与未来 (B2)",
+    "description": "Tech & future (B2)",
     "createdAt": "2026-06-14T16:39:34.703Z"
   },
   {
@@ -820,7 +800,7 @@
       "robot",
       "smart"
     ],
-    "description": "科技与生活 (B1)",
+    "description": "Technology & life (B1)",
     "createdAt": "2026-06-14T16:39:34.703Z"
   },
   {
@@ -854,7 +834,7 @@
       "airport",
       "bus"
     ],
-    "description": "旅行与度假 (A1-A2 / B1)",
+    "description": "Travel & vacation (A1-A2 / B1)",
     "createdAt": "2026-06-14T16:39:34.702Z"
   },
   {
@@ -880,7 +860,7 @@
       "experience",
       "growth"
     ],
-    "description": "旅行与探险 (B2)",
+    "description": "Travel & adventure (B2)",
     "createdAt": "2026-06-14T16:39:34.703Z"
   },
   {
@@ -907,7 +887,7 @@
       "activity",
       "feel"
     ],
-    "description": "天气与季节 (A1-A2)",
+    "description": "Weather & seasons (A1-A2)",
     "createdAt": "2026-06-14T16:39:34.702Z"
   },
   {
@@ -934,7 +914,7 @@
       "balance",
       "life"
     ],
-    "description": "工作与职业 (B1)",
+    "description": "Work & career (B1)",
     "createdAt": "2026-06-14T16:39:34.703Z"
   },
   {
@@ -960,7 +940,7 @@
       "career",
       "choice"
     ],
-    "description": "工作与生活 (B2)",
+    "description": "Work-life balance (B2)",
     "createdAt": "2026-06-14T16:39:34.703Z"
   }
 ]
