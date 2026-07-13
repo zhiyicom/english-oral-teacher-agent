@@ -184,7 +184,7 @@ function reconstructSessionState(
 }
 
 // ---------- LLM client selection (mirrors src/cli.ts selectClient) ----------
-function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLMClient {
+function selectClient(fixturesDir: string): LLMClient {
   const testFail = process.env.LLM_TEST_FAIL
   if (testFail) {
     const status = Number.parseInt(testFail, 10)
@@ -196,6 +196,9 @@ function selectClient(env: ReturnType<typeof loadEnv>, fixturesDir: string): LLM
   if (getEnvVar('RUN_LIVE_LLM') === '1') {
     // v1.0.8 §1.7 — pick the wire format the user chose in Settings.
     // 'openai' covers DeepSeek, OpenAI, OpenRouter, Together, Groq, etc.
+    // Re-read env on every call so Web UI settings take effect immediately
+    // (setEnvVar updates process.env; loadEnv() re-parses it).
+    const env = loadEnv()
     return getEnvVar('API_STYLE') === 'openai'
       ? createOpenAIProvider(env)
       : createAnthropicProvider(env)
@@ -269,7 +272,7 @@ export function createApp(opts: {
   const keywordHits = createKeywordHitsDao(db)
   const mistakesDao = createMistakesDao(db)
   const systemPrompt = loadSystemPrompt()
-  let client = selectClient(env, opts.fixturesDir)
+  let client = selectClient(opts.fixturesDir)
   const embedder = createTransformersEmbedder()
   // v1.0.1 — UI preferences stored in a JSON file (localStorage is not
   // reliable across browser restarts). Voice settings stay in USER.md.
@@ -812,7 +815,7 @@ export function createApp(opts: {
         persisted.push('run_live_llm')
         // Re-initialize LLM client on toggle
         if (getEnvVar('RUN_LIVE_LLM') === '1') {
-          client = selectClient(env, opts.fixturesDir)
+          client = selectClient(opts.fixturesDir)
         }
       } catch { /* best-effort */ }
     }
@@ -830,7 +833,7 @@ export function createApp(opts: {
         setEnvVar('API_STYLE', body.api_style)
         persisted.push('api_style')
         if (getEnvVar('RUN_LIVE_LLM') === '1') {
-          client = selectClient(env, opts.fixturesDir)
+          client = selectClient(opts.fixturesDir)
         }
       } catch { /* best-effort */ }
     }
@@ -845,7 +848,7 @@ export function createApp(opts: {
         setApiKeyPersist(body.api_key.trim())
         persisted.push('api_key')
         if (getEnvVar('RUN_LIVE_LLM') === '1') {
-          client = selectClient(env, opts.fixturesDir)
+          client = selectClient(opts.fixturesDir)
         }
       } catch { /* best-effort */ }
     }
@@ -920,7 +923,7 @@ export function createApp(opts: {
       }
       // Re-initialize LLM client — setup may have switched replay→live
       if (getEnvVar('RUN_LIVE_LLM') === '1') {
-        client = selectClient(env, opts.fixturesDir)
+        client = selectClient(opts.fixturesDir)
       }
       return c.json({ ok: true, persisted })
     } catch (err) {
