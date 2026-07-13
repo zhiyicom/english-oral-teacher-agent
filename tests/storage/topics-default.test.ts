@@ -43,8 +43,8 @@ afterEach(() => {
 })
 
 describe('topics-default seed (v1.0.5 §C)', () => {
-  it('JSON file is well-formed and contains 30 topics with all required fields', () => {
-    expect(seeds).toHaveLength(30)
+  it('JSON file is well-formed and contains 34 topics with all required fields', () => {
+    expect(seeds).toHaveLength(34)
     for (const s of seeds) {
       expect(typeof s.name, `seed.name should be a non-empty string`).toBe('string')
       expect(s.name.length).toBeGreaterThan(0)
@@ -104,10 +104,10 @@ describe('topics-default seed (v1.0.5 §C)', () => {
     const count = (db.raw.prepare('SELECT COUNT(*) as c FROM topics').get() as { c: number }).c
     db.close()
 
-    expect(count).toBe(30)
+    expect(count).toBe(34)
   })
 
-  it('applies OR IGNORE correctly when DB already has the same 30 topics', () => {
+  it('applies OR IGNORE correctly when DB already has the same 34 topics', () => {
     const db = openDb({ dataDir: tempDir })
     applyMigrations(db, migrationsDir)
 

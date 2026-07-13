@@ -31,18 +31,22 @@ describe('TopicsDao + TopicStatsDao (v1.0.5 §C migrations 003 + 007)', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  describe('seed data (v1.0.5 §C: 003 CREATE TABLE only, 007 seeds 30)', () => {
-    it('migration 007 seeds 30 baseline topics', () => {
+  describe('seed data (v1.0.5 §C: 003 CREATE TABLE only, 007 seeds 34)', () => {
+    it('migration 007 seeds 34 baseline topics', () => {
       const all = topics.list()
-      expect(all).toHaveLength(30)
+      expect(all).toHaveLength(34)
       const names = all.map((t) => t.name).sort()
-      // Spot-check a few well-known baseline names instead of asserting all 30
+      // Spot-check a few well-known baseline names instead of asserting all 34
       expect(names).toContain('art_culture')
       expect(names).toContain('food_drink')
       expect(names).toContain('school_life')
       expect(names).toContain('travel')
+      // v1.0.9 added: aviation / gaming / music / space_science
+      expect(names).toContain('aviation')
+      expect(names).toContain('gaming')
+      expect(names).toContain('music')
+      expect(names).toContain('space_science')
       // v0.6 names are NOT seeded anymore (003 removed them; 007 has no overlap)
-      expect(names).not.toContain('minecraft')
       expect(names).not.toContain('movies')
     })
 
