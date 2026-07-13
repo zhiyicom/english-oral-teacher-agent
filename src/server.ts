@@ -194,6 +194,14 @@ function selectClient(_fixturesDir: string): LLMClient {
   }
   // Always live. Re-read env on every call so Web UI settings take effect
   // immediately (setEnvVar updates process.env; loadEnv() re-parses it).
+  // On first install no API key is configured — return a friendly provider
+  // so the server starts and the /setup page can be served.
+  if (isSetupNeeded()) {
+    return createThrowingProvider(
+      401,
+      'API key not configured. Open the web UI /setup page to configure.',
+    )
+  }
   const env = loadEnv()
   return getEnvVar('API_STYLE') === 'openai'
     ? createOpenAIProvider(env)
