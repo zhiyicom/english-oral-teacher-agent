@@ -809,20 +809,19 @@ export function createApp(opts: {
       persisted.push('send_hotkey')
     }
     // v1.0.6 — RUN_LIVE_LLM persisted to AppData/.env
+    let llmConfigChanged = false
     if (typeof body.run_live_llm === 'boolean') {
       try {
         setEnvVar('RUN_LIVE_LLM', body.run_live_llm ? '1' : '0')
         persisted.push('run_live_llm')
-        // Re-initialize LLM client on toggle
-        if (getEnvVar('RUN_LIVE_LLM') === '1') {
-          client = selectClient(opts.fixturesDir)
-        }
+        llmConfigChanged = true
       } catch { /* best-effort */ }
     }
     if (typeof body.base_url === 'string' && body.base_url.trim()) {
       try {
         setEnvVar('ANTHROPIC_BASE_URL', body.base_url.trim())
         persisted.push('base_url')
+        llmConfigChanged = true
       } catch { /* best-effort */ }
     }
     // v1.0.8 §1.7 — API wire format. Only 'anthropic' | 'openai' accepted;
@@ -832,25 +831,26 @@ export function createApp(opts: {
       try {
         setEnvVar('API_STYLE', body.api_style)
         persisted.push('api_style')
-        if (getEnvVar('RUN_LIVE_LLM') === '1') {
-          client = selectClient(opts.fixturesDir)
-        }
+        llmConfigChanged = true
       } catch { /* best-effort */ }
     }
     if (typeof body.model === 'string' && body.model.trim()) {
       try {
         setEnvVar('LLM_MODEL', body.model.trim())
         persisted.push('model')
+        llmConfigChanged = true
       } catch { /* best-effort */ }
     }
     if (typeof body.api_key === 'string' && body.api_key.trim()) {
       try {
         setApiKeyPersist(body.api_key.trim())
         persisted.push('api_key')
-        if (getEnvVar('RUN_LIVE_LLM') === '1') {
-          client = selectClient(opts.fixturesDir)
-        }
+        llmConfigChanged = true
       } catch { /* best-effort */ }
+    }
+    // Rebuild LLM client whenever any LLM config changes (not just key/style)
+    if (llmConfigChanged && getEnvVar('RUN_LIVE_LLM') === '1') {
+      client = selectClient(opts.fixturesDir)
     }
 
     if (Object.keys(prefsUpdates).length > 0) {
