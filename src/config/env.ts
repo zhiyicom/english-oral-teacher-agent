@@ -1,5 +1,8 @@
 import 'dotenv/config'
+import { join } from 'node:path'
 import { z } from 'zod'
+import { getAppDataDir } from './paths.js'
+import { readEnvFile } from './secrets.js'
 
 const EnvSchema = z.object({
   // v1.0.8 §1.7 — LLM wire format. 'anthropic' uses @anthropic-ai/sdk with
@@ -35,7 +38,28 @@ const EnvSchema = z.object({
 export type Env = z.infer<typeof EnvSchema>
 
 export function loadEnv(): Env {
-  const result = EnvSchema.safeParse(process.env)
+  // Build input by merging env files into process.env.
+  // Priority: process.env > AppData/.env > CWD/.env > schema defaults.
+  // This matches getEnvVar() / getApiKey() so Web UI settings persist across
+  // restarts even when the install directory has no .env file.
+  const input: Record<string, string | undefined> = {}
+  // 1. CWD/.env (dotenv/config already loaded it into process.env)
+  // 2. AppData/.env (Web UI writes here; lower priority than process.env)
+  for (const path of [
+    join(getAppDataDir(), '.env'),
+    join(process.cwd(), '.env'),
+  ]) {
+    const file = readEnvFile(path)
+    for (const [k, v] of Object.entries(file)) {
+      if (!(k in input)) input[k] = v
+    }
+  }
+  // 3. process.env (highest priority)
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) input[k] = v
+  }
+
+  const result = EnvSchema.safeParse(input)
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `  - ${i.path.join('.')}: ${i.message}`)

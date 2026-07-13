@@ -114,7 +114,7 @@ export function getEnvVar(key: string): string {
   return fromCwd ?? ''
 }
 
-function readEnvFile(path: string): Record<string, string> {
+export function readEnvFile(path: string): Record<string, string> {
   if (!existsSync(path)) return {}
   const content = readFileSync(path, 'utf-8')
   const result: Record<string, string> = {}
