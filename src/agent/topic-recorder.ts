@@ -67,11 +67,13 @@ export function recordAdoptedTopics(
     topicsDao: TopicsDao
   },
 ): string[] {
-  // v1.0.9 §1.4 — partition adopted into "above threshold" and "below".
-  // Above-threshold entries are written and returned. Below-threshold
-  // are dropped from this session's `topics_used`; their suggestedKeyword
-  // does not feed keyword_hits either, so D5 isn't biased by ignored picks.
-  const adoptedSlugs: string[] = []
+  // v1.1.0 §D — ledger + fallback merge. Both paths run; dedup by slug
+  // so multi-topic sessions get full credit regardless of whether the
+  // LLM called topic_select for each transition.
+  const writtenSlugs = new Set<string>()
+
+  // 1. Ledger: write-on-selection (Hook A/B). Only topics with enough
+  //    genuine discussion turns count toward adoption.
   if (adopted.size > 0) {
     for (const [slug, info] of adopted) {
       if (info.onTopicTurns < ADOPTION_MIN_TURNS) continue
@@ -79,16 +81,19 @@ export function recordAdoptedTopics(
       if (info.suggestedKeyword) {
         deps.keywordHits.upsertMany(slug, [info.suggestedKeyword], ctx.now)
       }
-      adoptedSlugs.push(slug)
+      writtenSlugs.add(slug)
     }
-    if (adoptedSlugs.length > 0) return adoptedSlugs
   }
 
-  const best = matchTopic(fallbackKeywords, deps.topics)
-  if (best) {
-    deps.topicStats.incrementAndUpdate(best.topic, ctx.now)
-    deps.keywordHits.upsertMany(best.topic, best.shared, ctx.now)
-    return [best.topic]
+  // 2. Fallback: summary-keyword matchTopic against the topic library.
+  //    Skips slugs already covered by the ledger to avoid double-counting.
+  const matches = matchTopic(fallbackKeywords, deps.topics)
+  for (const m of matches) {
+    if (writtenSlugs.has(m.topic)) continue
+    deps.topicStats.incrementAndUpdate(m.topic, ctx.now)
+    deps.keywordHits.upsertMany(m.topic, [m.shared[0]!], ctx.now)
+    writtenSlugs.add(m.topic)
   }
-  return []
+
+  return [...writtenSlugs]
 }

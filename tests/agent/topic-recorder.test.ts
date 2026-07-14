@@ -291,5 +291,59 @@ describe('recordAdoptedTopics (v1.0.7 §11)', () => {
       expect(topicStats.get('school_life')).toBeNull()
       expect(topicStats.get('food_drink')?.discussionCount).toBe(1)
     })
+
+    // v1.1.0 §D — ledger + fallback merge
+    it('merges ledger above threshold + fallback matches with dedup', () => {
+      const adopted = new Map([
+        ['school_life', adoptedEntry('homework', 'auto', TOPICS[0]!, ABOVE)],
+      ])
+      // school_life is already in ledger; fallback should add food_drink
+      // without double-counting school_life.
+      const result = recordAdoptedTopics(
+        adopted,
+        ['hotpot', 'homework', 'spicy'],
+        { sessionId: 'sess-1', now },
+        { topics: TOPICS, topicStats, keywordHits, topicsDao },
+      )
+      expect(result).toHaveLength(2)
+      expect(result).toContain('school_life')
+      expect(result).toContain('food_drink')
+      // school_life only counted once (from ledger, not from fallback)
+      expect(topicStats.get('school_life')?.discussionCount).toBe(1)
+      expect(topicStats.get('food_drink')?.discussionCount).toBe(1)
+    })
+
+    it('dedup: ledger and fallback both find food_drink → only one increment', () => {
+      const adopted = new Map([
+        ['food_drink', adoptedEntry('hotpot', 'llm', TOPICS[1]!, ABOVE)],
+      ])
+      // Both ledger and fallback would match food_drink → dedup
+      const result = recordAdoptedTopics(
+        adopted,
+        ['hotpot', 'friends'],
+        { sessionId: 'sess-1', now },
+        { topics: TOPICS, topicStats, keywordHits, topicsDao },
+      )
+      expect(result).toEqual(['food_drink'])
+      expect(topicStats.get('food_drink')?.discussionCount).toBe(1)
+    })
+
+    it('ledger below threshold + ledger above threshold + fallback merge', () => {
+      const adopted = new Map([
+        ['school_life', adoptedEntry('homework', 'auto', TOPICS[0]!, 0)], // below → dropped
+        ['food_drink', adoptedEntry('hotpot', 'llm', TOPICS[1]!, ABOVE)],
+      ])
+      // food_drink from ledger; daily_routine from fallback (fallbackKw 'morning' matches)
+      const result = recordAdoptedTopics(
+        adopted,
+        ['morning', 'commute'],
+        { sessionId: 'sess-1', now },
+        { topics: TOPICS, topicStats, keywordHits, topicsDao },
+      )
+      expect(result).toHaveLength(2)
+      expect(result).toContain('food_drink')
+      expect(result).toContain('daily_routine')
+      expect(topicStats.get('school_life')).toBeNull()
+    })
   })
 })

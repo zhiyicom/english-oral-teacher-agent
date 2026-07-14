@@ -72,21 +72,31 @@ export async function autoExpandTopicLibrary(
     )
     if (newKeywords.length === 0) return
 
-    // Step 2: MERGE — attach to existing topic if Jaccard + count matches.
-    const best = matchTopic(newKeywords, deps.topics, MERGE_THRESHOLD)
-    if (best && best.shared.length > 0) {
-      // Only bump keyword_hits — topic_stats stays put to avoid double-
-      // counting with recordAdoptedTopics on the same session.
-      deps.keywordHits.upsertMany(best.topic, best.shared, ctx.now)
+    // Step 2: MERGE — attach to existing topics. v1.1.0 §E traverses all
+    // Top-N matches so every matching keyword is absorbed by its best-fit
+    // topic. Only keywords that appear in ZERO matches go to CREATE.
+    const matches = matchTopic(newKeywords, deps.topics, MERGE_THRESHOLD)
+    const mergedKwSet = new Set<string>()
+    for (const m of matches) {
+      if (m.shared.length === 0) continue
+      deps.keywordHits.upsertMany(m.topic, m.shared, ctx.now)
+      for (const k of m.shared) mergedKwSet.add(k.toLowerCase())
+    }
+    if (matches.length > 0) {
       process.stderr.write(
-        `[auto-expand] merged [${best.shared.join(',')}] -> ${best.topic}\n`,
+        `[auto-expand] merged into ${matches.length} topic(s): ` +
+        matches.map(m => `${m.topic}[${m.shared.join(',')}]`).join('; ') + '\n',
       )
-      return
     }
 
-    // Step 3: CREATE — ask the LLM to propose a new topic.
+    // Step 3: identify keywords NOT covered by any merge → CREATE candidate.
+    const unmerged = newKeywords.filter(
+      (k) => !mergedKwSet.has(k.toLowerCase()),
+    )
+    if (unmerged.length === 0) return
+
     const proposed = await extractNewTopicFromKeywords(
-      [...newKeywords],
+      unmerged,
       deps.topics.map((t) => t.name),
       deps.client,
     )

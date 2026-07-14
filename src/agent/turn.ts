@@ -721,6 +721,7 @@ export async function* runTurn(
       history.push({ role: 'assistant', content: displayText })
       deps.messages.append({ sessionId, role: 'assistant', content: displayText })
     } else {
+      const strippedPrefix = stripToolCall(response, parsed).trim()
       yield {
         type: 'tool-call',
         name: parsed.name,
@@ -763,6 +764,10 @@ export async function* runTurn(
       if (followupParsed) {
         followupDisplay = stripToolCall(followup.content, followupParsed)
       }
+      // v1.1.0 — preserve stripped text from the 1st response
+      if (strippedPrefix) {
+        followupDisplay = `${strippedPrefix}\n\n${followupDisplay}`
+      }
       yield { type: 'student-text', text: `${followupDisplay}\n\n` }
       history.push({ role: 'assistant', content: followupDisplay })
       deps.messages.append({ sessionId, role: 'assistant', content: followupDisplay })
@@ -778,6 +783,7 @@ export async function* runTurn(
       history.push({ role: 'assistant', content: displayText })
       deps.messages.append({ sessionId, role: 'assistant', content: displayText })
     } else {
+      const strippedPrefix = stripToolCall(response, parsed).trim()
       yield {
         type: 'tool-call',
         name: parsed.name,
@@ -858,6 +864,9 @@ export async function* runTurn(
       if (followupParsed) {
         followupDisplay = stripToolCall(followup.content, followupParsed)
       }
+      if (strippedPrefix) {
+        followupDisplay = `${strippedPrefix}\n\n${followupDisplay}`
+      }
       yield { type: 'student-text', text: `${followupDisplay}\n\n` }
       history.push({ role: 'assistant', content: followupDisplay })
       deps.messages.append({ sessionId, role: 'assistant', content: followupDisplay })
@@ -872,6 +881,10 @@ export async function* runTurn(
       history.push({ role: 'assistant', content: displayText })
       deps.messages.append({ sessionId, role: 'assistant', content: displayText })
     } else {
+      // v1.1.0 — preserve stripped text from the 1st response (e.g. corrections
+      // or natural transition text that appears before the <tool> tag) so it
+      // isn't lost when the 2nd-call response replaces it.
+      const strippedPrefix = stripToolCall(response, parsed).trim()
       // v1.0.2 — enforce MIN_TOPIC_AGE so the LLM can't ping-pong between
       // topics every turn. counter tracks user turns since the last
       // successful topic_select (or session start). Explicit user request
@@ -967,6 +980,11 @@ export async function* runTurn(
       })()
       if (followupParsed) {
         followupDisplay = stripToolCall(followup.content, followupParsed)
+      }
+      // v1.1.0 — prepend the stripped text so corrections/natural transitions
+      // from the 1st response are visible alongside the 2nd-call response.
+      if (strippedPrefix) {
+        followupDisplay = `${strippedPrefix}\n\n${followupDisplay}`
       }
       yield { type: 'student-text', text: `${followupDisplay}\n\n` }
       history.push({ role: 'assistant', content: followupDisplay })

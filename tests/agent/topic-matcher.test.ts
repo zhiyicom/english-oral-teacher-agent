@@ -73,75 +73,92 @@ describe('jaccard (v0.6 L1)', () => {
   })
 })
 
-describe('matchTopic (v0.6 L1)', () => {
+describe('matchTopic (v1.1.0 §A §C — normalized + Top-N)', () => {
   it('minecraft fixture: 5 keywords all in minecraft topic → score 0.5 → match', () => {
     const result = matchTopic(
       ['minecraft', 'castle', 'creeper', 'wall', 'build'],
       [minecraft, school, sports],
     )
-    expect(result).not.toBeNull()
-    expect(result?.topic).toBe('minecraft')
-    // v0.9: score uses max(jaccard, countScore), 5 shared keywords = strong signal
-    expect(result?.jaccard).toBeGreaterThan(0.4)
-    expect(result?.shared.sort()).toEqual(['build', 'castle', 'creeper', 'minecraft', 'wall'])
+    expect(result.length).toBeGreaterThan(0)
+    expect(result[0]?.topic).toBe('minecraft')
+    expect(result[0]?.jaccard).toBeGreaterThan(0.4)
+    expect(result[0]?.shared.sort()).toEqual(['build', 'castle', 'creeper', 'minecraft', 'wall'])
   })
 
-  it('empty session keywords → null (not an error)', () => {
-    expect(matchTopic([], [minecraft, school])).toBeNull()
+  it('empty session keywords → empty array (not an error)', () => {
+    expect(matchTopic([], [minecraft, school])).toEqual([])
   })
 
-  it('unrelated keywords → null (no topic above threshold)', () => {
-    // 5 unrelated words, no intersection with any topic
+  it('unrelated keywords → empty array (no topic above threshold)', () => {
     expect(
       matchTopic(
         ['philosophy', 'gravity', 'quantum', 'entropy', 'algebra'],
         [minecraft, school, sports],
       ),
-    ).toBeNull()
+    ).toEqual([])
   })
 
   it('threshold 0.5 strict mode: only high-score topics match', () => {
-    // 1 keyword in school matches at threshold 0.5 with countScore
-    expect(matchTopic(['homework'], [minecraft, school, sports], 0.5)?.topic).toBe('school')
-    // 5 keywords in minecraft → strong match
+    expect(matchTopic(['homework'], [minecraft, school, sports], 0.5)[0]?.topic).toBe('school')
     expect(
       matchTopic(
         ['minecraft', 'castle', 'creeper', 'wall', 'build'],
         [minecraft, school, sports],
         0.5,
-      ),
-    ).not.toBeNull()
+      ).length,
+    ).toBeGreaterThan(0)
   })
 
-  it('tie-break: two topics with identical Jaccard → pick lexicographically smaller name', () => {
-    // Both topics have keyword "x". session=["x","a"]. jaccard with each = 1/2.
+  it('tie-break: two topics with identical Jaccard → sorted by score then lexicographically', () => {
     const a: Topic = { name: 'zebra', keywords: ['x', 'a'], description: null, createdAt: '' }
     const b: Topic = { name: 'apple', keywords: ['x', 'a'], description: null, createdAt: '' }
     const result = matchTopic(['x', 'a'], [a, b])
-    expect(result?.topic).toBe('apple')
+    expect(result[0]?.topic).toBe('apple')
   })
 
-  it('multiple topics: returns the best (highest jaccard) one', () => {
-    // session has 2 minecraft + 1 school. minecraft score = 2/11 = 0.18 (below 0.3 default)
-    // Hmm, that's below threshold. Use 5/10 minecraft:
+  it('Top-N: returns all matches above threshold, sorted by score desc', () => {
     const result = matchTopic(
-      ['minecraft', 'castle', 'creeper', 'wall', 'build'],
+      ['minecraft', 'castle', 'homework'],
       [minecraft, school, sports],
     )
-    expect(result?.topic).toBe('minecraft')
+    expect(result.length).toBe(2)
+    expect(result[0]?.topic).toBe('minecraft') // 2 shared > 1 shared
+    expect(result[1]?.topic).toBe('school')
   })
 
   it('lowercase normalization: keyword "MineCraft" still matches "minecraft" topic', () => {
-    // 5 case-mixed keywords matching 10 minecraft keywords → jaccard 0.5 (above 0.3)
     const result = matchTopic(['MineCraft', 'Castle', 'Creeper', 'Wall', 'Build'], [minecraft])
-    expect(result?.topic).toBe('minecraft')
+    expect(result[0]?.topic).toBe('minecraft')
+  })
+
+  it('§A space→underscore normalization: "delta force" matches topic with "delta_force"', () => {
+    const gamingTopic: Topic = {
+      name: 'gaming',
+      keywords: ['delta_force', 'shooter', 'game'],
+      description: null,
+      createdAt: '',
+    }
+    const result = matchTopic(['delta force', 'shooting games'], [gamingTopic])
+    expect(result.length).toBeGreaterThan(0)
+    expect(result[0]?.topic).toBe('gaming')
+  })
+
+  it('§A multi-word normalization: "summer vacation" matches "vacation" in travel topic', () => {
+    const travel: Topic = {
+      name: 'travel',
+      keywords: ['travel', 'vacation', 'trip'],
+      description: null,
+      createdAt: '',
+    }
+    const result = matchTopic(['summer vacation'], [travel])
+    expect(result.length).toBeGreaterThan(0)
+    expect(result[0]?.topic).toBe('travel')
   })
 
   it('threshold=0 case: any non-empty intersection matches', () => {
     const result = matchTopic(['homework'], [school], 0)
-    expect(result?.topic).toBe('school')
-    // v0.9: score uses countScore, 1 shared keyword = strong signal
-    expect(result?.jaccard).toBeGreaterThan(0)
+    expect(result[0]?.topic).toBe('school')
+    expect(result[0]?.jaccard).toBeGreaterThan(0)
   })
 
   it('threshold=1: must be exact set match', () => {
@@ -151,9 +168,7 @@ describe('matchTopic (v0.6 L1)', () => {
       description: null,
       createdAt: '',
     }
-    // exact match → 1.0 → above threshold
-    expect(matchTopic(['minecraft', 'castle'], [exactTopic], 1)).not.toBeNull()
-    // v0.9: single keyword with countScore = 1.0 also passes threshold=1
-    expect(matchTopic(['minecraft'], [exactTopic], 1)?.topic).toBe('exact')
+    expect(matchTopic(['minecraft', 'castle'], [exactTopic], 1).length).toBeGreaterThan(0)
+    expect(matchTopic(['minecraft'], [exactTopic], 1)[0]?.topic).toBe('exact')
   })
 })

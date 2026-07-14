@@ -7,16 +7,27 @@ export interface TopicMatch {
 }
 
 /**
+ * Normalize a keyword for matching: lowercase + replace spaces/special chars
+ * with underscores. Summarizer outputs natural-English phrases ("delta force",
+ * "harry potter") while topic library keywords use underscores ("delta_force",
+ * "harry_potter"). This bridge eliminates the format gap.
+ */
+function norm(s: string): string {
+  return s.toLowerCase().replace(/[\s\-]+/g, '_')
+}
+
+/**
  * Jaccard similarity between two keyword arrays.
  * - case-insensitive
+ * - spaces ↔ underscores normalized
  * - empty input → 0.0
  * - identical sets → 1.0
  * - disjoint sets → 0.0
  */
 export function jaccard(a: string[], b: string[]): number {
   if (a.length === 0 || b.length === 0) return 0
-  const setA = new Set(a.map((s) => s.toLowerCase()))
-  const setB = new Set(b.map((s) => s.toLowerCase()))
+  const setA = new Set(a.map(norm))
+  const setB = new Set(b.map(norm))
   let intersection = 0
   for (const x of setA) if (setB.has(x)) intersection++
   const union = setA.size + setB.size - intersection
@@ -24,32 +35,36 @@ export function jaccard(a: string[], b: string[]): number {
 }
 
 /**
- * Match a session's keywords against the topic library using Jaccard.
- * - empty session keywords → null
- * - no topic above threshold → null
- * - on tie (two topics same Jaccard), pick the lexicographically smaller name
- *   so the result is deterministic
+ * Match a session's keywords against the topic library.
+ *
+ * v1.1.0 §A — keywords are normalized before comparison (spaces → underscores,
+ * lowercased) so summarizer output ("delta force") matches topic-library
+ * keywords ("delta_force").
+ *
+ * v1.1.0 §C — returns ALL matches above threshold (sorted by score descending)
+ * instead of just the single best. Multi-topic sessions no longer get under-counted.
+ *
+ * @returns TopicMatch[] sorted by jaccard score descending. Empty array when
+ *   no keyword is shared or all scores are below threshold.
  */
 export function matchTopic(
   sessionKeywords: string[],
   topics: Topic[],
   threshold = 0.1,
-): TopicMatch | null {
-  if (sessionKeywords.length === 0) return null
-  const normSession = sessionKeywords.map((s) => s.toLowerCase())
-  let best: TopicMatch | null = null
+): TopicMatch[] {
+  if (sessionKeywords.length === 0) return []
+  const normSession = sessionKeywords.map(norm)
+  const results: TopicMatch[] = []
   for (const t of topics) {
-    const shared = t.keywords.filter((k) => normSession.includes(k.toLowerCase()))
+    const normTopicKw = t.keywords.map(norm)
+    const shared = t.keywords.filter((k) => normSession.includes(norm(k)))
     if (shared.length === 0) continue
-    // Two scoring axes: Jaccard similarity + simple keyword count.
-    // A single shared keyword is often meaningful (e.g. "football" → sports).
-    const jScore = jaccard(normSession, t.keywords)
+    const jScore = jaccard(normSession, normTopicKw)
     const countScore = shared.length / Math.max(sessionKeywords.length, 1)
     const score = Math.max(jScore, countScore)
     if (score < threshold) continue
-    if (best === null || score > best.jaccard || (score === best.jaccard && t.name < best.topic)) {
-      best = { topic: t.name, jaccard: score, shared }
-    }
+    results.push({ topic: t.name, jaccard: score, shared })
   }
-  return best
+  results.sort((a, b) => b.jaccard - a.jaccard)
+  return results
 }
