@@ -77,9 +77,19 @@ export async function summarize(messages: Message[], client: LLMClient): Promise
 
   const response = await client.chat({ system, messages: summaryRequest })
 
+  let body = response.content.trim()
+  // v1.1.0 hotfix — strip markdown code fence when present.
+  // The summarizer system prompt's example uses ```json...``` which
+  // teaches the LLM to wrap output; at LLM_TEMPERATURE=0.7 the LLM
+  // wraps ~70-80% of the time, occasionally stripping the fence on
+  // its own. Without this strip, JSON.parse sees the leading backtick
+  // and throws. See data/llm-debug/*summarize-failed.txt for prior cases.
+  const fenceMatch = body.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+  if (fenceMatch) body = fenceMatch[1]!.trim()
+
   let parsed: unknown
   try {
-    parsed = JSON.parse(response.content)
+    parsed = JSON.parse(body)
   } catch (err) {
     throw new Error(
       `summarizer LLM response is not valid JSON: ${(err as Error).message}\n` +

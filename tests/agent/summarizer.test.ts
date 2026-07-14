@@ -156,6 +156,38 @@ describe('summarize (end-to-end with stub client)', () => {
     expect(out.keywords).toEqual(['minecraft', 'castle', 'build'])
   })
 
+  // v1.1.0 hotfix — LLM (temperature=0.7) frequently wraps JSON in
+  // ```json...``` because the summarizer prompt's example uses that
+  // format. Strip the fence before parse so the user doesn't see a
+  // "(summarization failed)" placeholder. Regression coverage for
+  // data/llm-debug/2026-07-14T13-29-53-* + 33 prior failures.
+  it('strips ```json markdown fence before parsing (v1.1.0 hotfix)', async () => {
+    const inner = JSON.stringify({
+      summary: 'Student talked about cats and Minecraft for several turns.',
+      keywords: ['cat', 'minecraft', 'castle'],
+    })
+    const fenced = '```json\n' + inner + '\n```'
+    const out = await summarize(
+      [makeMessage('user', 'hi'), makeMessage('assistant', 'hello')],
+      makeStubClient(fenced),
+    )
+    expect(out.summary).toContain('cats')
+    expect(out.keywords).toEqual(['cat', 'minecraft', 'castle'])
+  })
+
+  it('strips ``` fence without json language tag (defensive)', async () => {
+    const inner = JSON.stringify({
+      summary: 'Student talked about pets and toys for the entire session.',
+      keywords: ['pet', 'toy', 'cat'],
+    })
+    const fenced = '```\n' + inner + '\n```'
+    const out = await summarize(
+      [makeMessage('user', 'hi'), makeMessage('assistant', 'hello')],
+      makeStubClient(fenced),
+    )
+    expect(out.keywords).toEqual(['pet', 'toy', 'cat'])
+  })
+
   it('passes the transcript + final instruction to the LLM (stub records what it received)', async () => {
     let received: Message[] = []
     const recordingClient: LLMClient = {
