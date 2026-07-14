@@ -4,7 +4,7 @@
 
 ### Windows installer (recommended)
 
-1. Download `EnglishOralTeacher-Setup-v1.0.9.exe` from [GitHub Releases](https://github.com/zhiyicom/english-oral-teacher-agent/releases)
+1. Download `EnglishOralTeacher-Setup-v1.1.0.exe` from [GitHub Releases](https://github.com/zhiyicom/english-oral-teacher-agent/releases)
 2. Double-click → follow the wizard → shortcuts created automatically
 3. Launch → browser opens → setup wizard appears
 
@@ -155,6 +155,14 @@ Access via the bottom-left navigation. All changes take effect immediately — n
 | Base URL | API endpoint URL. |
 | Model | Model name. |
 
+### Topic auto-expand
+
+| Setting | Values | Default |
+|---------|--------|---------|
+| Auto-expand topic library | toggle | Off |
+
+When enabled, after each session the system checks whether the conversation covered new topics or keywords not in the library. If so, it either merges them into existing topics or creates new topic entries. Recommended for students who frequently discuss niche interests.
+
 ### Form behavior
 
 - **Save**: writes to AppData and updates the running LLM client immediately
@@ -163,7 +171,7 @@ Access via the bottom-left navigation. All changes take effect immediately — n
 
 ## 6. Topic Library
 
-Access via the bottom-left navigation. 30 default topics across three levels (A1-A2, B1, B2).
+Access via the bottom-left navigation. 34 default topics across three levels (A1-A2, B1, B2).
 
 ### Topic list
 

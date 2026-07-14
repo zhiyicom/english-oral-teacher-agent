@@ -259,5 +259,9 @@ Key dependencies kept external from esbuild: `better-sqlite3`, `onnxruntime-node
 4. **Write-on-selection topic tracking** — topic statistics recorded at selection time (not from summary keywords), ensuring accurate dedup signals.
 5. **ESM → CJS bundle for pkg** — `@yao-pkg/pkg` cannot resolve ESM exports. esbuild `--bundle` inlines everything into a single CJS file. Patch script handles the remaining incompatibilities.
 6. **AppData/.env as single source of truth** — Web UI writes here; `loadEnv()` reads from here. No need for a .env in the install directory.
-7. **No RUN_LIVE_LLM toggle** — system always runs in live mode. Testing uses `LLM_TEST_FAIL` env var for injecting failures.
-8. **Anthropic ephemeral caching** — last 2 messages marked with `cache_control` to reduce token costs on multi-turn conversations.
+7. **No RUN_LIVE_LLM toggle** — system always runs in live mode. Web UI settings take effect immediately via `setEnvVar` + `selectClient` recreation.
+8. **Anthropic ephemeral caching** — last 2 messages marked with `cache_control`.
+9. **A+B hybrid protocol** — `topic_select`, `memory_search`, `summarize_history` trigger a 2nd LLM call. v1.1.0 preserves the stripped text from the 1st response.
+10. **Topic keyword normalization** — spaces ↔ underscores in `matchTopic` to bridge summarizer output and topic library format.
+11. **Write-on-selection + fallback merge** — ledger topics and `matchTopic` Top-N results are merged (dedup) at session end for comprehensive topic tracking.
+12. **Auto-expand topic library** — opt-in pipeline that merges new keywords into existing topics or creates new ones via LLM at session end.

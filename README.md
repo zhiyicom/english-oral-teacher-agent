@@ -8,14 +8,15 @@ A local AI agent for English oral practice. Runs entirely on your PC — one-cli
 - **Two LLM protocols** — supports Anthropic-compatible (MiniMax, etc.) and OpenAI-compatible (DeepSeek, OpenAI, OpenRouter, etc.) APIs
 - **Voice I/O** — speech recognition (STT) and text-to-speech (TTS) via browser Web Speech APIs
 - **Four-phase session** — Warm Up → Main Activity → Wrap Up → End, with automatic state transitions and timers
-- **30-topic default library** — A1 through B2 levels, editable via Web UI with per-keyword hit statistics
-- **Topic dedup** — automatic 30-day hard exclusion and discussion-count-based soft preference to keep conversations fresh
-- **Long-term memory** — session summaries, 384-dim embeddings (MiniLM-L6-v2), cosine-similarity retrieval across sessions
-- **Mistake collection** — grammar/vocab/word-choice errors auto-tagged by the AI teacher, reviewable in history
-- **Student profile** — YAML-based profile with level, goals, interests; auto-extracted and updated each session
-- **Web UI** — React 19 + Vite 6, sidebar layout with session list, history viewer, settings, and topic editor
-- **Debug logging** — opt-in per-turn LLM request logging for troubleshooting
-- **Setup wizard** — first-launch guided configuration for API key and student profile
+- **34-topic default library** — A1 through B2 levels, editable via Web UI with per-keyword hit statistics
+- **Topic dedup** — 30-day hard exclusion + discussion-count soft preference + keyword-freshness bias
+- **Auto-expand** — opt-in automatic topic library growth (merge new keywords to existing topics or create new ones)
+- **Long-term memory** — session summaries, 384-dim embeddings (MiniLM-L6-v2), cosine-similarity retrieval
+- **Mistake collection** — grammar/vocab/word-choice errors auto-tagged by the AI teacher
+- **Student profile** — auto-extracted and updated each session
+- **Web UI** — React 19 + Vite 6, sidebar layout, settings take effect immediately without restart
+- **Debug logging** — opt-in per-turn LLM request logging
+- **Setup wizard** — first-launch guided configuration for API key, LLM provider, and student profile
 
 ## Quick Start
 
