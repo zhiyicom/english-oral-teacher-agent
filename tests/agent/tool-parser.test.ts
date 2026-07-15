@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { parseToolCall, stripToolCall } from '../../src/agent/tool-parser.js'
+import {
+  parseBracketToolCall,
+  parseToolCall,
+  stripBracketToolCall,
+  stripEchoedPhasePrefix,
+  stripToolCall,
+} from '../../src/agent/tool-parser.js'
 
 describe('parseToolCall (v0.7 L1)', () => {
   it('parses a well-formed call and returns name/args/rawMatch', () => {
@@ -92,5 +98,115 @@ describe('stripToolCall (v0.7 L1)', () => {
     const parsed = parseToolCall(text)
     if (!parsed) throw new Error('expected parse')
     expect(stripToolCall(text, parsed)).toBe('Hello')
+  })
+})
+
+describe('parseBracketToolCall (v1.1.1 P0-#2)', () => {
+  it('B1: parses a complete bracket-form tool call', () => {
+    const text =
+      '[Tool call: topic_select]\n{"phase":"MAIN_ACTIVITY","exclude_recent_days":30}'
+    const parsed = parseBracketToolCall(text)
+    expect(parsed).not.toBeNull()
+    expect(parsed?.name).toBe('topic_select')
+    expect(parsed?.args).toEqual({
+      phase: 'MAIN_ACTIVITY',
+      exclude_recent_days: 30,
+    })
+    expect(parsed?.rawMatch).toContain('[Tool call:')
+  })
+
+  it('B2: returns null when bracket form has no JSON body', () => {
+    expect(parseBracketToolCall('[Tool call: topic_select]')).toBeNull()
+  })
+
+  it('B3: returns null (does not throw) when JSON body is malformed', () => {
+    // LLM forgot the closing brace — must NOT throw, just return null so
+    // the caller's defensive strip can still take over.
+    expect(parseBracketToolCall('[Tool call: topic_select]\n{garbage')).toBeNull()
+    expect(parseBracketToolCall('[Tool call: name]\n{"k": "v"')).toBeNull()
+  })
+
+  it('B4: stripBracketToolCall removes bracket prefix + JSON body', () => {
+    const text =
+      '[Tool call: topic_select]\n{"phase":"MAIN_ACTIVITY","exclude_recent_days":30}\n后续文本'
+    expect(stripBracketToolCall(text)).toBe('后续文本')
+  })
+
+  it('B5: stripBracketToolCall returns the input unchanged when no bracket prefix', () => {
+    expect(stripBracketToolCall('Hey Jeremy')).toBe('Hey Jeremy')
+    expect(stripBracketToolCall('Just a normal teacher reply')).toBe('Just a normal teacher reply')
+  })
+
+  it('B6: <tool> form is still preferred — existing tests do not regress', () => {
+    // The primary parser must still take precedence when both forms appear
+    // (even though our LLM never emits both, the original 8 parseToolCall
+    // tests above already lock this in).
+    const text =
+      '<tool>mark_mistake({"original":"a","corrected":"b","category":"grammar"})</tool>'
+    const parsed = parseToolCall(text)
+    expect(parsed?.name).toBe('mark_mistake')
+    expect(parseBracketToolCall(text)).toBeNull()
+  })
+
+  it('B7: bracket in the middle of text does not match (^...$ anchor)', () => {
+    expect(parseBracketToolCall('Hey [Tool call: name] how are you?')).toBeNull()
+    expect(stripBracketToolCall('Hey [Tool call: name] how are you?')).toBe(
+      'Hey [Tool call: name] how are you?',
+    )
+  })
+
+  it('B8: name with non-word characters (e.g. hyphen) does not match', () => {
+    expect(parseBracketToolCall('[Tool call: my-tool]\n{"x":1}')).toBeNull()
+    expect(parseBracketToolCall('[Tool call: foo.bar]\n{"x":1}')).toBeNull()
+  })
+
+  it('stripBracketToolCall also strips when JSON body is malformed', () => {
+    // Defensive path: even when parseBracketToolCall returns null, the
+    // strip should still remove the prefix so the UI never sees it.
+    const text = '[Tool call: topic_select]\n{garbage not json}\nHey Jeremy'
+    expect(stripBracketToolCall(text)).toBe('Hey Jeremy')
+  })
+})
+
+describe('stripEchoedPhasePrefix (v1.1.1 P0-#4)', () => {
+  it('P1: strips a single-line "[Phase: ...]" prefix', () => {
+    const r = stripEchoedPhasePrefix(
+      '[Phase: MAIN_ACTIVITY — CALL `topic_select` TOOL to pick next topic] Hey Jeremy',
+    )
+    expect(r.stripped).toBe(true)
+    expect(r.cleaned).toBe('Hey Jeremy')
+  })
+
+  it('P2: returns the input unchanged when no prefix is present', () => {
+    const r = stripEchoedPhasePrefix('Hey Jeremy')
+    expect(r.stripped).toBe(false)
+    expect(r.cleaned).toBe('Hey Jeremy')
+  })
+
+  it('P3: strips multi-line prefix (matches the observed MAIN_ACTIVITY ---] form)', () => {
+    // Mirrors the 7/15 rawHead:
+    //   "[Phase: MAIN_ACTIVITY — ... 25 min\n\n---] I talked to you last time."
+    const r = stripEchoedPhasePrefix(
+      '[Phase: MAIN_ACTIVITY — CALL `topic_select` TOOL to pick next topic (NEVER pick from `# STUDENT` interests directly) — teach vocab, student talks 70%, NEVER end before 25 min\n\n---] I talked to you last time.',
+    )
+    expect(r.stripped).toBe(true)
+    expect(r.cleaned).toBe('I talked to you last time.')
+  })
+
+  it('P3b: strips the observed END-phase prefix', () => {
+    const r = stripEchoedPhasePrefix(
+      '[Phase: END — Time remaining: 0.0 min — NO more questions. End the session now.]\n\nBye Jeremy, see you next time!',
+    )
+    expect(r.stripped).toBe(true)
+    expect(r.cleaned).toBe('Bye Jeremy, see you next time!')
+  })
+
+  it('P4: does not strip a mid-sentence "[Phase: x]" (^ anchor)', () => {
+    // Defends against false positives where a teacher reply uses the
+    // literal word "phase" mid-sentence.
+    const text = 'I noticed we changed phase. Want to keep going?'
+    const r = stripEchoedPhasePrefix(text)
+    expect(r.stripped).toBe(false)
+    expect(r.cleaned).toBe(text)
   })
 })

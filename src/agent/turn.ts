@@ -58,7 +58,10 @@ import {
   buildFinalSystemSegments,
   estimateMessagesTokens,
   estimateTokens,
+  parseBracketToolCall,
   parseToolCall,
+  stripBracketToolCall,
+  stripEchoedPhasePrefix,
   stripToolCall,
   summarize,
   truncateHistory,
@@ -631,6 +634,18 @@ export async function* runTurn(
     }
   }
 
+  // v1.1.1 P0-#4 — strip any echoed "[Phase: ...]" prefix BEFORE the
+  // diagnostic log captures rawHead (so the log shows the post-strip
+  // value, matching what we actually send to the student) and BEFORE
+  // parseToolCall (so the stripper-deleted prefix doesn't trip the
+  // <tool> regex). The LLM occasionally paraphrases the [System Context]
+  // block as "[Phase: PHASE — reminder]" and we'd otherwise leak the
+  // metadata into the student UI.
+  const rawEchoesPhasePrefix = /^\[Phase:/.test(response.trim())
+  const phasePrefixStrip = stripEchoedPhasePrefix(response)
+  const phasePrefixStripped = phasePrefixStrip.stripped
+  if (phasePrefixStripped) response = phasePrefixStrip.cleaned
+
   // v1.0.1 diagnostic — record what the 1st-call LLM actually produced,
   // before any tool parsing / stripping. Used to track down "no reply"
   // cases where the Web UI shows nothing.
@@ -639,7 +654,8 @@ export async function* runTurn(
     rawLen: response.length,
     rawHead: response.slice(0, 300),
     rawTail: response.length > 400 ? response.slice(-100) : '',
-    rawEchoesPhasePrefix: /^\[Phase:/.test(response.trim()),
+    rawEchoesPhasePrefix,
+    phasePrefixStripped,
   })
 
   // ---------- 4. Post-LLM: usage + 80% warn ----------
@@ -673,6 +689,22 @@ export async function* runTurn(
   let endedReason: 'user_exit' | 'user_stop' | 'phase_end' | 'llm_error' | null = null
   if (isTimeEnd) endedReason = 'phase_end'
   else if (isStop) endedReason = 'user_stop'
+
+  if (!parsed) {
+    // v1.1.1 P0-#2 — bracket-form fallback: when LLM forgets <tool>...</tool>
+    // and emits "[Tool call: name]\n{json}" instead, still try to parse it
+    // as a real tool call. If parse succeeds, fall through to the
+    // tool-specific branches below (don't `else` here — we want the chain
+    // to continue). If parse fails (incl. malformed JSON), strip the
+    // bracket syntax defensively so the student never sees the raw
+    // "[Tool call: ...]" leak in their UI.
+    const bracketParsed = parseBracketToolCall(response)
+    if (bracketParsed) {
+      parsed = bracketParsed
+    } else {
+      response = stripBracketToolCall(response)
+    }
+  }
 
   if (!parsed) {
     // No tool: stdout the LLM text as-is.
@@ -956,39 +988,59 @@ export async function* runTurn(
           }
         }
       }
-      history.push({ role: 'assistant', content: response })
-      const resultText = formatToolResult(parsed.name, result)
-      history.push({ role: 'user', content: resultText })
-      const followup = await deps.client.chat({ systemBlocks, messages: history })
-      logTurnDiagnostic(sessionId, phaseHistory.length, nextState.phase, {
-        ev: 'tool_2nd_call_done',
-        toolName: parsed.name,
-        followupLen: followup.content.length,
-        followupHead: followup.content.slice(0, 200),
-        followupEchoesPhasePrefix: /^\[Phase:/.test(followup.content.trim()),
-        blocked,
-      })
-      const errOrSlug = 'error' in result ? 'error' : `slug=${result.slug}`
-      yield { type: 'tool-2nd-call', name: parsed.name, argSummary: errOrSlug }
-      let followupDisplay = followup.content
-      const followupParsed = (() => {
-        try {
-          return parseToolCall(followup.content)
-        } catch {
-          return null
+
+      // v1.1.1 P1-#5/#6 — when blocked, short-circuit the 2nd LLM call to
+      // avoid both (a) duplicated followup text (strippedPrefix + 2nd-call
+      // followup both get pushed into history) and (b) the "复读机" effect
+      // where the 2nd-call LLM tends to repeat the previous turn's wording.
+      // Use the 1st response's strippedPrefix directly; if the LLM only
+      // emitted the tool call (no followup), use a deterministic one-liner.
+      if (blocked) {
+        displayText = strippedPrefix || "Let's keep going with this — tell me more."
+        yield { type: 'student-text', text: `${displayText}\n\n` }
+        history.push({ role: 'assistant', content: displayText })
+        deps.messages.append({ sessionId, role: 'assistant', content: displayText })
+        yield {
+          type: 'tool-2nd-call',
+          name: parsed.name,
+          argSummary: 'blocked (short-circuit)',
         }
-      })()
-      if (followupParsed) {
-        followupDisplay = stripToolCall(followup.content, followupParsed)
+        // Skip the normal 2nd-call path below.
+      } else {
+        history.push({ role: 'assistant', content: response })
+        const resultText = formatToolResult(parsed.name, result)
+        history.push({ role: 'user', content: resultText })
+        const followup = await deps.client.chat({ systemBlocks, messages: history })
+        logTurnDiagnostic(sessionId, phaseHistory.length, nextState.phase, {
+          ev: 'tool_2nd_call_done',
+          toolName: parsed.name,
+          followupLen: followup.content.length,
+          followupHead: followup.content.slice(0, 200),
+          followupEchoesPhasePrefix: /^\[Phase:/.test(followup.content.trim()),
+          blocked,
+        })
+        const errOrSlug = 'error' in result ? 'error' : `slug=${result.slug}`
+        yield { type: 'tool-2nd-call', name: parsed.name, argSummary: errOrSlug }
+        let followupDisplay = followup.content
+        const followupParsed = (() => {
+          try {
+            return parseToolCall(followup.content)
+          } catch {
+            return null
+          }
+        })()
+        if (followupParsed) {
+          followupDisplay = stripToolCall(followup.content, followupParsed)
+        }
+        // v1.1.0 — prepend the stripped text so corrections/natural transitions
+        // from the 1st response are visible alongside the 2nd-call response.
+        if (strippedPrefix) {
+          followupDisplay = `${strippedPrefix}\n\n${followupDisplay}`
+        }
+        yield { type: 'student-text', text: `${followupDisplay}\n\n` }
+        history.push({ role: 'assistant', content: followupDisplay })
+        deps.messages.append({ sessionId, role: 'assistant', content: followupDisplay })
       }
-      // v1.1.0 — prepend the stripped text so corrections/natural transitions
-      // from the 1st response are visible alongside the 2nd-call response.
-      if (strippedPrefix) {
-        followupDisplay = `${strippedPrefix}\n\n${followupDisplay}`
-      }
-      yield { type: 'student-text', text: `${followupDisplay}\n\n` }
-      history.push({ role: 'assistant', content: followupDisplay })
-      deps.messages.append({ sessionId, role: 'assistant', content: followupDisplay })
     }
   } else {
     displayText = stripToolCall(response, parsed)

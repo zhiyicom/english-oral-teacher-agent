@@ -12,10 +12,11 @@ import {
   runTurn,
 } from '../../src/agent/index.js'
 import { createToolRegistry } from '../../src/agent/tool-registry.js'
+import { createTopicSelectTool } from '../../src/agent/tools/topic-select.js'
 import type { TurnEvent, TurnInput, TurnOutput } from '../../src/agent/turn.js'
 import { createReplayProvider } from '../../src/llm/testing.js'
 import type { LLMClient } from '../../src/llm/types.js'
-import type { ChatOpts } from '../../src/llm/types.js'
+import type { ChatChunk, ChatOpts, ChatResult } from '../../src/llm/types.js'
 import type { RelevantSession } from '../../src/memory/index.js'
 import { type SystemPrompt, loadSystemPrompt } from '../../src/prompts/loader.js'
 import { applyMigrations, openDb } from '../../src/storage/db.js'
@@ -320,6 +321,167 @@ describe('runTurn (v1.0.4 §1.2 — Last session Messages[0] keyword alignment)'
     expect(hintContent).toContain('Last session (1 days ago):')
     for (const kw of sixKeywords) {
       expect(hintContent).toContain(kw)
+    }
+  })
+})
+
+describe('runTurn (v1.1.1 P1-#5/#6 — blocked topic_select short-circuit)', () => {
+  let harness: Harness
+  let sessionId: string
+
+  // A scripted LLM: chatStream emits `firstResponse` (1st call), chat()
+  // records how many times the 2nd call fires and returns `followup`.
+  function makeScriptedClient(opts: { firstResponse: string; followup?: string }): {
+    client: LLMClient
+    chatCalls: () => number
+  } {
+    let chatCallCount = 0
+    const client: LLMClient = {
+      async *chatStream(_o: ChatOpts): AsyncIterable<ChatChunk> {
+        yield { type: 'text', delta: opts.firstResponse }
+        yield {
+          type: 'usage',
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        }
+      },
+      async chat(_o: ChatOpts): Promise<ChatResult> {
+        chatCallCount += 1
+        return { content: opts.followup ?? '2nd-call followup.' }
+      },
+    }
+    return { client, chatCalls: () => chatCallCount }
+  }
+
+  // Register a real topic_select tool so `deps.toolRegistry.get('topic_select')`
+  // resolves (an empty registry would route to the tool-unknown branch and
+  // never reach the blocked short-circuit). rng=0.5 keeps selection
+  // deterministic; a single topic guarantees a winner for the non-blocked
+  // regression path.
+  function registerTopicSelect(h: Harness): void {
+    h.toolRegistry.register(
+      createTopicSelectTool({
+        topics: [{ name: 'friends', keywords: ['friends'], description: null, createdAt: '' }],
+        stats: [],
+        interests: [],
+        rng: () => 0.5,
+      }),
+    )
+  }
+
+  async function drain(iter: AsyncGenerator<TurnEvent, TurnOutput>): Promise<{
+    events: TurnEvent[]
+    output: TurnOutput | undefined
+  }> {
+    const events: TurnEvent[] = []
+    let output: TurnOutput | undefined
+    while (true) {
+      const next = await iter.next()
+      if (next.done) {
+        output = next.value
+        break
+      }
+      events.push(next.value)
+    }
+    return { events, output }
+  }
+
+  beforeEach(() => {
+    harness = makeHarness()
+    registerTopicSelect(harness)
+    const session = harness.sessions.create()
+    sessionId = session.id
+  })
+
+  afterEach(() => {
+    harness.db.close()
+    rmSync(harness.dataDir, { recursive: true, force: true })
+  })
+
+  it('T1: blocked + non-empty strippedPrefix → uses prefix, no 2nd LLM call', async () => {
+    // Fresh session → topicTurnCount=0 < minAge(5) and userInput is not an
+    // explicit switch → blocked. The 1st response carries a followup after
+    // the tool call; the short-circuit must surface that prefix verbatim.
+    const { client, chatCalls } = makeScriptedClient({
+      firstResponse:
+        '<tool>topic_select({"phase":"MAIN_ACTIVITY","exclude_recent_days":30})</tool>\nNice, playing with friends sounds fun!',
+    })
+    const input = makeTurnInput({
+      harness,
+      sessionId,
+      userInput: 'we played tag at recess',
+      isFirstTurn: false,
+    })
+    const deps = { ...makeTurnDeps(harness), client }
+    const { events } = await drain(runTurn(input, deps))
+
+    const studentTexts = events.filter((e) => e.type === 'student-text')
+    expect(studentTexts).toHaveLength(1)
+    if (studentTexts[0]?.type === 'student-text') {
+      expect(studentTexts[0].text).toBe('Nice, playing with friends sounds fun!\n\n')
+    }
+    // No 2nd LLM call fired.
+    expect(chatCalls()).toBe(0)
+    // Only one assistant message in history (user + assistant = 2 total).
+    const assistants = input.history.filter((m) => m.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    expect(assistants[0]?.content).toBe('Nice, playing with friends sounds fun!')
+  })
+
+  it('T2: blocked + empty strippedPrefix → deterministic fallback, no 2nd LLM call', async () => {
+    // 1st response is ONLY the tool call (no followup text). The
+    // short-circuit must emit the deterministic one-liner instead of
+    // asking the LLM again.
+    const { client, chatCalls } = makeScriptedClient({
+      firstResponse:
+        '<tool>topic_select({"phase":"MAIN_ACTIVITY","exclude_recent_days":30})</tool>',
+    })
+    const input = makeTurnInput({
+      harness,
+      sessionId,
+      userInput: 'yeah',
+      isFirstTurn: false,
+    })
+    const deps = { ...makeTurnDeps(harness), client }
+    const { events } = await drain(runTurn(input, deps))
+
+    const studentTexts = events.filter((e) => e.type === 'student-text')
+    expect(studentTexts).toHaveLength(1)
+    if (studentTexts[0]?.type === 'student-text') {
+      expect(studentTexts[0].text).toBe("Let's keep going with this — tell me more.\n\n")
+    }
+    expect(chatCalls()).toBe(0)
+  })
+
+  it('T3: not blocked (explicit switch) → 2nd LLM call runs (regression)', async () => {
+    // Explicit "switch topic" bypasses the MIN_TOPIC_AGE gate, so the tool
+    // executes and the normal A+B 2nd-call path runs — preserving v1.1.0
+    // behavior (strippedPrefix prepended to the 2nd-call followup).
+    const { client, chatCalls } = makeScriptedClient({
+      firstResponse:
+        '<tool>topic_select({"phase":"MAIN_ACTIVITY","exclude_recent_days":30})</tool>\nGreat, let me pick something new.',
+      followup: 'So, tell me about your friends!',
+    })
+    const input = makeTurnInput({
+      harness,
+      sessionId,
+      userInput: "let's switch topic",
+      isFirstTurn: false,
+    })
+    const deps = { ...makeTurnDeps(harness), client }
+    const { events } = await drain(runTurn(input, deps))
+
+    // 2nd LLM call fired exactly once.
+    expect(chatCalls()).toBe(1)
+    const studentTexts = events.filter((e) => e.type === 'student-text')
+    expect(studentTexts).toHaveLength(1)
+    if (studentTexts[0]?.type === 'student-text') {
+      // v1.1.0: strippedPrefix prepended before the 2nd-call followup.
+      expect(studentTexts[0].text).toBe(
+        'Great, let me pick something new.\n\nSo, tell me about your friends!\n\n',
+      )
     }
   })
 })
