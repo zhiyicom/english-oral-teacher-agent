@@ -1022,11 +1022,24 @@ export function createApp(opts: {
   // ---- SPA fallback (v1.0.5.1 §1.1) ----
   // Always-on (no existsSync gate). After `pnpm build`, the postbuild step
   // copies web/dist/* to dist/web/ so distDir = __dirname/web resolves
-  // correctly. Dev mode uses `pnpm dev-web` (Vite on 5173) and does not
-  // hit this code path. `opts.webDistDir` lets tests inject a fixture.
+  // correctly. `opts.webDistDir` lets tests inject a fixture.
   const distDir = opts.webDistDir ?? resolve(process.cwd(), 'dist', 'web')
   const distIndex = join(distDir, 'index.html')
+
+  // v1.1.2 dev-mode redirect — in dev mode (NODE_ENV=development), all
+  // non-/api HTTP requests redirect to Vite's dev server on 5173 so the
+  // user always sees live source. Without this, the static dist/web/
+  // bundle (last build) is served on 3000 and silently diverges from
+  // web/src/. Triggered automatically by `pnpm dev-web` which sets
+  // NODE_ENV=development on the serve side. In production (NODE_ENV
+  // unset or anything else), the original static-serve behavior is used.
+  const isDevMode = process.env.NODE_ENV === 'development'
+  const VITE_DEV_URL = 'http://localhost:5173'
+
   app.get('/assets/*', (c) => {
+    if (isDevMode) {
+      return c.redirect(`${VITE_DEV_URL}${c.req.path}`)
+    }
     const filePath = resolve(distDir, c.req.path.slice(1))
     if (!filePath.startsWith(distDir)) return c.notFound()
     if (!existsSync(filePath)) return c.notFound()
@@ -1046,6 +1059,9 @@ export function createApp(opts: {
 
   app.get('/*', (c) => {
     if (c.req.path.startsWith('/api')) return c.notFound()
+    if (isDevMode) {
+      return c.redirect(`${VITE_DEV_URL}${c.req.path}`)
+    }
     if (!existsSync(distIndex)) return c.text('SPA not built. Run `pnpm build` first.', 500)
     return c.html(readFileSync(distIndex, 'utf-8'))
   })
