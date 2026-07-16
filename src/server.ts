@@ -136,6 +136,13 @@ interface SessionRuntime {
   // `description` so turn.ts can run `isTurnOnTopic` without re-reading
   // the topics table, and recorder gates writes on the adoption threshold.
   adoptedTopics: Map<string, AdoptedTopic>
+  // v1.1.2 P1-A — session-level block counter (ref object so the
+  // in-turn increment inside runTurn propagates back here across
+  // turns; a primitive would copy-by-value and tier escalation would
+  // never progress past tier 1). In-memory only; server restart
+  // resets to 0 (acceptable, matches the v0.7.5 dedup-on-restart
+  // pattern).
+  blockedCountRef: { value: number }
 }
 
 function reconstructSessionState(
@@ -182,6 +189,10 @@ function reconstructSessionState(
     isFirstTurn: phaseHistory.length <= 1,
     markedOriginals: new Set(),
     adoptedTopics: new Map(),
+    // v1.1.2 P1-A — fresh ref object per session/reconstruct so the
+    // tier counter always starts at 0 for a brand-new session and
+    // resets on server restart.
+    blockedCountRef: { value: 0 },
   }
 }
 
@@ -482,6 +493,17 @@ export function createApp(opts: {
         messages,
         topicStats,
         markedOriginals: rt.markedOriginals,
+        // v1.1.2 P1-A/P2-A — full library snapshot (Topic[]) for the
+        // topic layer of pickFreshHints, plus keyword_hits snapshot
+        // (KeywordHit[]) for the keyword layer. Read at session start
+        // (reconstructSessionState is the per-request entry point, so
+        // a fresh server start sees the latest writes; within a single
+        // session the tables don't mutate mid-loop).
+        topics: topics.list(),
+        keywordHits: keywordHits.getAll(),
+        // v1.1.2 P1-A — ref object lives on SessionRuntime so the
+        // in-turn tier counter increment survives across turns.
+        blockedCountRef: rt.blockedCountRef,
       }
 
       return streamSSE(c, async (stream) => {
@@ -497,6 +519,12 @@ export function createApp(opts: {
               isFirstTurn: output.isFirstTurn,
               markedOriginals: rt.markedOriginals,
               adoptedTopics: rt.adoptedTopics,
+              // v1.1.2 P1-A — preserve the ref object across turns so
+              // the tier counter keeps advancing. Same pattern as
+              // markedOriginals / adoptedTopics above (rt.* is the
+              // pre-turn value, output.* would lose the increment
+              // because runTurn doesn't return blockedCountRef).
+              blockedCountRef: rt.blockedCountRef,
             })
             await stream.writeSSE({
               event: 'done',

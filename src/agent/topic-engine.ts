@@ -203,3 +203,66 @@ export function selectTopic(opts: {
   scored.sort((a, b) => b.score - a.score)
   return scored[0]?.topic ?? null
 }
+
+/**
+ * v1.1.2 §1.3 — return fresh hints from BOTH layers:
+ *   - topics: top `topicLimit` fresh topics by `filterHardExclude` + `sortByCountAsc`
+ *   - keywords: top `keywordLimit` keywords with `hit_count === 0` from
+ *     `keyword_hits`, ordered by parent-discussion-count ASC, then
+ *     topic ASC, then keyword ASC (deterministic)
+ *
+ * User correction: hints must surface fresh ANGLES (keywords), not just
+ * fresh topics. 7/16 session showed `keyword_hits` only has 33 entries
+ * (hit_count=1:30 / =2:3 / =0:0); combined with 8 fresh topics whose
+ * keywords are also all unhit, this gives ~673 fresh keywords to anchor
+ * the LLM the next time it improvises.
+ *
+ * Used by `turn.ts`'s blocked-branch hint injection. Pure: no I/O, no DB.
+ *
+ * Returns `{topics: [], keywords: []}` when both layers are exhausted —
+ * the caller (turn.ts) skips hint injection in that case. Partial results
+ * (e.g. topics empty, keywords populated) are valid — each layer is
+ * independent.
+ */
+export function pickFreshHints(opts: {
+  topics: Topic[]
+  stats: TopicStat[]
+  keywordStats: KeywordHit[]
+  excludeDays?: number
+  topicLimit?: number
+  keywordLimit?: number
+  now?: Date
+}): { topics: Topic[]; keywords: string[] } {
+  const excludeDays = opts.excludeDays ?? 30
+  const now = opts.now ?? new Date()
+  const topicLimit = opts.topicLimit ?? 3
+  const keywordLimit = opts.keywordLimit ?? 5
+
+  // Topic layer: same pool as selectTopic (D1 hard-exclude + D2 count bias).
+  let pool = filterHardExclude(opts.topics, opts.stats, excludeDays, now)
+  pool = sortByCountAsc(pool, opts.stats)
+  const freshTopics = pool.slice(0, topicLimit)
+
+  // Keyword layer: only keywords whose hit_count === 0 in keyword_hits.
+  // Tie-broken by parent topic discussion_count (asc), then topic,
+  // then keyword — three-level deterministic sort so the hint is stable
+  // across runs (and tests can assert exact order).
+  const zeroHitKw = opts.keywordStats
+    .filter((h) => h.hitCount === 0)
+    .map((h) => ({
+      topic: h.topic,
+      keyword: h.keyword,
+      parentCount:
+        opts.stats.find((s) => s.topic === h.topic)?.discussionCount ?? 0,
+    }))
+
+  zeroHitKw.sort((a, b) => {
+    if (a.parentCount !== b.parentCount) return a.parentCount - b.parentCount
+    if (a.topic !== b.topic) return a.topic.localeCompare(b.topic)
+    return a.keyword.localeCompare(b.keyword)
+  })
+
+  const freshKeywords = zeroHitKw.slice(0, keywordLimit).map((h) => h.keyword)
+
+  return { topics: freshTopics, keywords: freshKeywords }
+}

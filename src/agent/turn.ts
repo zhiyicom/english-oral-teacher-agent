@@ -62,13 +62,15 @@ import {
   parseToolCall,
   stripBracketToolCall,
   stripEchoedPhasePrefix,
+  stripEchoedSystemNote,
   stripToolCall,
   summarize,
   truncateHistory,
 } from './index.js'
-import { isTurnOnTopic } from './topic-engine.js'
+import { isTurnOnTopic, pickFreshHints } from './topic-engine.js'
+import { pickBlockedFallback } from './blocked-fallback.js'
 import type { AdoptedTopic } from './topic-recorder.js'
-import type { Topic } from '../storage/topics.js'
+import type { KeywordHit, Topic } from '../storage/topics.js'
 import type { ToolRegistry } from './tool-registry.js'
 
 // ---------- v0.4 strict whole-sentence stop regex ----------
@@ -198,6 +200,26 @@ export interface TurnDeps {
   messages: MessagesDao
   topicStats: TopicStatsDao
   markedOriginals: Set<string>
+  // v1.1.2 — full library of topics (Topic[]), read on demand for
+  // pickFreshHints (topic layer's filterHardExclude + sortByCountAsc).
+  // Required for tier ≥ 2 fresh-hint injection in the blocked branch.
+  // Optional for callers that don't enable the hint (e.g. tests can
+  // pass an empty array and stay on the v1.1.1 tier-1 path).
+  topics?: Topic[]
+  // v1.1.2 — keyword_hits snapshot for pickFreshHints (keyword layer's
+  // hit_count === 0 filter). Same lifetime as TurnDeps: passed in once by
+  // the caller (CLI / server / test harness). Optional; missing means
+  // keyword layer of fresh hints is empty (tier 2 falls back to no hint).
+  keywordHits?: KeywordHit[]
+  // v1.1.2 — session-level block counter (ref object so the increment
+  // inside runTurn propagates back to the caller across turns; a bare
+  // `number` would copy-by-value and tier escalation would never
+  // progress). Mutated in place by runTurn when the topic_select
+  // blocked branch fires. Initialized to {value: 0} by the caller;
+  // survives within a single session, NOT persisted across sessions
+  // (T11 backlog). Optional for backward-compat — missing means the
+  // blocked branch always stays at tier 1 (pure continuation).
+  blockedCountRef?: { value: number }
 }
 
 export interface TurnInput {
@@ -641,6 +663,15 @@ export async function* runTurn(
   // <tool> regex). The LLM occasionally paraphrases the [System Context]
   // block as "[Phase: PHASE — reminder]" and we'd otherwise leak the
   // metadata into the student UI.
+  //
+  // v1.1.2 P0-α — also strip "[System note: ...]" (LLM-self-narrated
+  // reminders from 7/16 session 7132fcc9). Order: System note first
+  // (paranoid future-proofing for nested `[System note: now is
+  // [Phase: MAIN_ACTIVITY]]`), Phase second.
+  const systemNoteStrip = stripEchoedSystemNote(response)
+  const systemNoteStripped = systemNoteStrip.stripped
+  if (systemNoteStripped) response = systemNoteStrip.cleaned
+
   const rawEchoesPhasePrefix = /^\[Phase:/.test(response.trim())
   const phasePrefixStrip = stripEchoedPhasePrefix(response)
   const phasePrefixStripped = phasePrefixStrip.stripped
@@ -656,6 +687,8 @@ export async function* runTurn(
     rawTail: response.length > 400 ? response.slice(-100) : '',
     rawEchoesPhasePrefix,
     phasePrefixStripped,
+    // v1.1.2 P0-α — stripped the System-note echo prefix on this turn.
+    systemNoteStripped,
   })
 
   // ---------- 4. Post-LLM: usage + 80% warn ----------
@@ -993,17 +1026,79 @@ export async function* runTurn(
       // avoid both (a) duplicated followup text (strippedPrefix + 2nd-call
       // followup both get pushed into history) and (b) the "复读机" effect
       // where the 2nd-call LLM tends to repeat the previous turn's wording.
-      // Use the 1st response's strippedPrefix directly; if the LLM only
-      // emitted the tool call (no followup), use a deterministic one-liner.
+      // v1.1.2 P1-A — three-tier fallback ladder (pickBlockedFallback) so
+      //   the same sentence isn't repeated 4-5× in a row.
+      // v1.1.2 P2-A — tier ≥ 2 also attaches topic+keyword fresh hints
+      //   (pickFreshHints) so the LLM can see what's unused in the
+      //   library instead of improvising from memory.
       if (blocked) {
-        displayText = strippedPrefix || "Let's keep going with this — tell me more."
-        yield { type: 'student-text', text: `${displayText}\n\n` }
+        if (deps.blockedCountRef === undefined) deps.blockedCountRef = { value: 0 }
+        deps.blockedCountRef.value += 1
+        const blockedCount = deps.blockedCountRef.value
+        const fallback = pickBlockedFallback(blockedCount - 1)
+        displayText = strippedPrefix || fallback
+
+        // Tier ≥ 2 → attach fresh hints. Tier 1 stays clean (pure
+        // continuation, no system-y phrasing, no hint). Caller controls
+        // visibility: hintSuffix goes into the student-facing student-text
+        // AND into deps.messages (persistent row), but NOT into the LLM
+        // input.history (LLM should not see system scaffolding).
+        let hintSuffix = ''
+        let freshHintLayer: 'none' | 'keyword' | 'topic+keyword' = 'none'
+        let freshHintInjected = false
+        if (blockedCount - 1 >= 1 && deps.topics && deps.topics.length > 0) {
+          const fresh = pickFreshHints({
+            topics: deps.topics,
+            stats: deps.topicStats.all(),
+            keywordStats: deps.keywordHits ?? [],
+            excludeDays: 30,
+            topicLimit: 3,
+            keywordLimit: 5,
+          })
+          const kwList = fresh.keywords.join(', ')
+          if (fresh.keywords.length > 0) {
+            if (blockedCount - 1 >= 2 && fresh.topics.length > 0) {
+              const tList = fresh.topics
+                .map((t) => t.description?.trim() || t.name)
+                .join(', ')
+              hintSuffix = `\n\nFresh angles to try: ${kwList}.\n\nTry switching to: ${tList}.`
+              freshHintLayer = 'topic+keyword'
+            } else {
+              hintSuffix = `\n\nFresh angles to try: ${kwList}.`
+              freshHintLayer = 'keyword'
+            }
+            freshHintInjected = true
+          }
+        }
+
+        const tier =
+          blockedCount >= 3 ? 3 : blockedCount
+        yield {
+          type: 'student-text',
+          text: `${displayText}${hintSuffix}\n\n`,
+        }
         history.push({ role: 'assistant', content: displayText })
-        deps.messages.append({ sessionId, role: 'assistant', content: displayText })
+        deps.messages.append({
+          sessionId,
+          role: 'assistant',
+          content: `${displayText}${hintSuffix}`,
+        })
+        logTurnDiagnostic(sessionId, phaseHistory.length, nextState.phase, {
+          ev: 'turn_done',
+          toolName: parsed.name,
+          lastHistoryRole: 'assistant',
+          lastHistoryLen: displayText.length,
+          lastHistoryHead: displayText.slice(0, 200),
+          endedReason: null,
+          blockedCount,
+          fallbackTier: tier,
+          freshHintInjected,
+          freshHintLayer,
+        })
         yield {
           type: 'tool-2nd-call',
           name: parsed.name,
-          argSummary: 'blocked (short-circuit)',
+          argSummary: `blocked tier=${tier} layer=${freshHintLayer}`,
         }
         // Skip the normal 2nd-call path below.
       } else {

@@ -396,6 +396,14 @@ const adoptedTopics: Map<string, AdoptedTopic> = new Map()
   // process start, so a brand-new CLI invocation gets a fresh dedup view.
   const markedOriginals = new Set<string>()
 
+  // v1.1.2 P1-A — session-level block counter for the topic_select
+  // short-circuit branch. Mutated in place by runTurn when MIN_TOPIC_AGE
+  // gate rejects a topic switch. Whole-session scope (same as
+  // markedOriginals) — session reload resets to 0. Wrapped in a ref
+  // object so the in-turn increment propagates back here across turns
+  // (a primitive would copy-by-value and tier escalation would stall).
+  const sessionBlockedCountRef = { value: 0 }
+
   // v0.7.6 B1 — anchor pair. Captures the first user/assistant exchange of
   // this session so the truncate-history sliding window can protect it from
   // being dropped. Populated AFTER the first LLM response is processed
@@ -460,6 +468,18 @@ const adoptedTopics: Map<string, AdoptedTopic> = new Map()
           messages,
           topicStats,
           markedOriginals,
+          // v1.1.2 P1-A/P2-A — full library snapshot (Topic[]) for the
+          // topic layer of pickFreshHints, plus keyword_hits snapshot
+          // (KeywordHit[]) for the keyword layer. Read once at session
+          // startup — within a single CLI process the topic_stats /
+          // keyword_hits tables don't mutate mid-loop (writes happen
+          // in the finally block), so a per-session snapshot is safe.
+          topics: topics.list(),
+          keywordHits: keywordHits.getAll(),
+          // v1.1.2 P1-A — ref object so the in-turn tier counter
+          // increment survives across turns (see sessionBlockedCountRef
+          // declaration above).
+          blockedCountRef: sessionBlockedCountRef,
         },
       )
 

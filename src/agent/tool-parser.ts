@@ -132,3 +132,41 @@ export function stripEchoedPhasePrefix(response: string): {
   if (!m) return { cleaned: response, stripped: false }
   return { cleaned: response.slice(m[0].length).trim(), stripped: true }
 }
+
+// ----- v1.1.2: system-note echo stripper ---------------------------------
+//
+// Parallel to stripEchoedPhasePrefix above. The LLM occasionally invents
+// a leading "[System note: you must call topic_select now. ...]" prefix
+// when it tries to self-narrate the [System Context] reminder (observed
+// in 2026-07-16 session 7132fcc9 — 7 occurrences in 14 minutes).
+// Confirm-not-prompt-injection check: a `grep "\[System note:"` in src/
+// returns 0 hits (PRD.md mentions "System note" semantics but uses a
+// different literal); the LLM constructs these strings itself when it
+// gets stuck, then either prepends them or follows them with a real
+// <tool>topic_select(...)</tool> block.
+//
+// The 4 observed shapes are all covered by `[^\]]*\]\s*`:
+//   1. "[System note: ...] Hey Jeremy"          (followed by real text)
+//   2. "[System note: ...]\n\n<tool>...</tool>" (followed by tool call,
+//                                                handled by parseToolCall
+//                                                after strip)
+//   3. "[System note: ...]"                     (just the note, nothing
+//                                                else — cleaned = "")
+//   4. Very short, "[System note: must call X.]" (LLM terseness variant)
+//
+// Order with stripEchoedPhasePrefix: System note first, Phase second.
+// Unobserved in practice but future-safe — if LLM ever nests
+// "[System note: now is [Phase: MAIN_ACTIVITY]]" the outer [System note: ...
+// ] strip leaves the inner phase prefix for the next pass.
+// `^` anchor so a mid-sentence "system note" mention never triggers.
+
+const ECHOED_SYSTEM_NOTE_PREFIX = /^\[System note:[^\]]*\]\s*/
+
+export function stripEchoedSystemNote(response: string): {
+  cleaned: string
+  stripped: boolean
+} {
+  const m = response.match(ECHOED_SYSTEM_NOTE_PREFIX)
+  if (!m) return { cleaned: response, stripped: false }
+  return { cleaned: response.slice(m[0].length).trim(), stripped: true }
+}

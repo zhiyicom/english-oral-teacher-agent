@@ -4,6 +4,7 @@ import {
   parseToolCall,
   stripBracketToolCall,
   stripEchoedPhasePrefix,
+  stripEchoedSystemNote,
   stripToolCall,
 } from '../../src/agent/tool-parser.js'
 
@@ -206,6 +207,45 @@ describe('stripEchoedPhasePrefix (v1.1.1 P0-#4)', () => {
     // literal word "phase" mid-sentence.
     const text = 'I noticed we changed phase. Want to keep going?'
     const r = stripEchoedPhasePrefix(text)
+    expect(r.stripped).toBe(false)
+    expect(r.cleaned).toBe(text)
+  })
+})
+
+describe('stripEchoedSystemNote (v1.1.2 P0-α — parallel to stripEchoedPhasePrefix)', () => {
+  // v1.1.2 P0-α — LLM self-narrated "[System note: ...]" prefixes observed
+  // 7× in 7/16 session 7132fcc9 (when LLM gets stuck and tries to restate
+  // the [System Context] reminder in its own words). Order with
+  // stripEchoedPhasePrefix: System note first, Phase second (defensive
+  // future-proofing for nested brackets).
+
+  it('S1: strips a single-line "[System note: ...]" prefix', () => {
+    const r = stripEchoedSystemNote(
+      '[System note: you must call topic_select now. The student is stuck.] Hey Jeremy',
+    )
+    expect(r.stripped).toBe(true)
+    expect(r.cleaned).toBe('Hey Jeremy')
+  })
+
+  it('S2: returns the input unchanged when no prefix is present', () => {
+    const r = stripEchoedSystemNote('Hey Jeremy')
+    expect(r.stripped).toBe(false)
+    expect(r.cleaned).toBe('Hey Jeremy')
+  })
+
+  it('S3: strips a multi-line prefix ending with the closing bracket', () => {
+    const r = stripEchoedSystemNote(
+      '[System note: must call topic_select — student gave a 1-word answer.\nThis is the 3rd short reply in a row.]\nNice, playing with friends.',
+    )
+    expect(r.stripped).toBe(true)
+    expect(r.cleaned).toBe('Nice, playing with friends.')
+  })
+
+  it('S4: does not strip a mid-sentence "[System note: x]" (^ anchor)', () => {
+    // Defends against false positives where a teacher reply uses the
+    // literal phrase "system note" mid-sentence (unlikely but possible).
+    const text = 'Just a friendly system note for you: keep going!'
+    const r = stripEchoedSystemNote(text)
     expect(r.stripped).toBe(false)
     expect(r.cleaned).toBe(text)
   })

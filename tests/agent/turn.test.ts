@@ -485,3 +485,259 @@ describe('runTurn (v1.1.1 P1-#5/#6 — blocked topic_select short-circuit)', () 
     }
   })
 })
+
+describe('runTurn (v1.1.2 P1-A — blocked tier ladder + fresh hints)', () => {
+  let harness: Harness
+  let sessionId: string
+
+  // Scripted LLM: chatStream emits firstResponse (1st call), chat() returns
+  // a deterministic 2nd-call followup if it ever fires. Tests assert whether
+  // the 2nd call ran (v1.1.2 short-circuits it on the blocked branch).
+  function makeScriptedClient(opts: { firstResponse: string; followup?: string }): {
+    client: LLMClient
+    chatCalls: () => number
+  } {
+    let chatCallCount = 0
+    const client: LLMClient = {
+      async *chatStream(_o: ChatOpts): AsyncIterable<ChatChunk> {
+        yield { type: 'text', delta: opts.firstResponse }
+        yield {
+          type: 'usage',
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        }
+      },
+      async chat(_o: ChatOpts): Promise<ChatResult> {
+        chatCallCount += 1
+        return { content: opts.followup ?? '2nd-call followup.' }
+      },
+    }
+    return { client, chatCalls: () => chatCallCount }
+  }
+
+  function registerTopicSelect(h: Harness): void {
+    h.toolRegistry.register(
+      createTopicSelectTool({
+        topics: [{ name: 'friends', keywords: ['friends'], description: null, createdAt: '' }],
+        stats: [],
+        interests: [],
+        rng: () => 0.5,
+      }),
+    )
+  }
+
+  // Library fixture for the fresh-hint tests: 3 topics, all with hit_count=0
+  // keywords (mirrors the 7/16 DB state where 673 fresh keywords exist).
+  const libraryTopics = [
+    { name: 'travel', keywords: ['beach', 'plane'], description: 'Travel stories', createdAt: '' },
+    { name: 'food', keywords: ['pizza', 'sushi'], description: 'Food culture', createdAt: '' },
+    { name: 'music', keywords: ['guitar', 'piano'], description: 'Music taste', createdAt: '' },
+  ]
+  const libraryKeywordHits = libraryTopics.map((t) =>
+    t.keywords.map((k) => ({
+      topic: t.name,
+      keyword: k,
+      hitCount: 0,
+      firstHitAt: null,
+      lastHitAt: null,
+    })),
+  ).flat()
+
+  async function drain(iter: AsyncGenerator<TurnEvent, TurnOutput>): Promise<{
+    events: TurnEvent[]
+    output: TurnOutput | undefined
+  }> {
+    const events: TurnEvent[] = []
+    let output: TurnOutput | undefined
+    while (true) {
+      const next = await iter.next()
+      if (next.done) {
+        output = next.value
+        break
+      }
+      events.push(next.value)
+    }
+    return { events, output }
+  }
+
+  async function runBlockedTurn(opts: {
+    harness: Harness
+    sessionId: string
+    userInput: string
+    firstResponse: string
+    topics?: Array<{ name: string; keywords: string[]; description: string | null; createdAt: string }>
+    keywordHits?: Array<{ topic: string; keyword: string; hitCount: number; firstHitAt: string | null; lastHitAt: string | null }>
+    blockedCountRef?: { value: number }
+  }): Promise<{
+    events: TurnEvent[]
+    output: TurnOutput | undefined
+    input: ReturnType<typeof makeTurnInput>
+    chatCalls: () => number
+  }> {
+    const { client, chatCalls } = makeScriptedClient({ firstResponse: opts.firstResponse })
+    const input = makeTurnInput({
+      harness: opts.harness,
+      sessionId: opts.sessionId,
+      userInput: opts.userInput,
+      isFirstTurn: false,
+    })
+    const deps = {
+      ...makeTurnDeps(opts.harness),
+      client,
+      topics: opts.topics ?? libraryTopics,
+      keywordHits: opts.keywordHits ?? libraryKeywordHits,
+      blockedCountRef: opts.blockedCountRef ?? { value: 0 },
+    }
+    const { events, output } = await drain(runTurn(input, deps))
+    return { events, output, input, chatCalls }
+  }
+
+  beforeEach(() => {
+    harness = makeHarness()
+    registerTopicSelect(harness)
+    const session = harness.sessions.create()
+    sessionId = session.id
+  })
+
+  afterEach(() => {
+    harness.db.close()
+    rmSync(harness.dataDir, { recursive: true, force: true })
+  })
+
+  // ---- Tier-ladder tests (B-T1, B-T2, B-T3) -----------------------------
+
+  it('B-T1: blocked 1st time (blockedCountRef.value=0 → tier 1) → identical to v1.1.1 fallback', async () => {
+    const blockedCountRef = { value: 0 }
+    const { events, input, chatCalls } = await runBlockedTurn({
+      harness,
+      sessionId,
+      userInput: 'yeah',
+      firstResponse: '<tool>topic_select({"phase":"MAIN_ACTIVITY","exclude_recent_days":30})</tool>',
+      blockedCountRef,
+    })
+
+    const studentText = events.find((e) => e.type === 'student-text')
+    expect(studentText).toBeDefined()
+    if (studentText && studentText.type === 'student-text') {
+      // Tier 1: pure continuation, NO fresh hint injected.
+      expect(studentText.text).toBe("Let's keep going with this — tell me more.\n\n")
+      expect(studentText.text).not.toContain('Fresh angles')
+    }
+    // No 2nd LLM call.
+    expect(chatCalls()).toBe(0)
+    // Tier counter advanced.
+    expect(blockedCountRef.value).toBe(1)
+    // History only got one assistant message.
+    expect(input.history.filter((m) => m.role === 'assistant')).toHaveLength(1)
+  })
+
+  it('B-T2: blocked 2nd time (blockedCountRef.value=1 → tier 2) → keyword-only hint', async () => {
+    const blockedCountRef = { value: 1 }
+    const { events, chatCalls } = await runBlockedTurn({
+      harness,
+      sessionId,
+      userInput: 'yeah',
+      firstResponse: '<tool>topic_select({"phase":"MAIN_ACTIVITY","exclude_recent_days":30})</tool>',
+      blockedCountRef,
+    })
+
+    const studentText = events.find((e) => e.type === 'student-text')
+    expect(studentText).toBeDefined()
+    if (studentText && studentText.type === 'student-text') {
+      // Tier 2: tier-2 ladder line + keyword-only hint.
+      expect(studentText.text).toMatch(/didn't take/)
+      expect(studentText.text).toContain('Fresh angles to try:')
+      // No topic layer (tier 3 exclusive).
+      expect(studentText.text).not.toContain('Try switching to:')
+    }
+    expect(chatCalls()).toBe(0)
+    expect(blockedCountRef.value).toBe(2)
+  })
+
+  it('B-T3: blocked 3rd time (blockedCountRef.value=2 → tier 3) → dual layer topic+keyword hint', async () => {
+    const blockedCountRef = { value: 2 }
+    const { events, chatCalls } = await runBlockedTurn({
+      harness,
+      sessionId,
+      userInput: 'yeah',
+      firstResponse: '<tool>topic_select({"phase":"MAIN_ACTIVITY","exclude_recent_days":30})</tool>',
+      blockedCountRef,
+    })
+
+    const studentText = events.find((e) => e.type === 'student-text')
+    expect(studentText).toBeDefined()
+    if (studentText && studentText.type === 'student-text') {
+      // Tier 3: tier-3 ladder line + dual layer (keywords + topics).
+      expect(studentText.text).toMatch(/keep circling/)
+      expect(studentText.text).toContain('Fresh angles to try:')
+      expect(studentText.text).toContain('Try switching to:')
+    }
+    expect(chatCalls()).toBe(0)
+    expect(blockedCountRef.value).toBe(3)
+  })
+
+  // ---- Hint-content tests (B-F1, B-F2, B-F3) ----------------------------
+
+  it('B-F1: tier 1 emits NO hint suffix (no "Fresh angles" / "Try switching to")', async () => {
+    const { events } = await runBlockedTurn({
+      harness,
+      sessionId,
+      userInput: 'yeah',
+      firstResponse:
+        '<tool>topic_select({"phase":"MAIN_ACTIVITY","exclude_recent_days":30})</tool>',
+      blockedCountRef: { value: 0 },
+    })
+    const studentText = events.find((e) => e.type === 'student-text')
+    if (studentText && studentText.type === 'student-text') {
+      expect(studentText.text).not.toContain('Fresh angles')
+      expect(studentText.text).not.toContain('Try switching to:')
+    }
+  })
+
+  it('B-F2: tier 2 hint contains the keyword names but NOT topic names', async () => {
+    const { events } = await runBlockedTurn({
+      harness,
+      sessionId,
+      userInput: 'yeah',
+      firstResponse:
+        '<tool>topic_select({"phase":"MAIN_ACTIVITY","exclude_recent_days":30})</tool>',
+      blockedCountRef: { value: 1 },
+    })
+    const studentText = events.find((e) => e.type === 'student-text')
+    if (studentText && studentText.type === 'student-text') {
+      // Should mention at least one of our fixture keywords.
+      const hasKeyword = ['beach', 'plane', 'pizza', 'sushi', 'guitar', 'piano'].some((kw) =>
+        studentText.text.includes(kw),
+      )
+      expect(hasKeyword).toBe(true)
+      // Should NOT mention topic names (tier 3 exclusive).
+      const hasTopicName = ['travel', 'food', 'music'].some((t) =>
+        studentText.text.includes(t),
+      )
+      expect(hasTopicName).toBe(false)
+    }
+  })
+
+  it('B-F3: tier 3 hint contains BOTH keyword names AND topic descriptions', async () => {
+    const { events } = await runBlockedTurn({
+      harness,
+      sessionId,
+      userInput: 'yeah',
+      firstResponse:
+        '<tool>topic_select({"phase":"MAIN_ACTIVITY","exclude_recent_days":30})</tool>',
+      blockedCountRef: { value: 2 },
+    })
+    const studentText = events.find((e) => e.type === 'student-text')
+    if (studentText && studentText.type === 'student-text') {
+      // Both layers must be present.
+      expect(studentText.text).toContain('Fresh angles to try:')
+      expect(studentText.text).toContain('Try switching to:')
+      // Topic descriptions (not names) appear in the layer-3 hint.
+      expect(studentText.text).toContain('Travel stories')
+      expect(studentText.text).toContain('Food culture')
+      expect(studentText.text).toContain('Music taste')
+    }
+  })
+})
