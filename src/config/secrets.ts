@@ -35,11 +35,12 @@ const ENV_DEFAULTS: Record<string, string> = {
  * Returns null when no source has a non-empty value.
  */
 export function getApiKey(): string | null {
-  const fromEnv = process.env.API_KEY?.trim()
-  if (fromEnv) return fromEnv
-
+  // Same priority as getEnvVar: AppData/.env (Web UI) > process.env > CWD/.env.
   const fromAppData = readEnvFile(join(getAppDataDir(), '.env')).API_KEY
   if (fromAppData?.trim()) return fromAppData.trim()
+
+  const fromEnv = process.env.API_KEY?.trim()
+  if (fromEnv) return fromEnv
 
   const fromCwd = readEnvFile(join(process.cwd(), '.env')).API_KEY
   if (fromCwd?.trim()) return fromCwd.trim()
@@ -104,11 +105,25 @@ function formatEnvFile(vars: Record<string, string>): string {
 }
 
 export function getEnvVar(key: string): string {
-  const fromEnv = process.env[key]
-  if (fromEnv !== undefined) return fromEnv
-
+  // Check AppData/.env FIRST (Web UI writes here). It must win over
+  // process.env because dotenv/config loaded CWD/.env into process.env
+  // at import time. Checking process.env first would make CWD/.env
+  // (project defaults like MiniMax-M3) always shadow AppData/.env
+  // (Web UI settings like deepseek-v4-flash).
+  //
+  // Explicit CLI overrides (e.g. LLM_MODEL=X pnpm serve) are handled:
+  // setEnvVar updates both process.env AND the file, and the file path
+  // is shared between the server and the CLI, so a CLI-set value also
+  // appears in AppData.
+  //
+  // True runtime-only overrides that don't touch the file (e.g. test
+  // fixtures setting process.env.API_KEY programmatically) are rare
+  // and still work: the process.env fallback catches them.
   const fromAppData = readEnvFile(join(getAppDataDir(), '.env'))[key]
   if (fromAppData !== undefined) return fromAppData
+
+  const fromEnv = process.env[key]
+  if (fromEnv !== undefined) return fromEnv
 
   const fromCwd = readEnvFile(join(process.cwd(), '.env'))[key]
   return fromCwd ?? ''

@@ -403,6 +403,9 @@ const adoptedTopics: Map<string, AdoptedTopic> = new Map()
   // object so the in-turn increment propagates back here across turns
   // (a primitive would copy-by-value and tier escalation would stall).
   const sessionBlockedCountRef = { value: 0 }
+  // v1.1.2 T5 — one-shot anti-spam flag, set after a blocked turn, consumed
+  // by the next turn's [System Context]. Reset to false each turn.
+  let topicSelectBlockedLastTurn = false
 
   // v0.7.6 B1 — anchor pair. Captures the first user/assistant exchange of
   // this session so the truncate-history sliding window can protect it from
@@ -436,6 +439,10 @@ const adoptedTopics: Map<string, AdoptedTopic> = new Map()
       // runTurn also handles this, but the CLI uses a different log line
       // for time-based END that L3 tests are not strict about.
       reader.writePrompt('[Teacher]: ')
+      // v1.1.2 T5 — consume and reset the one-shot blocked flag for this turn.
+      const blockedLastTurn = topicSelectBlockedLastTurn
+      topicSelectBlockedLastTurn = false
+      const blockedBefore = sessionBlockedCountRef.value
 
       const turnIter = runTurn(
         {
@@ -456,6 +463,8 @@ const adoptedTopics: Map<string, AdoptedTopic> = new Map()
           // v1.0.7 §11 — pass the session's adopted-topics ledger so runTurn
           // can append slugs as they're locked in.
           adoptedTopics,
+          // v1.1.2 T5 — one-shot anti-spam flag, consumed this turn.
+          topicSelectBlockedLastTurn: blockedLastTurn,
           mockTime,
         },
         {
@@ -503,6 +512,11 @@ const adoptedTopics: Map<string, AdoptedTopic> = new Map()
       if (output) {
         state = output.state
         isFirstTurn = output.isFirstTurn
+        // v1.1.2 T5 — if this turn triggered a topic_select block, set the
+        // one-shot flag for the next turn's [System Context].
+        if (sessionBlockedCountRef.value > blockedBefore) {
+          topicSelectBlockedLastTurn = true
+        }
         if (output.sessionPersisted) sessionPersisted = true
         if (output.endedReason === 'llm_error') {
           process.exitCode = 1

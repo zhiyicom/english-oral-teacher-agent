@@ -38,25 +38,44 @@ const EnvSchema = z.object({
 export type Env = z.infer<typeof EnvSchema>
 
 export function loadEnv(): Env {
-  // Build input by merging env files into process.env.
-  // Priority: process.env > AppData/.env > CWD/.env > schema defaults.
-  // This matches getEnvVar() / getApiKey() so Web UI settings persist across
-  // restarts even when the install directory has no .env file.
+  // Priority: explicit process.env > AppData/.env (Web UI) > CWD/.env > defaults.
+  //
+  // dotenv/config already loaded CWD/.env into process.env at import time, so
+  // we cannot blindly merge process.env over file values — that would make
+  // CWD/.env effectively highest priority (defeating the AppData/.env override
+  // that the Web UI writes). Instead, we read files in priority order (CWD
+  // first, AppData second — later wins), then only merge process.env keys that
+  // did NOT come from any file (i.e. true CLI overrides like `LLM_MODEL=X
+  // pnpm serve`).
   const input: Record<string, string | undefined> = {}
-  // 1. CWD/.env (dotenv/config already loaded it into process.env)
-  // 2. AppData/.env (Web UI writes here; lower priority than process.env)
-  for (const path of [
-    join(getAppDataDir(), '.env'),
-    join(process.cwd(), '.env'),
-  ]) {
+  const fromFile = new Set<string>()
+
+  // 1. CWD/.env — lowest file priority (dotenv already loaded these, but
+  //    we re-read to track which keys came from this file).
+  for (const path of [join(process.cwd(), '.env')]) {
     const file = readEnvFile(path)
-    for (const [k, v] of Object.entries(file)) {
-      if (!(k in input)) input[k] = v
+    for (const k of Object.keys(file)) {
+      input[k] = file[k]
+      fromFile.add(k)
     }
   }
-  // 3. process.env (highest priority)
+
+  // 2. AppData/.env — higher priority (Web UI writes here); overwrites CWD.
+  const appDataPath = join(getAppDataDir(), '.env')
+  const appDataFile = readEnvFile(appDataPath)
+  for (const k of Object.keys(appDataFile)) {
+    input[k] = appDataFile[k]
+    fromFile.add(k)
+  }
+
+  // 3. process.env — highest priority, but only for keys that did NOT come
+  //    from any file (true CLI overrides). File keys are skipped because
+  //    dotenv already loaded CWD/.env into process.env, and step 2 gave
+  //    AppData/.env its correct higher priority over CWD.
   for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined) input[k] = v
+    if (v !== undefined && !fromFile.has(k)) {
+      input[k] = v
+    }
   }
 
   const result = EnvSchema.safeParse(input)

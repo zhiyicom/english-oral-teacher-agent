@@ -542,22 +542,34 @@ describe('pickFreshHints (v1.1.2 P2-A — fresh topic+keyword dual layer)', () =
   })
 
   it('H-2: fresh topics exist but ALL keywords already used → topic-only layer', () => {
-    // Topic layer is fine; keyword layer is empty.
+    // All keywords across all topics have been hit (hitCount > 0).
+    // No fresh keywords remain; only topic layer survives.
     const topics = [minecraft, school, sports]
     const stats: TopicStat[] = []
     const keywordHits: KeywordHit[] = [
+      kwHit('minecraft', 'minecraft', 5),
       kwHit('minecraft', 'castle', 5),
+      kwHit('minecraft', 'creeper', 3),
+      kwHit('school', 'school', 3),
       kwHit('school', 'class', 3),
+      kwHit('school', 'teacher', 2),
       kwHit('sports', 'soccer', 7),
+      kwHit('sports', 'ball', 1),
+      kwHit('sports', 'team', 4),
     ]
     const result = pickFreshHints({ topics, stats, keywordStats: keywordHits, now: NOW })
+    // H-2 context: all keywords hit → 0 fresh keywords
     expect(result.topics.length).toBeGreaterThan(0)
     expect(result.keywords.length).toBe(0)
   })
 
   it('H-3: all topics discussed but SOME keywords unused → keyword-only layer', () => {
     // Mirror the 7/16 DB state: 26/26 in topic_stats (none fresh by topic),
-    // but 673 fresh keywords still in keyword_hits. Keyword layer saves us.
+    // but 673 fresh keywords. Keyword layer saves us.
+    // v1.1.2 §1.6 fix: fresh keywords come from topic library, not from
+    // keyword_hits rows with hitCount===0. Keywords absent from keyword_hits
+    // are fresh (never discussed). Test that keywords with hitCount>0 are
+    // excluded, and keywords with hitCount===0 or absent are included.
     const topics = [minecraft, school, sports]
     const stats: TopicStat[] = [
       stat('minecraft', 3, 1),
@@ -565,14 +577,23 @@ describe('pickFreshHints (v1.1.2 P2-A — fresh topic+keyword dual layer)', () =
       stat('sports', 4, 10),
     ]
     const keywordHits: KeywordHit[] = [
+      // castle and class: hitCount===0 → fresh (backward compat with tests)
       kwHit('minecraft', 'castle', 0),
       kwHit('school', 'class', 0),
+      // soccer: hitCount>0 → excluded
       kwHit('sports', 'soccer', 1),
+      // These keywords were hit → excluded
+      kwHit('minecraft', 'minecraft', 1),
+      kwHit('minecraft', 'creeper', 1),
+      kwHit('school', 'school', 2),
+      kwHit('school', 'teacher', 2),
+      kwHit('sports', 'ball', 3),
+      kwHit('sports', 'team', 4),
     ]
     const result = pickFreshHints({ topics, stats, keywordStats: keywordHits, excludeDays: 30, now: NOW })
     // All 3 topics are within the 30-day exclude window → topic layer empty.
     expect(result.topics.length).toBe(0)
-    // 2 fresh keywords remain (soccer has hit_count=1).
+    // 2 fresh keywords remain (castle, class).
     expect(result.keywords.length).toBe(2)
     expect(result.keywords).toContain('castle')
     expect(result.keywords).toContain('class')
@@ -580,36 +601,42 @@ describe('pickFreshHints (v1.1.2 P2-A — fresh topic+keyword dual layer)', () =
   })
 
   it('H-4: everything fresh → both layers populated, sort order deterministic', () => {
-    // All topics fresh (no stats); keywords all unused. Verify the
+    // All topics fresh (no stats); all keywords unused. Verify the
     // three-level sort: parentCount ASC → topic ASC → keyword ASC.
+    // v1.1.2 §1.6 fix: keywords come from topic library, not keywordStats.
+    // Since none have been hit, ALL keywords from ALL topics are fresh.
     const topics = [minecraft, school, sports, food]
     const stats: TopicStat[] = []
-    const keywordHits: KeywordHit[] = [
-      kwHit('minecraft', 'castle', 0),
-      kwHit('school', 'class', 0),
-      kwHit('food', 'pizza', 0),
-    ]
+    const keywordHits: KeywordHit[] = []
     const result = pickFreshHints({ topics, stats, keywordStats: keywordHits, now: NOW })
     // Topic limit default 3 → first 3 after sortByCountAsc (all 0 count → stable).
     expect(result.topics.length).toBe(3)
-    // Keyword sort by topic ASC (all parentCount=0): food < minecraft < school
-    expect(result.keywords).toEqual(['pizza', 'castle', 'class'])
+    // Sort: parentCount=0 for all, topic ASC, keyword ASC.
+    // food(burger, noodle, pizza) < minecraft(castle, creeper) < school(class, teacher) < sports(ball, soccer, team)
+    // Top 5: burger, noodle, pizza, castle, creeper
+    expect(result.keywords).toEqual(['burger', 'noodle', 'pizza', 'castle', 'creeper'])
   })
 
   it('H-5: all topics discussed within exclude window + all keywords used → empty', () => {
-    // Library exhausted by both metrics. Caller should fall back to
-    // tier-1 (no hint) so the empty result doesn't surface as "Fresh
-    // angles to try: " with a blank list.
+    // Library exhausted by both metrics. All keywords in the library have
+    // been hit (hitCount > 0). Caller should fall back to tier-1 (no hint).
     const topics = [minecraft, school, sports]
     const stats: TopicStat[] = [
       stat('minecraft', 5, 1),
       stat('school', 5, 3),
       stat('sports', 5, 7),
     ]
+    // All keywords from all three topics are hit (including topic-name keywords).
     const keywordHits: KeywordHit[] = [
+      kwHit('minecraft', 'minecraft', 12),
       kwHit('minecraft', 'castle', 10),
+      kwHit('minecraft', 'creeper', 5),
+      kwHit('school', 'school', 10),
       kwHit('school', 'class', 8),
+      kwHit('school', 'teacher', 3),
       kwHit('sports', 'soccer', 6),
+      kwHit('sports', 'ball', 4),
+      kwHit('sports', 'team', 2),
     ]
     const result = pickFreshHints({ topics, stats, keywordStats: keywordHits, excludeDays: 30, now: NOW })
     expect(result.topics.length).toBe(0)

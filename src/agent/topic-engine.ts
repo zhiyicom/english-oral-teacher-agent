@@ -243,26 +243,45 @@ export function pickFreshHints(opts: {
   pool = sortByCountAsc(pool, opts.stats)
   const freshTopics = pool.slice(0, topicLimit)
 
-  // Keyword layer: only keywords whose hit_count === 0 in keyword_hits.
-  // Tie-broken by parent topic discussion_count (asc), then topic,
-  // then keyword — three-level deterministic sort so the hint is stable
-  // across runs (and tests can assert exact order).
-  const zeroHitKw = opts.keywordStats
-    .filter((h) => h.hitCount === 0)
-    .map((h) => ({
-      topic: h.topic,
-      keyword: h.keyword,
-      parentCount:
-        opts.stats.find((s) => s.topic === h.topic)?.discussionCount ?? 0,
-    }))
+  // Keyword layer: fresh = keywords from the topic library that have NOT
+  // been hit (i.e. no row in keyword_hits with hitCount > 0). v1.1.2
+  // originally filtered `keywordStats` for `hitCount === 0`, but the
+  // keyword_hits table only stores rows for keywords that have been hit
+  // (UPSERT starts at hit_count=1). Keywords never discussed are absent
+  // from the table entirely, so the hitCount===0 filter always returned
+  // empty. v1.1.2 §1.6 fixes this: the source of truth is the topic
+  // library's full keyword inventory, minus what's in keyword_hits.
+  //
+  // Build a hit set: (topic, keyword) pairs that appear in keywordStats
+  // with hitCount > 0. Pairs with hitCount === 0 (backward compat with
+  // synthetic test fixtures) or absent from keywordStats are fresh.
+  const hitKeys = new Set(
+    opts.keywordStats
+      .filter((h) => h.hitCount > 0)
+      .map((h) => `${h.topic}\x00${h.keyword}`),
+  )
 
-  zeroHitKw.sort((a, b) => {
+  // Collect all fresh keywords from the topic library.
+  // parentCount is the parent topic's discussion_count for sorting.
+  const freshKw: { keyword: string; topic: string; parentCount: number }[] = []
+  for (const t of opts.topics) {
+    const parentCount =
+      opts.stats.find((s) => s.topic === t.name)?.discussionCount ?? 0
+    for (const kw of t.keywords) {
+      if (!hitKeys.has(`${t.name}\x00${kw}`)) {
+        freshKw.push({ keyword: kw, topic: t.name, parentCount })
+      }
+    }
+  }
+
+  // Three-level deterministic sort: parentCount ASC → topic ASC → keyword ASC.
+  freshKw.sort((a, b) => {
     if (a.parentCount !== b.parentCount) return a.parentCount - b.parentCount
     if (a.topic !== b.topic) return a.topic.localeCompare(b.topic)
     return a.keyword.localeCompare(b.keyword)
   })
 
-  const freshKeywords = zeroHitKw.slice(0, keywordLimit).map((h) => h.keyword)
+  const freshKeywords = freshKw.slice(0, keywordLimit).map((h) => h.keyword)
 
   return { topics: freshTopics, keywords: freshKeywords }
 }

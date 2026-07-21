@@ -143,6 +143,10 @@ interface SessionRuntime {
   // resets to 0 (acceptable, matches the v0.7.5 dedup-on-restart
   // pattern).
   blockedCountRef: { value: number }
+  // v1.1.2 T5 — set to true after a turn where topic_select was blocked,
+  // consumed by the next turn's context injection as a one-shot anti-spam
+  // signal. Reset to false when consumed.
+  topicSelectBlockedLastTurn: boolean
 }
 
 function reconstructSessionState(
@@ -193,6 +197,7 @@ function reconstructSessionState(
     // tier counter always starts at 0 for a brand-new session and
     // resets on server restart.
     blockedCountRef: { value: 0 },
+    topicSelectBlockedLastTurn: false,
   }
 }
 
@@ -480,8 +485,12 @@ export function createApp(opts: {
         // v1.0.7 §11 — pass the session's adopted-topics ledger so runTurn
         // can append slugs as they're locked in.
         adoptedTopics: rt.adoptedTopics,
+        // v1.1.2 T5 — one-shot anti-spam flag consumed on this turn,
+        // then reset so it doesn't leak into subsequent turns.
+        topicSelectBlockedLastTurn: rt.topicSelectBlockedLastTurn,
         mockTime: false,
       }
+      rt.topicSelectBlockedLastTurn = false
 
       const turnDeps = {
         env: { LLM_CONTEXT_BUDGET_TOKENS: env.LLM_CONTEXT_BUDGET_TOKENS },
@@ -507,11 +516,17 @@ export function createApp(opts: {
       }
 
       return streamSSE(c, async (stream) => {
+        // v1.1.2 T5 — snapshot pre-turn blocked count to detect whether
+        // this turn triggered a topic_select block.
+        const blockedBefore = rt.blockedCountRef.value
         const gen = runTurn(turnInput, turnDeps)
         while (true) {
           const next = await gen.next()
           if (next.done) {
             const output = next.value as TurnOutput
+            // v1.1.2 T5 — if this turn triggered a topic_select block,
+            // set the one-shot flag for the next turn's [System Context].
+            const blockedThisTurn = rt.blockedCountRef.value > blockedBefore
             sessionStore.set(id, {
               state: output.state,
               phaseHistory: output.phaseHistory,
@@ -525,6 +540,7 @@ export function createApp(opts: {
               // pre-turn value, output.* would lose the increment
               // because runTurn doesn't return blockedCountRef).
               blockedCountRef: rt.blockedCountRef,
+              topicSelectBlockedLastTurn: blockedThisTurn,
             })
             await stream.writeSSE({
               event: 'done',

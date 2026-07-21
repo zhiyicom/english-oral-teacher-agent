@@ -33,14 +33,14 @@ describe('loadLastReview', () => {
     sessions.create({ id: 's1', startedAt: '2026-06-05T10:00:00.000Z' })
     sessions.markEnded('s1', {
       endedAt: '2026-06-05T10:05:00.000Z',
-      summary: 'Student talked about castles.',
+      summary: 'Student talked about castles and minecraft during the session.',
       keywords: ['castle', 'minecraft'],
     })
     const now = new Date('2026-06-06T10:00:00.000Z')
     const r = loadLastReview(db, now)
     expect(r).not.toBeNull()
     expect(r?.sessionId).toBe('s1')
-    expect(r?.summary).toBe('Student talked about castles.')
+    expect(r?.summary).toBe('Student talked about castles and minecraft during the session.')
     expect(r?.keywords).toEqual(['castle', 'minecraft'])
     expect(r?.durationMin).toBe(5)
     expect(r?.startedAt).toBe('2026-06-05T10:00:00.000Z')
@@ -48,24 +48,24 @@ describe('loadLastReview', () => {
 
   it('2 sessions → returns the one with later started_at', () => {
     sessions.create({ id: 'older', startedAt: '2026-06-04T10:00:00.000Z' })
-    sessions.markEnded('older', { summary: 'old summary', keywords: ['a', 'b', 'c'] })
+    sessions.markEnded('older', { summary: 'Older session about dragons and medieval castles.', keywords: ['a', 'b', 'c'] })
     sessions.create({ id: 'newer', startedAt: '2026-06-05T10:00:00.000Z' })
-    sessions.markEnded('newer', { summary: 'new summary', keywords: ['d', 'e', 'f'] })
+    sessions.markEnded('newer', { summary: 'Newer session about spaceships and rocket science.', keywords: ['d', 'e', 'f'] })
 
     const r = loadLastReview(db)
     expect(r?.sessionId).toBe('newer')
-    expect(r?.summary).toBe('new summary')
+    expect(r?.summary).toBe('Newer session about spaceships and rocket science.')
   })
 
   it('session with NULL summary is skipped (v0.3 / pre-v0.5 rows)', () => {
     sessions.create({ id: 'old', startedAt: '2026-06-04T10:00:00.000Z' })
     sessions.markEnded('old', { endedAt: '2026-06-04T10:05:00.000Z' }) // no summary
     sessions.create({ id: 'new', startedAt: '2026-06-05T10:00:00.000Z' })
-    sessions.markEnded('new', { summary: 'fresh', keywords: ['x', 'y', 'z'] })
+    sessions.markEnded('new', { summary: 'Fresh session with some interesting discussion topics.', keywords: ['x', 'y', 'z'] })
 
     const r = loadLastReview(db)
     expect(r?.sessionId).toBe('new')
-    expect(r?.summary).toBe('fresh')
+    expect(r?.summary).toBe('Fresh session with some interesting discussion topics.')
   })
 
   it('all sessions have NULL summary → returns null', () => {
@@ -78,7 +78,7 @@ describe('loadLastReview', () => {
 
   it('keywords field is parsed from JSON array', () => {
     sessions.create({ id: 'k', startedAt: '2026-06-05T10:00:00.000Z' })
-    sessions.markEnded('k', { summary: 's', keywords: ['one', 'two', 'three'] })
+    sessions.markEnded('k', { summary: 'Student practiced vocabulary with several new words and expressions.', keywords: ['one', 'two', 'three'] })
     const r = loadLastReview(db)
     expect(r?.keywords).toEqual(['one', 'two', 'three'])
   })
@@ -88,7 +88,7 @@ describe('loadLastReview', () => {
     const now = new Date('2026-06-06T10:00:00.000Z')
     const startedAt = new Date(now.getTime() - 23 * 3600_000).toISOString()
     sessions.create({ id: 'd1', startedAt })
-    sessions.markEnded('d1', { summary: 's', keywords: ['a', 'b', 'c'] })
+    sessions.markEnded('d1', { summary: 'Student discussed various topics including favorite foods and hobbies.', keywords: ['a', 'b', 'c'] })
     expect(loadLastReview(db, now)?.daysAgo).toBe(0)
   })
 
@@ -96,7 +96,7 @@ describe('loadLastReview', () => {
     const now = new Date('2026-06-06T10:00:00.000Z')
     const startedAt = new Date(now.getTime() - 25 * 3600_000).toISOString()
     sessions.create({ id: 'd2', startedAt })
-    sessions.markEnded('d2', { summary: 's', keywords: ['a', 'b', 'c'] })
+    sessions.markEnded('d2', { summary: 'Student discussed various topics including favorite foods and hobbies.', keywords: ['a', 'b', 'c'] })
     expect(loadLastReview(db, now)?.daysAgo).toBe(1)
   })
 
@@ -104,7 +104,7 @@ describe('loadLastReview', () => {
     const now = new Date('2026-06-06T10:00:00.000Z')
     const startedAt = new Date(now.getTime() - 47 * 3600_000).toISOString()
     sessions.create({ id: 'd3', startedAt })
-    sessions.markEnded('d3', { summary: 's', keywords: ['a', 'b', 'c'] })
+    sessions.markEnded('d3', { summary: 'Student discussed various topics including favorite foods and hobbies.', keywords: ['a', 'b', 'c'] })
     expect(loadLastReview(db, now)?.daysAgo).toBe(1)
   })
 
@@ -112,14 +112,14 @@ describe('loadLastReview', () => {
     const now = new Date('2026-06-06T10:00:00.000Z')
     const startedAt = new Date(now.getTime() - 49 * 3600_000).toISOString()
     sessions.create({ id: 'd4', startedAt })
-    sessions.markEnded('d4', { summary: 's', keywords: ['a', 'b', 'c'] })
+    sessions.markEnded('d4', { summary: 'Student discussed various topics including favorite foods and hobbies.', keywords: ['a', 'b', 'c'] })
     expect(loadLastReview(db, now)?.daysAgo).toBe(2)
   })
 
   it('daysAgo: startedAt == now → 0 (no negative)', () => {
     const now = new Date('2026-06-06T10:00:00.000Z')
     sessions.create({ id: 'd5', startedAt: now.toISOString() })
-    sessions.markEnded('d5', { summary: 's', keywords: ['a', 'b', 'c'] })
+    sessions.markEnded('d5', { summary: 'Student discussed various topics including favorite foods and hobbies.', keywords: ['a', 'b', 'c'] })
     expect(loadLastReview(db, now)?.daysAgo).toBe(0)
   })
 })

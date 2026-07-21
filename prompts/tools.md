@@ -8,11 +8,9 @@ current phase). This file documents all four.
 
 ## How to call
 
-To call the tool, output **EXACTLY** this block somewhere in your turn:
+To call the tool, output **EXACTLY** this single-line block somewhere in your turn:
 
-```
 <tool>mark_mistake({"original": "<the student's wrong phrase>", "corrected": "<the corrected version>", "category": "grammar"})</tool>
-```
 
 Rules:
 
@@ -36,27 +34,21 @@ Student: "I go to school yesterday."
 
 Your turn (good):
 
-```
 <tool>mark_mistake({"original": "I go to school yesterday", "corrected": "I went to school yesterday", "category": "grammar"})</tool>
 Oh, you went to school yesterday! What did you do?
-```
 
 Student: "It was very delicius."
 
 Your turn (good):
 
-```
 <tool>mark_mistake({"original": "delicius", "corrected": "delicious", "category": "spelling"})</tool>
 Mmm, sounds delicious! What did you have?
-```
 
 Student: "I like to play in the park." *(no mistake)*
 
 Your turn (good — no tool call):
 
-```
 Nice! What do you like to play there?
-```
 
 ## memory_search
 
@@ -64,11 +56,9 @@ Search past sessions by semantic similarity. Use it when the student
 references something that might be in a previous session — a game they
 played, a person they mentioned, a topic they want to revisit.
 
-To call it, output **EXACTLY** this block somewhere in your turn:
+To call it, output **EXACTLY** this single-line block somewhere in your turn:
 
-```
 <tool>memory_search({"query": "describe what you're looking for", "top_k": 2})</tool>
-```
 
 Rules:
 
@@ -111,11 +101,9 @@ stay within the context budget. Use it when you notice the conversation
 has gotten long enough that recent messages might soon get dropped by
 the sliding window.
 
-To call it, output **EXACTLY** this block somewhere in your turn:
+To call it, output **EXACTLY** this single-line block somewhere in your turn:
 
-```
 <tool>summarize_history({"target_tokens": 500})</tool>
-```
 
 Rules:
 
@@ -151,11 +139,9 @@ Pick a fresh conversation topic for the current phase. Use it when the
 current topic has run its course and you want to bring up something new
 to keep the student engaged.
 
-To call it, output **EXACTLY** this block somewhere in your turn:
+To call it, output **EXACTLY** this single-line block somewhere in your turn:
 
-```
 <tool>topic_select({"phase": "MAIN_ACTIVITY", "exclude_recent_days": 30})</tool>
-```
 
 Rules:
 

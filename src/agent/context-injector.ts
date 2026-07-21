@@ -71,6 +71,7 @@ export function buildSystemContext(
   recentMistakes: Mistake[] = [],
   relevantPast: RelevantSession[] = [],
   now: Date = new Date(),
+  topicSelectBlockedLastTurn = false,
 ): SystemContextResult {
   const lastTransitionAgo = Math.max(0, state.elapsedMin - state.lastTransitionAt)
 
@@ -82,6 +83,14 @@ export function buildSystemContext(
     `[System Context] Phase: ${state.phase} | Elapsed: ${state.elapsedMin.toFixed(1)} min | Silence: ${state.silenceMin.toFixed(1)} min | Entered ${state.phase} ${lastTransitionAgo.toFixed(1)} min ago`,
   ].join('\n')
   const lines: string[] = [phaseSeg]
+
+  // v1.1.2 T5 — one-shot anti-spam signal when previous turn's topic_select
+  // was blocked. Tells the LLM NOT to retry topic_select this turn.
+  if (topicSelectBlockedLastTurn) {
+    lines.push(
+      '- topic_select was BLOCKED last turn — stay on the current topic, do NOT call topic_select again.',
+    )
+  }
 
   let lastSeg = ''
   if (lastReview) {

@@ -99,8 +99,17 @@ export function buildFinalSystemSegments(
   activeTopics: TopicStat[] = [],
   recentMistakes: Mistake[] = [],
   relevantPast: RelevantSession[] = [],
+  topicSelectBlockedLastTurn = false,
 ): { static: string; dynamic: string; segments: SystemContextResult['segments'] } {
-  const ctx = buildSystemContext(state, lastReview, activeTopics, recentMistakes, relevantPast)
+  const ctx = buildSystemContext(
+    state,
+    lastReview,
+    activeTopics,
+    recentMistakes,
+    relevantPast,
+    undefined, // now — use default
+    topicSelectBlockedLastTurn,
+  )
   return {
     static: buildSystemString(systemPrompt),
     dynamic: ctx.text,

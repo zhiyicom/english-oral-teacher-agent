@@ -61,6 +61,7 @@ import {
   parseBracketToolCall,
   parseToolCall,
   stripBracketToolCall,
+  stripCodeFences,
   stripEchoedPhasePrefix,
   stripEchoedSystemNote,
   stripToolCall,
@@ -251,6 +252,11 @@ export interface TurnInput {
   // so end-of-turn logic can run `isTurnOnTopic` and recorder can gate
   // writes on ADOPTION_MIN_TURNS.
   adoptedTopics?: Map<string, AdoptedTopic>
+  // v1.1.2 T5 — set to true by the caller when the previous turn's
+  // topic_select was blocked. Injected into [System Context] as a
+  // one-shot anti-spam signal so the LLM does NOT retry topic_select.
+  // Reset to false after the turn where it was consumed.
+  topicSelectBlockedLastTurn?: boolean
   mockTime: boolean
 }
 
@@ -413,6 +419,7 @@ export async function* runTurn(
     input.activeTopics,
     input.recentMistakes,
     wasFirstTurn ? input.relevantPast : [],
+    input.topicSelectBlockedLastTurn ?? false,
   )
   const systemSize = estimateTokens(sysSeg.static) + estimateTokens(sysSeg.dynamic)
   yield {
@@ -655,6 +662,12 @@ export async function* runTurn(
       sessionPersisted,
     }
   }
+
+  // v1.1.2 §1.5 P0-B — strip markdown code fences BEFORE any other
+  // processing. If the LLM wraps its entire response (or just the tool
+  // call) in ``` fences, strip them first so the inner content can be
+  // parsed normally by parseToolCall / other strippers below.
+  response = stripCodeFences(response)
 
   // v1.1.1 P0-#4 — strip any echoed "[Phase: ...]" prefix BEFORE the
   // diagnostic log captures rawHead (so the log shows the post-strip

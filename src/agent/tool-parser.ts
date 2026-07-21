@@ -170,3 +170,31 @@ export function stripEchoedSystemNote(response: string): {
   if (!m) return { cleaned: response, stripped: false }
   return { cleaned: response.slice(m[0].length).trim(), stripped: true }
 }
+
+// ----- v1.1.2 §1.5: markdown code-fence stripper -------------------------
+//
+// The LLM sometimes wraps <tool>...</tool> in ``` fences because the
+// tools.md prompt (pre-v1.1.2-fix) showed examples inside fences with
+// "output EXACTLY this block". When parseToolCall matches the <tool> inside
+// the fences and stripToolCall removes only the <tool> tag, the bare ```
+// fences remain and leak to the student UI.
+//
+// stripCodeFences removes leading ``` (with optional language tag) and
+// trailing ``` before any other processing, so the tool call inside is
+// extracted cleanly and no backtick garbage reaches the student.
+//
+// Only strips fence markers on their own line — inline backticks like
+// `word` are not touched.
+
+// Matches a standalone ``` fence line (with optional language tag), with
+// optional leading/trailing whitespace on the line. Only matches when the
+// fence marker is the only thing on its line (plus optional language tag).
+// Does NOT match inline backticks like `word`.
+const FENCE_LINE = /^[ \t]*```(?:\w+)?[ \t]*\n/gm
+
+export function stripCodeFences(response: string): string {
+  let s = response.replace(FENCE_LINE, '')
+  // Also handle trailing ``` at end of string (no newline after it).
+  s = s.replace(/^[ \t]*```[ \t]*$/gm, '')
+  return s.replace(/\n{3,}/g, '\n\n').trim()
+}

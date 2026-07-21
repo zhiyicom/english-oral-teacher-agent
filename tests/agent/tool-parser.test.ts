@@ -3,6 +3,7 @@ import {
   parseBracketToolCall,
   parseToolCall,
   stripBracketToolCall,
+  stripCodeFences,
   stripEchoedPhasePrefix,
   stripEchoedSystemNote,
   stripToolCall,
@@ -248,5 +249,42 @@ describe('stripEchoedSystemNote (v1.1.2 P0-α — parallel to stripEchoedPhasePr
     const r = stripEchoedSystemNote(text)
     expect(r.stripped).toBe(false)
     expect(r.cleaned).toBe(text)
+  })
+})
+
+// ----- v1.1.2 §1.5: stripCodeFences ----------------------------------------
+
+describe('stripCodeFences (v1.1.2 P0-B — code fence strip)', () => {
+  it('F1: strips leading + trailing ``` fences, keeps inner content', () => {
+    const input = '```\n<tool>topic_select({"phase":"MAIN_ACTIVITY"})</tool>\n```'
+    const result = stripCodeFences(input)
+    expect(result).toBe('<tool>topic_select({"phase":"MAIN_ACTIVITY"})</tool>')
+  })
+
+  it('F2: strips fences with language tag', () => {
+    const input = '```json\n{"key":"value"}\n```'
+    const result = stripCodeFences(input)
+    expect(result).toBe('{"key":"value"}')
+  })
+
+  it('F3: no-op on plain text without fences', () => {
+    const input = 'Hey Jeremy, how are you?'
+    const result = stripCodeFences(input)
+    expect(result).toBe(input)
+  })
+
+  it('F4: does not touch inline backticks', () => {
+    const input = 'I like `pizza` and `pasta`'
+    const result = stripCodeFences(input)
+    expect(result).toBe(input)
+  })
+
+  it('F5: strips fences when natural text precedes tool call inside', () => {
+    const input =
+      'Sure, let me pick a fresh topic!\n\n```\n<tool>topic_select({"phase":"MAIN_ACTIVITY"})</tool>\n```'
+    const result = stripCodeFences(input)
+    expect(result).toBe(
+      'Sure, let me pick a fresh topic!\n\n<tool>topic_select({"phase":"MAIN_ACTIVITY"})</tool>',
+    )
   })
 })
