@@ -28,6 +28,9 @@ export const TopicSelectArgsSchema = z.object({
   // insensitive). Empty/missing = no boost. Applied AFTER hard-exclude so
   // relevance cannot bring a recently-discussed topic back into the pool.
   context_keywords: z.array(z.string()).optional(),
+  // v1.1.3 — server-injected per-session dedup. NOT advertised in the tool
+  // description; the LLM should never see or provide this field.
+  exclude_slugs: z.array(z.string()).optional(),
 })
 
 export type TopicSelectArgs = z.infer<typeof TopicSelectArgsSchema>
@@ -130,6 +133,7 @@ export function createTopicSelectTool(opts: {
         interests: opts.interests,
         keywordStats,
         excludeDays: parsed.exclude_recent_days,
+        excludeSlugs: parsed.exclude_slugs,
         rng: opts.rng,
         useInterestBoost,
         // v1.0.9 §1.3 — forward WARM_UP-extracted keywords as a soft

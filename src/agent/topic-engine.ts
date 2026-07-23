@@ -26,15 +26,20 @@ export interface TopicCandidate {
   score: number
 }
 
-/** D1 — hard exclude. Keep topics whose lastDiscussedAt is older than cutoff, or never discussed. */
+/** D1 — hard exclude. Keep topics whose lastDiscussedAt is older than cutoff, or never discussed.
+ *  v1.1.3 — excludeSlugs adds per-session dedup: topics already selected in the current
+ *  session are excluded regardless of their lastDiscussedAt. */
 export function filterHardExclude(
   topics: Topic[],
   stats: TopicStat[],
   excludeDays: number,
   now: Date,
+  excludeSlugs?: string[],
 ): Topic[] {
   const cutoff = now.getTime() - excludeDays * 86_400_000
+  const slugSet = new Set(excludeSlugs ?? [])
   return topics.filter((t) => {
+    if (slugSet.has(t.name)) return false
     const stat = stats.find((s) => s.topic === t.name)
     if (!stat || !stat.lastDiscussedAt) return true
     return Date.parse(stat.lastDiscussedAt) < cutoff
@@ -70,6 +75,18 @@ export function avgKeywordHit(topic: Topic, keywordStats: KeywordHit[]): number 
   let sum = 0
   for (const k of topic.keywords) sum += byKeyword.get(k.toLowerCase()) ?? 0
   return sum / topic.keywords.length
+}
+
+/** v1.1.3 — proportion of topic.keywords that have NOT been hit (hitCount > 0).
+ *  Keywords absent from keywordStats are treated as 0 hits → fresh.
+ *  Range [0, 1]. Empty topic.keywords → 0. */
+export function computeFreshRatio(topic: Topic, keywordStats: KeywordHit[]): number {
+  if (topic.keywords.length === 0) return 0
+  const hitSet = new Set(
+    keywordStats.filter((h) => h.hitCount > 0).map((h) => h.keyword.toLowerCase()),
+  )
+  const fresh = topic.keywords.filter((k) => !hitSet.has(k.toLowerCase())).length
+  return fresh / topic.keywords.length
 }
 
 /**
@@ -125,7 +142,12 @@ export function computeContextOverlap(
 export const CONTEXT_WEIGHT = 0.15
 
 const COUNT_WEIGHT = 0.1
-const KEYWORD_WEIGHT = 0.05
+const KEYWORD_WEIGHT = 0.1
+// v1.1.3 — freshRatio bonus: a topic with 100% fresh keywords gets +0.15.
+// This makes keyword freshness mean something (old KEYWORD_WEIGHT=0.05 was
+// lost in noise). Combined with avgHit penalty at same weight, a topic
+// with many fresh keywords clearly outranks one at the same count level.
+const FRESH_RATIO_WEIGHT = 0.15
 const INTEREST_WEIGHT = 0.5
 // v1.0.9 §1.2 — peak-to-peak (0.1) sits just above a single count diff (0.1),
 // so noise breaks ties without flipping a clear count ordering.
@@ -160,6 +182,9 @@ export function selectTopic(opts: {
   // Applied AFTER hard-exclude so dedup priority beats relevance. When
   // omitted, behaves exactly as before (no context boost).
   contextKeywords?: readonly string[]
+  // v1.1.3 — per-session dedup: slugs already selected in the current
+  // session are hard-excluded regardless of topic_stats.lastDiscussedAt.
+  excludeSlugs?: string[]
 }): Topic | null {
   const excludeDays = opts.excludeDays ?? 30
   const now = opts.now ?? new Date()
@@ -172,7 +197,7 @@ export function selectTopic(opts: {
   // v1.0.9 §1.3 — contextKeywords is purely additive; empty/missing = 0.
   const contextKeywords = opts.contextKeywords ?? []
 
-  let pool = filterHardExclude(opts.topics, opts.stats, excludeDays, now)
+  let pool = filterHardExclude(opts.topics, opts.stats, excludeDays, now, opts.excludeSlugs)
   if (pool.length === 0) return null
 
   pool = sortByCountAsc(pool, opts.stats)
@@ -182,6 +207,7 @@ export function selectTopic(opts: {
     const count = stat?.discussionCount ?? 0
     const interest = useInterestBoost ? computeInterest(t, opts.interests) : 0
     const kAvg = avgKeywordHit(t, keywordStats)
+    const freshRatio = computeFreshRatio(t, keywordStats)
     const context = computeContextOverlap(t, contextKeywords)
     const noise = (rng() * 2 - 1) * NOISE_RANGE
     return {
@@ -189,11 +215,10 @@ export function selectTopic(opts: {
       count,
       interest,
       avgKeywordHit: kAvg,
-      // v1.0.9 §1.3 — `+ context * CONTEXT_WEIGHT`. Independent of D3
-      // (interest) so the disabled-by-default interest channel stays dead.
       score:
         -count * COUNT_WEIGHT -
         kAvg * KEYWORD_WEIGHT +
+        freshRatio * FRESH_RATIO_WEIGHT +
         interest * INTEREST_WEIGHT +
         context * CONTEXT_WEIGHT +
         noise,
@@ -232,6 +257,8 @@ export function pickFreshHints(opts: {
   topicLimit?: number
   keywordLimit?: number
   now?: Date
+  // v1.1.3 — per-session dedup, forwarded to filterHardExclude.
+  excludeSlugs?: string[]
 }): { topics: Topic[]; keywords: string[] } {
   const excludeDays = opts.excludeDays ?? 30
   const now = opts.now ?? new Date()
@@ -239,7 +266,7 @@ export function pickFreshHints(opts: {
   const keywordLimit = opts.keywordLimit ?? 5
 
   // Topic layer: same pool as selectTopic (D1 hard-exclude + D2 count bias).
-  let pool = filterHardExclude(opts.topics, opts.stats, excludeDays, now)
+  let pool = filterHardExclude(opts.topics, opts.stats, excludeDays, now, opts.excludeSlugs)
   pool = sortByCountAsc(pool, opts.stats)
   const freshTopics = pool.slice(0, topicLimit)
 

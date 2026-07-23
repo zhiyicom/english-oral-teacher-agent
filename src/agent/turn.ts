@@ -257,6 +257,10 @@ export interface TurnInput {
   // one-shot anti-spam signal so the LLM does NOT retry topic_select.
   // Reset to false after the turn where it was consumed.
   topicSelectBlockedLastTurn?: boolean
+  // v1.1.3 — fresh topic/keyword hints generated during blocked fallback.
+  // Consumed once by context-injector in the next turn, then cleared.
+  // null = no hints (normal turns, or tier 1 blocked).
+  blockedFreshHints?: { topics: string[]; keywords: string[] } | null
   mockTime: boolean
 }
 
@@ -268,6 +272,9 @@ export interface TurnOutput {
   isFirstTurn: boolean
   endedReason: 'user_exit' | 'user_stop' | 'phase_end' | 'llm_error' | null
   sessionPersisted: boolean
+  // v1.1.3 — fresh hints written by blocked branch, consumed by server/cli
+  // for the next turn's [System Context] injection.
+  blockedFreshHints?: { topics: string[]; keywords: string[] } | null
 }
 
 // ---------- formatToolResult ----------
@@ -288,7 +295,14 @@ export function formatToolResult(name: string, result: unknown): string {
       return `[v076_topic_select_result]\n${r.error}. Pick a topic manually or continue.`
     }
     const r = result as TopicSelectResult
-    return `[v076_topic_select_result]\nSelected topic: ${r.title} (slug=${r.slug}, ~${r.est_minutes} min). Start discussing it.`
+    const kwPreview =
+      r.keywords && r.keywords.length > 0
+        ? `\nAll keywords: ${r.keywords.slice(0, 12).join(', ')}${r.keywords.length > 12 ? '...' : ''}.`
+        : ''
+    const angle = r.suggested_keyword
+      ? `\nSuggested angle: ${r.suggested_keyword} (least discussed — use this for your opening question).`
+      : ''
+    return `[v076_topic_select_result]\nSelected topic: ${r.title} (slug=${r.slug}, ~${r.est_minutes} min).${kwPreview}${angle}`
   }
   if (name !== 'memory_search') {
     return `[tool_result_v073]\n[v073_followup_responder]\n[Tool result: ${name}]\n${JSON.stringify(result)}`
@@ -332,6 +346,7 @@ export async function* runTurn(
       isFirstTurn,
       endedReason: 'phase_end',
       sessionPersisted,
+      blockedFreshHints: input.blockedFreshHints ?? null,
     }
   }
 
@@ -420,6 +435,7 @@ export async function* runTurn(
     input.recentMistakes,
     wasFirstTurn ? input.relevantPast : [],
     input.topicSelectBlockedLastTurn ?? false,
+    input.blockedFreshHints ?? null,
   )
   const systemSize = estimateTokens(sysSeg.static) + estimateTokens(sysSeg.dynamic)
   yield {
@@ -660,6 +676,7 @@ export async function* runTurn(
       isFirstTurn,
       endedReason,
       sessionPersisted,
+      blockedFreshHints: input.blockedFreshHints ?? null,
     }
   }
 
@@ -996,8 +1013,12 @@ export async function* runTurn(
           args: parsed.args,
           argSummary: `phase=${(parsed.args as { phase?: string }).phase ?? 'WARM_UP'}, exclude=${(parsed.args as { exclude_recent_days?: number }).exclude_recent_days ?? 30}d`,
         }
+        // v1.1.3 P1 — inject per-session adopted topic slugs so
+        // selectTopic won't return a topic already discussed this session.
+        const argsWithExclude = parsed.args as Record<string, unknown>
+        argsWithExclude.exclude_slugs = [...(input.adoptedTopics?.keys() ?? [])]
         try {
-          result = tool.execute(parsed.args) as TopicSelectResult | { error: string }
+          result = tool.execute(argsWithExclude) as TopicSelectResult | { error: string }
         } catch (err) {
           yield {
             type: 'tool-execute-error',
@@ -1007,9 +1028,13 @@ export async function* runTurn(
           result = { error: `tool execution failed: ${(err as Error).message}` }
         }
         if (!('error' in result)) {
-          // Successful topic switch — reset counter so the new topic starts
-          // fresh (0 user turns on it yet).
+          // Successful topic switch — reset counters so the new topic
+          // starts fresh (0 user turns on it yet).
           resetTopicTurnCount(sessionId)
+          // v1.1.3 P2-1 — reset the block streak when topic_select succeeds.
+          // Without this, the counter only rises over the entire session,
+          // keeping the fallback permanently stuck at tier 3.
+          if (deps.blockedCountRef) deps.blockedCountRef.value = 0
           // v1.0.7 §11.5 — Hook B: record the LLM-chosen topic in the ledger
           // (dedup by slug). `suggested_keyword` is the soft hint the tool
           // returns; fall back to the first keyword if missing.
@@ -1041,9 +1066,9 @@ export async function* runTurn(
       // where the 2nd-call LLM tends to repeat the previous turn's wording.
       // v1.1.2 P1-A — three-tier fallback ladder (pickBlockedFallback) so
       //   the same sentence isn't repeated 4-5× in a row.
-      // v1.1.2 P2-A — tier ≥ 2 also attaches topic+keyword fresh hints
-      //   (pickFreshHints) so the LLM can see what's unused in the
-      //   library instead of improvising from memory.
+      // v1.1.3 P2-2 — fresh hints go to [System Context] next turn via
+      //   input.blockedFreshHints, NOT to student-facing text. This keeps
+      //   system labels ("Fresh angles"/"Try switching to") out of the UI.
       if (blocked) {
         if (deps.blockedCountRef === undefined) deps.blockedCountRef = { value: 0 }
         deps.blockedCountRef.value += 1
@@ -1051,12 +1076,6 @@ export async function* runTurn(
         const fallback = pickBlockedFallback(blockedCount - 1)
         displayText = strippedPrefix || fallback
 
-        // Tier ≥ 2 → attach fresh hints. Tier 1 stays clean (pure
-        // continuation, no system-y phrasing, no hint). Caller controls
-        // visibility: hintSuffix goes into the student-facing student-text
-        // AND into deps.messages (persistent row), but NOT into the LLM
-        // input.history (LLM should not see system scaffolding).
-        let hintSuffix = ''
         let freshHintLayer: 'none' | 'keyword' | 'topic+keyword' = 'none'
         let freshHintInjected = false
         if (blockedCount - 1 >= 1 && deps.topics && deps.topics.length > 0) {
@@ -1067,18 +1086,19 @@ export async function* runTurn(
             excludeDays: 30,
             topicLimit: 3,
             keywordLimit: 5,
+            excludeSlugs: [...(input.adoptedTopics?.keys() ?? [])],
           })
-          const kwList = fresh.keywords.join(', ')
           if (fresh.keywords.length > 0) {
             if (blockedCount - 1 >= 2 && fresh.topics.length > 0) {
-              const tList = fresh.topics
-                .map((t) => t.description?.trim() || t.name)
-                .join(', ')
-              hintSuffix = `\n\nFresh angles to try: ${kwList}.\n\nTry switching to: ${tList}.`
               freshHintLayer = 'topic+keyword'
             } else {
-              hintSuffix = `\n\nFresh angles to try: ${kwList}.`
               freshHintLayer = 'keyword'
+            }
+            // v1.1.3 — write hints for next-turn [System Context] injection
+            // instead of exposing them to the student in student-text.
+            input.blockedFreshHints = {
+              topics: fresh.topics.map((t) => t.description?.trim() || t.name),
+              keywords: fresh.keywords,
             }
             freshHintInjected = true
           }
@@ -1088,13 +1108,13 @@ export async function* runTurn(
           blockedCount >= 3 ? 3 : blockedCount
         yield {
           type: 'student-text',
-          text: `${displayText}${hintSuffix}\n\n`,
+          text: `${displayText}\n\n`,
         }
         history.push({ role: 'assistant', content: displayText })
         deps.messages.append({
           sessionId,
           role: 'assistant',
-          content: `${displayText}${hintSuffix}`,
+          content: displayText,
         })
         logTurnDiagnostic(sessionId, phaseHistory.length, nextState.phase, {
           ev: 'turn_done',
@@ -1218,5 +1238,6 @@ export async function* runTurn(
     isFirstTurn,
     endedReason,
     sessionPersisted,
+    blockedFreshHints: input.blockedFreshHints ?? null,
   }
 }

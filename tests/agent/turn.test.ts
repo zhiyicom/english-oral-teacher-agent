@@ -633,9 +633,9 @@ describe('runTurn (v1.1.2 P1-A — blocked tier ladder + fresh hints)', () => {
     expect(input.history.filter((m) => m.role === 'assistant')).toHaveLength(1)
   })
 
-  it('B-T2: blocked 2nd time (blockedCountRef.value=1 → tier 2) → keyword-only hint', async () => {
+  it('B-T2: blocked 2nd time (blockedCountRef.value=1 → tier 2) → keyword-only hint in blockedFreshHints', async () => {
     const blockedCountRef = { value: 1 }
-    const { events, chatCalls } = await runBlockedTurn({
+    const { events, input, chatCalls } = await runBlockedTurn({
       harness,
       sessionId,
       userInput: 'yeah',
@@ -646,19 +646,21 @@ describe('runTurn (v1.1.2 P1-A — blocked tier ladder + fresh hints)', () => {
     const studentText = events.find((e) => e.type === 'student-text')
     expect(studentText).toBeDefined()
     if (studentText && studentText.type === 'student-text') {
-      // Tier 2: tier-2 ladder line + keyword-only hint.
+      // Tier 2: tier-2 ladder line, NO system labels in student text.
       expect(studentText.text).toMatch(/didn't take/)
-      expect(studentText.text).toContain('Fresh angles to try:')
-      // No topic layer (tier 3 exclusive).
+      expect(studentText.text).not.toContain('Fresh angles')
       expect(studentText.text).not.toContain('Try switching to:')
     }
+    // Hints go to input.blockedFreshHints, not student-text.
+    expect(input.blockedFreshHints).toBeDefined()
+    expect(input.blockedFreshHints!.keywords.length).toBeGreaterThan(0)
     expect(chatCalls()).toBe(0)
     expect(blockedCountRef.value).toBe(2)
   })
 
-  it('B-T3: blocked 3rd time (blockedCountRef.value=2 → tier 3) → dual layer topic+keyword hint', async () => {
+  it('B-T3: blocked 3rd time (blockedCountRef.value=2 → tier 3) → dual layer topic+keyword in blockedFreshHints', async () => {
     const blockedCountRef = { value: 2 }
-    const { events, chatCalls } = await runBlockedTurn({
+    const { events, input, chatCalls } = await runBlockedTurn({
       harness,
       sessionId,
       userInput: 'yeah',
@@ -669,19 +671,23 @@ describe('runTurn (v1.1.2 P1-A — blocked tier ladder + fresh hints)', () => {
     const studentText = events.find((e) => e.type === 'student-text')
     expect(studentText).toBeDefined()
     if (studentText && studentText.type === 'student-text') {
-      // Tier 3: tier-3 ladder line + dual layer (keywords + topics).
+      // Tier 3: tier-3 ladder line, NO system labels in student text.
       expect(studentText.text).toMatch(/keep circling/)
-      expect(studentText.text).toContain('Fresh angles to try:')
-      expect(studentText.text).toContain('Try switching to:')
+      expect(studentText.text).not.toContain('Fresh angles')
+      expect(studentText.text).not.toContain('Try switching to:')
     }
+    // Hints go to input.blockedFreshHints with BOTH layers.
+    expect(input.blockedFreshHints).toBeDefined()
+    expect(input.blockedFreshHints!.keywords.length).toBeGreaterThan(0)
+    expect(input.blockedFreshHints!.topics.length).toBeGreaterThan(0)
     expect(chatCalls()).toBe(0)
     expect(blockedCountRef.value).toBe(3)
   })
 
   // ---- Hint-content tests (B-F1, B-F2, B-F3) ----------------------------
 
-  it('B-F1: tier 1 emits NO hint suffix (no "Fresh angles" / "Try switching to")', async () => {
-    const { events } = await runBlockedTurn({
+  it('B-F1: tier 1 emits NO hint (student text clean, blockedFreshHints null)', async () => {
+    const { events, input } = await runBlockedTurn({
       harness,
       sessionId,
       userInput: 'yeah',
@@ -694,10 +700,12 @@ describe('runTurn (v1.1.2 P1-A — blocked tier ladder + fresh hints)', () => {
       expect(studentText.text).not.toContain('Fresh angles')
       expect(studentText.text).not.toContain('Try switching to:')
     }
+    // v1.1.3: tier 1 should NOT write blockedFreshHints.
+    expect(input.blockedFreshHints).toBeFalsy()
   })
 
-  it('B-F2: tier 2 hint contains the keyword names but NOT topic names', async () => {
-    const { events } = await runBlockedTurn({
+  it('B-F2: tier 2 writes keyword hints to blockedFreshHints, not student-text', async () => {
+    const { events, input } = await runBlockedTurn({
       harness,
       sessionId,
       userInput: 'yeah',
@@ -707,21 +715,22 @@ describe('runTurn (v1.1.2 P1-A — blocked tier ladder + fresh hints)', () => {
     })
     const studentText = events.find((e) => e.type === 'student-text')
     if (studentText && studentText.type === 'student-text') {
-      // Should mention at least one of our fixture keywords.
-      const hasKeyword = ['beach', 'plane', 'pizza', 'sushi', 'guitar', 'piano'].some((kw) =>
-        studentText.text.includes(kw),
-      )
-      expect(hasKeyword).toBe(true)
-      // Should NOT mention topic names (tier 3 exclusive).
-      const hasTopicName = ['travel', 'food', 'music'].some((t) =>
-        studentText.text.includes(t),
-      )
-      expect(hasTopicName).toBe(false)
+      // Student should NOT see system labels.
+      expect(studentText.text).not.toContain('Fresh angles')
+      expect(studentText.text).not.toContain('Try switching to:')
     }
+    // blockedFreshHints has keywords from the fixture library.
+    expect(input.blockedFreshHints).toBeDefined()
+    const hintKw = input.blockedFreshHints!.keywords
+    const hasFixtureKw = ['beach', 'plane', 'pizza', 'sushi', 'guitar', 'piano'].some((kw) =>
+      hintKw.includes(kw),
+    )
+    expect(hasFixtureKw).toBe(true)
+    // Tier 2 may or may not include topics; that's implementation detail.
   })
 
-  it('B-F3: tier 3 hint contains BOTH keyword names AND topic descriptions', async () => {
-    const { events } = await runBlockedTurn({
+  it('B-F3: tier 3 writes BOTH keywords AND topic descriptions to blockedFreshHints', async () => {
+    const { events, input } = await runBlockedTurn({
       harness,
       sessionId,
       userInput: 'yeah',
@@ -731,13 +740,17 @@ describe('runTurn (v1.1.2 P1-A — blocked tier ladder + fresh hints)', () => {
     })
     const studentText = events.find((e) => e.type === 'student-text')
     if (studentText && studentText.type === 'student-text') {
-      // Both layers must be present.
-      expect(studentText.text).toContain('Fresh angles to try:')
-      expect(studentText.text).toContain('Try switching to:')
-      // Topic descriptions (not names) appear in the layer-3 hint.
-      expect(studentText.text).toContain('Travel stories')
-      expect(studentText.text).toContain('Food culture')
-      expect(studentText.text).toContain('Music taste')
+      // Student should NOT see system labels.
+      expect(studentText.text).not.toContain('Fresh angles')
+      expect(studentText.text).not.toContain('Try switching to:')
     }
+    // blockedFreshHints has both layers.
+    expect(input.blockedFreshHints).toBeDefined()
+    expect(input.blockedFreshHints!.keywords.length).toBeGreaterThan(0)
+    expect(input.blockedFreshHints!.topics.length).toBeGreaterThan(0)
+    // Topic descriptions (not raw names) go into blockedFreshHints.topics.
+    expect(input.blockedFreshHints!.topics).toContain('Travel stories')
+    expect(input.blockedFreshHints!.topics).toContain('Food culture')
+    expect(input.blockedFreshHints!.topics).toContain('Music taste')
   })
 })

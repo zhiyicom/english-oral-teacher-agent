@@ -17,272 +17,546 @@ MAIN_ACTIVITY 阶段参考此文件选题。按学生级别分类。
 
 ## 话题列表
 
-### t
+### Art & culture (B2)
 
-关键词: placeholder
+关键词: art, culture, creativity, heritage, protect, music, painting, museum, history, traditional, modern, education...
 
 讨论角度:
-- placeholder
+- art
+- culture
+- creativity
+- heritage
+- protect
+- music
+- painting
+- museum
 
 ---
 
-### t
+### Aviation & flight — airplane, cockpit, pilot, Boeing/Airbus (B2)
 
-关键词: placeholder
+关键词: aviation, aircraft, airplane, plane, flying, fly, pilot, cockpit, captain, landing, takeoff, jet...
 
 讨论角度:
-- placeholder
+- aviation
+- aircraft
+- airplane
+- plane
+- flying
+- fly
+- pilot
+- cockpit
 
 ---
 
-### t
+### Customs & culture (B1)
 
-关键词: placeholder
+关键词: culture, tradition, festival, holiday, chinese, western, custom, celebrate, spring, lunar, new, year...
 
 讨论角度:
-- placeholder
+- culture
+- tradition
+- festival
+- holiday
+- chinese
+- western
+- custom
+- celebrate
 
 ---
 
-### t
+### Daily routine (A1-A2)
 
-关键词: placeholder
+关键词: daily, routine, morning, afternoon, evening, night, wake, sleep, breakfast, lunch, dinner, bus...
 
 讨论角度:
-- placeholder
+- daily
+- routine
+- morning
+- afternoon
+- evening
+- night
+- wake
+- sleep
 
 ---
 
-### t
+### Education & development (B2)
 
-关键词: placeholder
+关键词: education, debate, traditional, online, exam, test, score, pressure, lifelong, learning, value, degree...
 
 讨论角度:
-- placeholder
+- education
+- debate
+- traditional
+- online
+- exam
+- test
+- score
+- pressure
 
 ---
 
-### t
+### Education & learning (B1)
 
-关键词: placeholder
+关键词: education, learning, study, school, university, college, skill, knowledge, value, important, online, course...
 
 讨论角度:
-- placeholder
+- education
+- learning
+- study
+- school
+- university
+- college
+- skill
+- knowledge
 
 ---
 
-### t
+### Entertainment & media (A1-A2 / B1)
 
-关键词: placeholder
+关键词: movie, film, music, song, tv, show, watch, listen, favorite, actor, singer, band...
 
 讨论角度:
-- placeholder
+- movie
+- film
+- music
+- song
+- tv
+- show
+- watch
+- listen
 
 ---
 
-### t
+### Environment & nature (B1)
 
-关键词: placeholder
+关键词: environment, nature, earth, climate, weather, change, pollution, green, energy, recycle, protect, save...
 
 讨论角度:
-- placeholder
+- environment
+- nature
+- earth
+- climate
+- weather
+- change
+- pollution
+- green
 
 ---
 
-### t
+### Personal experience & opinion (B1)
 
-关键词: placeholder
+关键词: experience, opinion, think, believe, feel, remember, memory, unforgettable, proud, achievement, difficult, decision...
 
 讨论角度:
-- placeholder
+- experience
+- opinion
+- think
+- believe
+- feel
+- remember
+- memory
+- unforgettable
 
 ---
 
-### t
+### Food & drink (A1-A2)
 
-关键词: placeholder
+关键词: food, eat, drink, restaurant, cook, cooking, recipe, dish, meal, breakfast, lunch, dinner...
 
 讨论角度:
-- placeholder
+- food
+- eat
+- drink
+- restaurant
+- cook
+- cooking
+- recipe
+- dish
 
 ---
 
-### t
+### Food & lifestyle (B2)
 
-关键词: placeholder
+关键词: food, diet, culture, difference, healthy, fast, organic, vegetarian, vegan, cuisine, restaurant, home...
 
 讨论角度:
-- placeholder
+- food
+- diet
+- culture
+- difference
+- healthy
+- fast
+- organic
+- vegetarian
 
 ---
 
-### t
+### Friends & social life (A1-A2)
 
-关键词: placeholder
+关键词: friend, friends, best, together, weekend, visit, play, meet, social, classmate, neighbor, describe...
 
 讨论角度:
-- placeholder
+- friend
+- friends
+- best
+- together
+- weekend
+- visit
+- play
+- meet
 
 ---
 
-### t
+### Future plans (B1)
 
-关键词: placeholder
+关键词: future, plan, dream, job, career, want, become, travel, visit, learn, skill, study...
 
 讨论角度:
-- placeholder
+- future
+- plan
+- dream
+- job
+- career
+- want
+- become
+- travel
 
 ---
 
-### t
+### Video games — shooters, Minecraft, Bilibili gaming streamers (A1-A2 / B1)
 
-关键词: placeholder
+关键词: game, gaming, video_game, gamer, shooter, fps, battle, tactical, multiplayer, delta_force, battlefield, minecraft...
 
 讨论角度:
-- placeholder
+- game
+- gaming
+- video_game
+- gamer
+- shooter
+- fps
+- battle
+- tactical
 
 ---
 
-### t
+### Health & exercise (A1-A2)
 
-关键词: placeholder
+关键词: health, healthy, exercise, sport, run, swim, walk, gym, fitness, fit, strong, eat...
 
 讨论角度:
-- placeholder
+- health
+- healthy
+- exercise
+- sport
+- run
+- swim
+- walk
+- gym
 
 ---
 
-### t
+### Hobbies & leisure (A1-A2)
 
-关键词: placeholder
+关键词: hobby, hobbies, free, time, spare, sport, game, read, music, draw, paint, cook...
 
 讨论角度:
-- placeholder
+- hobby
+- hobbies
+- free
+- time
+- spare
+- sport
+- game
+- read
 
 ---
 
-### t
+### Home & family (A1-A2)
 
-关键词: placeholder
+关键词: home, house, apartment, room, bedroom, kitchen, living, family, live, weekend, parent, mom...
 
 讨论角度:
-- placeholder
+- home
+- house
+- apartment
+- room
+- bedroom
+- kitchen
+- living
+- family
 
 ---
 
-### t
+### Media impact (B2)
 
-关键词: placeholder
+关键词: media, impact, influence, movie, music, book, social, internet, celebrity, famous, advertisement, ad...
 
 讨论角度:
-- placeholder
+- media
+- impact
+- influence
+- movie
+- music
+- book
+- social
+- internet
 
 ---
 
-### t
+### Music — classical, folk, rock, instruments, bands, concerts (A1-A2 / B1 / B2)
 
-关键词: placeholder
+关键词: music, song, singer, band, album, concert, perform, melody, instrument, piano, cello, violin...
 
 讨论角度:
-- placeholder
+- music
+- song
+- singer
+- band
+- album
+- concert
+- perform
+- melody
 
 ---
 
-### t
+### Personal info (A1-A2)
 
-关键词: placeholder
+关键词: name, age, from, live, family, brother, sister, member, introduce, where, who, hometown...
 
 讨论角度:
-- placeholder
+- name
+- age
+- from
+- live
+- family
+- brother
+- sister
+- member
 
 ---
 
-### t
+### Relationships (B1)
 
-关键词: placeholder
+关键词: relationship, family, friend, parent, conflict, argue, get, along, understand, communication, talk, respect...
 
 讨论角度:
-- placeholder
+- relationship
+- family
+- friend
+- parent
+- conflict
+- argue
+- get
+- along
 
 ---
 
-### t
+### School life (A1-A2)
 
-关键词: placeholder
+关键词: school, subject, class, teacher, homework, exam, test, study, favorite, difficult, math, english...
 
 讨论角度:
-- placeholder
+- school
+- subject
+- class
+- teacher
+- homework
+- exam
+- test
+- study
 
 ---
 
-### t
+### Shopping (A1-A2)
 
-关键词: placeholder
+关键词: shop, shopping, buy, store, mall, market, clothes, price, money, online, like, often...
 
 讨论角度:
-- placeholder
+- shop
+- shopping
+- buy
+- store
+- mall
+- market
+- clothes
+- price
 
 ---
 
-### t
+### Society & relationships (B2)
 
-关键词: placeholder
+关键词: society, social, friendship, value, generation, gap, community, online, face, relationship, trust, belong...
 
 讨论角度:
-- placeholder
+- society
+- social
+- friendship
+- value
+- generation
+- gap
+- community
+- online
 
 ---
 
-### t
+### Space & science — Artemis, Moon, biology, science magazines (B1 / B2)
 
-关键词: placeholder
+关键词: space, moon, rocket, nasa, spacecraft, artemis, astronaut, planet, star, galaxy, biology, science...
 
 讨论角度:
-- placeholder
+- space
+- moon
+- rocket
+- nasa
+- spacecraft
+- artemis
+- astronaut
+- planet
 
 ---
 
-### t
+### Sports & health (B2)
 
-关键词: placeholder
+关键词: sport, competition, versus, professional, athlete, health, mental, physical, extreme, risk, value, team...
 
 讨论角度:
-- placeholder
+- sport
+- competition
+- versus
+- professional
+- athlete
+- health
+- mental
+- physical
 
 ---
 
-### t
+### Environment & sustainability (B2)
 
-关键词: placeholder
+关键词: sustainable, climate, change, carbon, footprint, recycle, waste, green, energy, solar, wind, power...
 
 讨论角度:
-- placeholder
+- sustainable
+- climate
+- change
+- carbon
+- footprint
+- recycle
+- waste
+- green
 
 ---
 
-### t
+### Tech & future (B2)
 
-关键词: placeholder
+关键词: future, ai, artificial, intelligence, robot, automation, digital, privacy, security, data, innovation, change...
 
 讨论角度:
-- placeholder
+- future
+- ai
+- artificial
+- intelligence
+- robot
+- automation
+- digital
+- privacy
 
 ---
 
-### t
+### Technology & life (B1)
 
-关键词: placeholder
+关键词: technology, tech, phone, mobile, computer, internet, online, social, media, app, game, gaming...
 
 讨论角度:
-- placeholder
+- technology
+- tech
+- phone
+- mobile
+- computer
+- internet
+- online
+- social
 
 ---
 
-### t
+### Travel & vacation (A1-A2 / B1)
 
-关键词: placeholder
+关键词: travel, trip, vacation, holiday, visit, place, city, country, beach, mountain, hiking, hike...
 
 讨论角度:
-- placeholder
+- travel
+- trip
+- vacation
+- holiday
+- visit
+- place
+- city
+- country
+
+---
+
+### Travel & adventure (B2)
+
+关键词: adventure, backpack, tour, solo, group, cultural, shock, adapt, eco, tourism, journey, explore...
+
+讨论角度:
+- adventure
+- backpack
+- tour
+- solo
+- group
+- cultural
+- shock
+- adapt
+
+---
+
+### Weather & seasons (A1-A2)
+
+关键词: weather, season, spring, summer, autumn, winter, hot, cold, warm, cool, rain, snow...
+
+讨论角度:
+- weather
+- season
+- spring
+- summer
+- autumn
+- winter
+- hot
+- cold
+
+---
+
+### Work & career (B1)
+
+关键词: work, job, career, part, time, full, summer, intern, company, boss, colleague, salary...
+
+讨论角度:
+- work
+- job
+- career
+- part
+- time
+- full
+- summer
+- intern
+
+---
+
+### Work-life balance (B2)
+
+关键词: balance, work, life, remote, office, home, stress, manage, time, priority, leisure, vacation...
+
+讨论角度:
+- balance
+- work
+- life
+- remote
+- office
+- home
+- stress
+- manage
 
 ---

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   avgKeywordHit,
   computeContextOverlap,
+  computeFreshRatio,
   computeInterest,
   filterHardExclude,
   isTurnOnTopic,
@@ -227,13 +228,14 @@ describe('selectTopic D5 — keyword freshness bias (v1.0.2)', () => {
     expect(result?.name).toBe('food')
   })
 
-  it('keyword freshness cannot override interest boost (W_KEYWORD < W_INTEREST)', () => {
-    // minecraft: count=0, interest=2 → +1.0; avg=10 → -0.5
-    //   score = 0 + 1.0 - 0.5 + 0 = 0.5
-    // food: count=0, interest=0 → 0; avg=0 → 0
-    //   score = 0 + 0 + 0 + 0 = 0
-    // interest boost is still strong enough to keep minecraft on top.
-    // v1.0.3 §1.3 — must opt back into D3 explicitly to test legacy scoring.
+  it('v1.1.3 — keyword freshness + freshRatio can overcome interest boost for stale topics', () => {
+    // minecraft: count=0, interest=2×0.5=1.0; avgHit=(10+10+10)/3=10 ×0.10=-1.0; freshRatio=0/3=0
+    //   score = 0 + 1.0 - 1.0 + 0 + 0 + 0 = 0
+    // food: count=0, interest=0; avgHit=0; freshRatio=3/3=1.0×0.15=+0.15
+    //   score = 0 + 0 + 0 + 0.15 + 0 + 0 = 0.15
+    // v1.1.3: doubled KEYWORD_WEIGHT (0.05→0.10) + new FRESH_RATIO_WEIGHT (0.15)
+    // means a topic with ALL keywords heavily hit can lose to a completely
+    // fresh topic even with interest matching — which is the desired behavior.
     const stats: TopicStat[] = []
     const hits: KeywordHit[] = [
       { topic: 'minecraft', keyword: 'minecraft', hitCount: 10, firstHitAt: null, lastHitAt: null },
@@ -249,7 +251,7 @@ describe('selectTopic D5 — keyword freshness bias (v1.0.2)', () => {
       now: NOW,
       useInterestBoost: true,
     })
-    expect(result?.name).toBe('minecraft')
+    expect(result?.name).toBe('food')
   })
 })
 
@@ -641,5 +643,83 @@ describe('pickFreshHints (v1.1.2 P2-A — fresh topic+keyword dual layer)', () =
     const result = pickFreshHints({ topics, stats, keywordStats: keywordHits, excludeDays: 30, now: NOW })
     expect(result.topics.length).toBe(0)
     expect(result.keywords.length).toBe(0)
+  })
+})
+
+describe('v1.1.3 — computeFreshRatio', () => {
+  function h(topic: string, keyword: string, hitCount: number): KeywordHit {
+    return { topic, keyword, hitCount, firstHitAt: null, lastHitAt: null }
+  }
+
+  it('all keywords fresh (no hits) → 1.0', () => {
+    expect(computeFreshRatio(minecraft, [])).toBe(1.0)
+  })
+
+  it('partial freshness', () => {
+    const hits: KeywordHit[] = [h('minecraft', 'minecraft', 1), h('minecraft', 'castle', 2)]
+    // minecraft has 3 keywords: minecraft(1), castle(2), creeper(unhit=0) → 1/3 fresh
+    expect(computeFreshRatio(minecraft, hits)).toBeCloseTo(1 / 3)
+  })
+
+  it('all keywords hit → 0.0', () => {
+    const hits: KeywordHit[] = [h('food', 'pizza', 1), h('food', 'burger', 1), h('food', 'noodle', 1)]
+    expect(computeFreshRatio(food, hits)).toBe(0.0)
+  })
+
+  it('empty keywords → 0', () => {
+    const empty = topic('empty', [])
+    expect(computeFreshRatio(empty, [])).toBe(0)
+  })
+
+  it('case-insensitive matching', () => {
+    const hits: KeywordHit[] = [h('minecraft', 'MINECRAFT', 1)]
+    expect(computeFreshRatio(minecraft, hits)).toBeCloseTo(2 / 3)
+  })
+})
+
+describe('v1.1.3 — excludeSlugs in filterHardExclude', () => {
+  const NOW = new Date('2026-06-10T12:00:00.000Z')
+
+  it('slug in excludeSlugs → excluded', () => {
+    const result = filterHardExclude([minecraft, school, sports], [], 30, NOW, ['minecraft'])
+    expect(result.map((t) => t.name)).toEqual(['school', 'sports'])
+  })
+
+  it('empty excludeSlugs → no effect', () => {
+    const result = filterHardExclude([minecraft, school], [], 30, NOW, [])
+    expect(result).toHaveLength(2)
+  })
+
+  it('undefined excludeSlugs → no effect (backward compat)', () => {
+    const result = filterHardExclude([minecraft, school], [], 30, NOW)
+    expect(result).toHaveLength(2)
+  })
+})
+
+describe('v1.1.3 — excludeSlugs in selectTopic', () => {
+  const NOW = new Date('2026-06-10T12:00:00.000Z')
+
+  it('excluded slug not selected', () => {
+    const result = selectTopic({
+      topics: [minecraft, food],
+      stats: [],
+      interests: [],
+      rng: () => 0.5,
+      now: NOW,
+      excludeSlugs: ['minecraft'],
+    })
+    expect(result?.name).toBe('food')
+  })
+
+  it('excluding all topics → null', () => {
+    const result = selectTopic({
+      topics: [minecraft],
+      stats: [],
+      interests: [],
+      rng: () => 0.5,
+      now: NOW,
+      excludeSlugs: ['minecraft'],
+    })
+    expect(result).toBeNull()
   })
 })

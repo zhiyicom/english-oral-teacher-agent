@@ -72,6 +72,9 @@ export function buildSystemContext(
   relevantPast: RelevantSession[] = [],
   now: Date = new Date(),
   topicSelectBlockedLastTurn = false,
+  // v1.1.3 — fresh hints from blocked fallback. Injected as system
+  // instructions for the next turn (one-shot, consumed then cleared).
+  blockedFreshHints?: { topics: string[]; keywords: string[] } | null,
 ): SystemContextResult {
   const lastTransitionAgo = Math.max(0, state.elapsedMin - state.lastTransitionAt)
 
@@ -89,6 +92,25 @@ export function buildSystemContext(
   if (topicSelectBlockedLastTurn) {
     lines.push(
       '- topic_select was BLOCKED last turn — stay on the current topic, do NOT call topic_select again.',
+    )
+  }
+
+  // v1.1.3 P2-2 — fresh topic/keyword hints from blocked tier escalation.
+  // Injected into [System Context] so the LLM can weave fresh angles into
+  // the conversation without calling topic_select again.
+  if (blockedFreshHints) {
+    if (blockedFreshHints.keywords.length > 0) {
+      lines.push(
+        `- Fresh keywords (not yet discussed): ${blockedFreshHints.keywords.join(', ')}`,
+      )
+    }
+    if (blockedFreshHints.topics.length > 0) {
+      lines.push(
+        `- Fresh topics (less-discussed, not yet covered this session): ${blockedFreshHints.topics.join('; ')}`,
+      )
+    }
+    lines.push(
+      '- Use these fresh angles to start your questions naturally — do NOT list them to the student.',
     )
   }
 

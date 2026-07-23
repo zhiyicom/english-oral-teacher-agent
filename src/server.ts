@@ -147,6 +147,9 @@ interface SessionRuntime {
   // consumed by the next turn's context injection as a one-shot anti-spam
   // signal. Reset to false when consumed.
   topicSelectBlockedLastTurn: boolean
+  // v1.1.3 — fresh hints written by blocked branch, consumed by next turn's
+  // [System Context]. null = no hints. Same one-shot pattern as T5.
+  blockedFreshHints?: { topics: string[]; keywords: string[] } | null
 }
 
 function reconstructSessionState(
@@ -198,6 +201,7 @@ function reconstructSessionState(
     // resets on server restart.
     blockedCountRef: { value: 0 },
     topicSelectBlockedLastTurn: false,
+    blockedFreshHints: null,
   }
 }
 
@@ -285,6 +289,9 @@ export function createApp(opts: {
   const topicStats = createTopicStatsDao(db)
   const keywordHits = createKeywordHitsDao(db)
   const mistakesDao = createMistakesDao(db)
+  // v1.1.3 — regenerate the human-readable topic reference from the current
+  // DB state on every startup so it never goes stale.
+  regenerateTopicLibrary(topics.list())
   const systemPrompt = loadSystemPrompt()
   let client = selectClient(opts.fixturesDir)
   const embedder = createTransformersEmbedder()
@@ -488,9 +495,12 @@ export function createApp(opts: {
         // v1.1.2 T5 — one-shot anti-spam flag consumed on this turn,
         // then reset so it doesn't leak into subsequent turns.
         topicSelectBlockedLastTurn: rt.topicSelectBlockedLastTurn,
+        // v1.1.3 — fresh hints from blocked fallback, consumed same turn.
+        blockedFreshHints: rt.blockedFreshHints,
         mockTime: false,
       }
       rt.topicSelectBlockedLastTurn = false
+      rt.blockedFreshHints = null
 
       const turnDeps = {
         env: { LLM_CONTEXT_BUDGET_TOKENS: env.LLM_CONTEXT_BUDGET_TOKENS },
@@ -541,6 +551,7 @@ export function createApp(opts: {
               // because runTurn doesn't return blockedCountRef).
               blockedCountRef: rt.blockedCountRef,
               topicSelectBlockedLastTurn: blockedThisTurn,
+              blockedFreshHints: output.blockedFreshHints ?? null,
             })
             await stream.writeSSE({
               event: 'done',

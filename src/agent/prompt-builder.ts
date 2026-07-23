@@ -100,6 +100,7 @@ export function buildFinalSystemSegments(
   recentMistakes: Mistake[] = [],
   relevantPast: RelevantSession[] = [],
   topicSelectBlockedLastTurn = false,
+  blockedFreshHints?: { topics: string[]; keywords: string[] } | null,
 ): { static: string; dynamic: string; segments: SystemContextResult['segments'] } {
   const ctx = buildSystemContext(
     state,
@@ -109,6 +110,7 @@ export function buildFinalSystemSegments(
     relevantPast,
     undefined, // now — use default
     topicSelectBlockedLastTurn,
+    blockedFreshHints,
   )
   return {
     static: buildSystemString(systemPrompt),

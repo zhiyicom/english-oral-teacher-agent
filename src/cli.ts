@@ -406,6 +406,8 @@ const adoptedTopics: Map<string, AdoptedTopic> = new Map()
   // v1.1.2 T5 — one-shot anti-spam flag, set after a blocked turn, consumed
   // by the next turn's [System Context]. Reset to false each turn.
   let topicSelectBlockedLastTurn = false
+  // v1.1.3 — fresh hints from blocked fallback, same one-shot pattern as T5.
+  let blockedFreshHints: { topics: string[]; keywords: string[] } | null = null
 
   // v0.7.6 B1 — anchor pair. Captures the first user/assistant exchange of
   // this session so the truncate-history sliding window can protect it from
@@ -442,6 +444,9 @@ const adoptedTopics: Map<string, AdoptedTopic> = new Map()
       // v1.1.2 T5 — consume and reset the one-shot blocked flag for this turn.
       const blockedLastTurn = topicSelectBlockedLastTurn
       topicSelectBlockedLastTurn = false
+      // v1.1.3 — consume and reset fresh hints for this turn's [System Context].
+      const turnBlockedFreshHints = blockedFreshHints
+      blockedFreshHints = null
       const blockedBefore = sessionBlockedCountRef.value
 
       const turnIter = runTurn(
@@ -465,6 +470,8 @@ const adoptedTopics: Map<string, AdoptedTopic> = new Map()
           adoptedTopics,
           // v1.1.2 T5 — one-shot anti-spam flag, consumed this turn.
           topicSelectBlockedLastTurn: blockedLastTurn,
+          // v1.1.3 — fresh hints from blocked fallback, consumed this turn.
+          blockedFreshHints: turnBlockedFreshHints,
           mockTime,
         },
         {
@@ -516,6 +523,10 @@ const adoptedTopics: Map<string, AdoptedTopic> = new Map()
         // one-shot flag for the next turn's [System Context].
         if (sessionBlockedCountRef.value > blockedBefore) {
           topicSelectBlockedLastTurn = true
+        }
+        // v1.1.3 — persist fresh hints written by blocked branch for next turn.
+        if (output.blockedFreshHints) {
+          blockedFreshHints = output.blockedFreshHints
         }
         if (output.sessionPersisted) sessionPersisted = true
         if (output.endedReason === 'llm_error') {
